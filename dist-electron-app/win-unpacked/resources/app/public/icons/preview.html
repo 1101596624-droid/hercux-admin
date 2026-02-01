@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HERCU 图标预览</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 40px;
+      font-size: 2.5rem;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 30px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      transition: transform 0.3s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+    }
+
+    .card h2 {
+      color: #1e293b;
+      margin-bottom: 20px;
+      font-size: 1.5rem;
+    }
+
+    .icon-display {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 200px;
+      background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+      border-radius: 12px;
+      margin-bottom: 20px;
+      padding: 20px;
+    }
+
+    .icon-display img {
+      max-width: 100%;
+      height: auto;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));
+    }
+
+    .icon-info {
+      background: #f8fafc;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      color: #475569;
+    }
+
+    .icon-info p {
+      margin: 5px 0;
+    }
+
+    .icon-info strong {
+      color: #1e293b;
+    }
+
+    .svg-preview {
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      text-align: center;
+    }
+
+    .svg-preview h2 {
+      color: #1e293b;
+      margin-bottom: 30px;
+      font-size: 1.8rem;
+    }
+
+    .svg-container {
+      display: inline-block;
+      background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+      padding: 40px;
+      border-radius: 12px;
+    }
+
+    .color-palette {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-top: 30px;
+    }
+
+    .color-item {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .color-swatch {
+      width: 100%;
+      height: 60px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .color-code {
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      color: #475569;
+    }
+
+    .footer {
+      text-align: center;
+      color: white;
+      margin-top: 40px;
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎨 HERCU 桌面应用图标预览</h1>
+
+    <div class="grid">
+      <div class="card">
+        <h2>📱 应用图标 (512x512)</h2>
+        <div class="icon-display">
+          <img src="icon.png" alt="HERCU Icon" style="width: 200px;">
+        </div>
+        <div class="icon-info">
+          <p><strong>文件:</strong> icon.png</p>
+          <p><strong>尺寸:</strong> 512x512 像素</p>
+          <p><strong>用途:</strong> Linux 应用图标</p>
+          <p><strong>大小:</strong> ~16KB</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🪟 Windows 图标</h2>
+        <div class="icon-display">
+          <img src="icon.png" alt="Windows Icon" style="width: 200px;">
+        </div>
+        <div class="icon-info">
+          <p><strong>文件:</strong> icon.ico</p>
+          <p><strong>尺寸:</strong> 256x256 像素</p>
+          <p><strong>用途:</strong> Windows 应用图标</p>
+          <p><strong>大小:</strong> ~6.2KB</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🍎 macOS 图标</h2>
+        <div class="icon-display">
+          <img src="icon-1024.png" alt="macOS Icon" style="width: 200px;">
+        </div>
+        <div class="icon-info">
+          <p><strong>文件:</strong> icon.icns</p>
+          <p><strong>尺寸:</strong> 1024x1024 像素</p>
+          <p><strong>用途:</strong> macOS 应用图标</p>
+          <p><strong>大小:</strong> ~48KB</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🔔 系统托盘图标</h2>
+        <div class="icon-display">
+          <img src="tray-icon.png" alt="Tray Icon" style="width: 64px;">
+        </div>
+        <div class="icon-info">
+          <p><strong>文件:</strong> tray-icon.png</p>
+          <p><strong>尺寸:</strong> 32x32 像素</p>
+          <p><strong>用途:</strong> 系统托盘图标</p>
+          <p><strong>大小:</strong> ~845B</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="svg-preview">
+      <h2>🎨 SVG 源文件</h2>
+      <div class="svg-container">
+        <img src="icon.svg" alt="SVG Icon" style="width: 300px;">
+      </div>
+
+      <div class="color-palette">
+        <div class="color-item">
+          <div class="color-swatch" style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%);"></div>
+          <div class="color-code">背景渐变<br>#1e293b → #334155</div>
+        </div>
+        <div class="color-item">
+          <div class="color-swatch" style="background: linear-gradient(180deg, #f1f5f9 0%, #cbd5e1 100%);"></div>
+          <div class="color-code">字母渐变<br>#f1f5f9 → #cbd5e1</div>
+        </div>
+        <div class="color-item">
+          <div class="color-swatch" style="background: #64748b;"></div>
+          <div class="color-code">装饰线条<br>#64748b</div>
+        </div>
+        <div class="color-item">
+          <div class="color-swatch" style="background: #94a3b8;"></div>
+          <div class="color-code">装饰点<br>#94a3b8</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>✨ HERCU 深度认知学习系统 - 桌面应用图标</p>
+      <p>最后更新: 2026-01-18</p>
+    </div>
+  </div>
+</body>
+</html>

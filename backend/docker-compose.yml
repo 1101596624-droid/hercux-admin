@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hercu_postgres
+    environment:
+      POSTGRES_USER: hercu_user
+      POSTGRES_PASSWORD: hercu_password
+      POSTGRES_DB: hercu_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hercu_user -d hercu_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hercu_network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: hercu_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hercu_network
+
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5.16-community
+    container_name: hercu_neo4j
+    environment:
+      NEO4J_AUTH: neo4j/hercu_password
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_memory_heap_max__size: 512M
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p hercu_password 'RETURN 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hercu_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+
+networks:
+  hercu_network:
+    driver: bridge

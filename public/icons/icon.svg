@@ -1,0 +1,26 @@
+<!-- HERCU 桌面应用图标 - 黑灰色配色 -->
+<svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 渐变背景 -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e293b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#334155;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="textGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f1f5f9;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#cbd5e1;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="512" height="512" fill="url(#bgGradient)" rx="64"/>
+
+  <!-- 字母 H -->
+  <text x="256" y="340" font-family="Arial, sans-serif" font-size="280" font-weight="bold" fill="url(#textGradient)" text-anchor="middle">H</text>
+
+  <!-- 装饰线条 -->
+  <rect x="100" y="420" width="312" height="8" fill="#64748b" opacity="0.8" rx="4"/>
+
+  <!-- 底部小点装饰 -->
+  <circle cx="256" cy="450" r="4" fill="#94a3b8" opacity="0.6"/>
+</svg>

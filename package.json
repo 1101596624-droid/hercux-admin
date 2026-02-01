@@ -1,0 +1,110 @@
+{
+  "name": "hercu-admin",
+  "version": "1.0.0",
+  "description": "HERCU 管理后台 - 课程、用户、进度管理",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build && node scripts/copy-static.js",
+    "start": "next start -p 3001",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "electron:compile": "tsc -p electron/tsconfig.json",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3001 && cross-env NODE_ENV=development electron .\"",
+    "electron:build": "npm run build && npm run electron:compile && electron-builder",
+    "electron:pack": "npm run electron:compile && electron-builder --dir",
+    "electron:dist": "npm run build && npm run electron:compile && electron-builder",
+    "electron:dist:win": "npm run electron:dist -- --win",
+    "electron:dist:mac": "npm run electron:dist -- --mac",
+    "electron:dist:linux": "npm run electron:dist -- --linux"
+  },
+  "dependencies": {
+    "clsx": "^2.1.0",
+    "electron-updater": "^6.7.3",
+    "framer-motion": "^12.27.5",
+    "gsap": "^3.14.2",
+    "lucide-react": "^0.562.0",
+    "next": "^14.2.0",
+    "pixi.js": "^8.15.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "recharts": "^3.7.0",
+    "tailwind-merge": "^2.2.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.7",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.0",
+    "concurrently": "^8.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.2.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.hercu.admin",
+    "productName": "HERCU Admin",
+    "asar": false,
+    "directories": {
+      "output": "dist-electron-app"
+    },
+    "files": [
+      "dist-electron/**/*",
+      ".next/standalone/**/*",
+      ".next/static/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist-electron/main.js"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/icons/icon.icns",
+      "category": "public.app-category.education"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "public/icons/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "language": "2052",
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HERCU 管理后台",
+      "runAfterFinish": true,
+      "artifactName": "${productName} Setup.${ext}",
+      "uninstallDisplayName": "HERCU 管理后台",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/uninstallerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "include": "build/installer.nsh"
+    }
+  }
+}
