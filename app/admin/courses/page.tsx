@@ -423,6 +423,15 @@ export default function AdminCoursesPage() {
                 <div className="flex items-center justify-between pt-3 border-t border-slate-200">
                   <div className="flex items-center gap-2">
                     <DifficultyBadge difficulty={course.difficulty} />
+                    {/* 显示标签 */}
+                    {course.tags && course.tags.length > 0 && course.tags.map((tag, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-600"
+                      >
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                   <div className="flex items-center gap-2">
                     {/* 只有下架状态的课程可以编辑 */}
