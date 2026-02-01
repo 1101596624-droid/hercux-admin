@@ -810,6 +810,69 @@ async def create_node(
     }
 
 
+@router.put("/courses/{course_id}/nodes/{node_id}")
+async def update_course_node(
+    course_id: int,
+    node_id: int,
+    node_data: NodeUpdate,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update node information and configuration (nested route)
+
+    Admin only - Can update timeline_config to change API endpoints
+    """
+    # Get node and verify it belongs to the course
+    result = await db.execute(
+        select(CourseNode).where(
+            CourseNode.id == node_id,
+            CourseNode.course_id == course_id
+        )
+    )
+    node = result.scalar_one_or_none()
+
+    if not node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Node {node_id} not found in course {course_id}"
+        )
+
+    # Check if new node_id conflicts with existing
+    if node_data.node_id and node_data.node_id != node.node_id:
+        existing_result = await db.execute(
+            select(CourseNode).where(CourseNode.node_id == node_data.node_id)
+        )
+        if existing_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Node with node_id '{node_data.node_id}' already exists"
+            )
+
+    # Update fields
+    update_data = node_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(node, field, value)
+
+    await db.commit()
+    await db.refresh(node)
+
+    return {
+        "id": node.id,
+        "node_id": node.node_id,
+        "type": node.type.value,
+        "component_id": node.component_id,
+        "title": node.title,
+        "description": node.description,
+        "sequence": node.sequence,
+        "parent_id": node.parent_id,
+        "timeline_config": node.timeline_config,
+        "unlock_condition": node.unlock_condition,
+        "updated_at": node.updated_at,
+        "message": "Node updated successfully"
+    }
+
+
 @router.put("/nodes/{node_id}")
 async def update_node(
     node_id: int,
