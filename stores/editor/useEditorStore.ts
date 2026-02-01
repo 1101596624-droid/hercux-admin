@@ -104,6 +104,10 @@ function convertStepToNodeConfig(step: LessonStep): NodeConfig {
         presetId: step.simulator_spec.preset_id,
         name: step.simulator_spec.name || step.title || '',
         description: step.simulator_spec.description || step.simulator_spec.scenario?.description || '',
+        // 自定义代码模式
+        mode: step.simulator_spec.mode,
+        custom_code: step.simulator_spec.custom_code,
+        variables: step.simulator_spec.variables,
         inputs: step.simulator_spec.inputs?.map(input => ({
           id: input.id,
           name: input.name,
