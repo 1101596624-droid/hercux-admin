@@ -255,6 +255,10 @@ export const realEditorAPI = {
     return {
       id: courseId,
       title: courseDetail.name || '未命名课程',
+      description: courseDetail.description || '',
+      difficulty: courseDetail.difficulty || 'intermediate',
+      tags: courseDetail.tags || [],
+      coverImage: courseDetail.thumbnail_url || '',
       chapters,
       aiGuidance: DEFAULT_AI_GUIDANCE,
       createdAt: courseDetail.created_at,

@@ -410,6 +410,10 @@ export interface EditorState {
 export interface EditorCourseData {
   id: string;
   title: string;
+  description?: string;
+  difficulty?: CourseDifficulty;
+  tags?: string[];
+  coverImage?: string;
   chapters: EditorChapter[];
   aiGuidance: AIGuidanceConfig;
   createdAt: string;

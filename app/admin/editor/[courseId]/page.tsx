@@ -80,6 +80,9 @@ export default function CourseEditorPage() {
         console.log('Course data received:', data);
         loadCourse(courseId, {
           title: data.title,
+          coverImage: data.coverImage,
+          difficulty: data.difficulty,
+          tags: data.tags,
           chapters: data.chapters,
           aiGuidance: data.aiGuidance,
         });
