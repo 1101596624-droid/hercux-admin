@@ -110,8 +110,94 @@ export function SimulatorRenderer({ config, readOnly = false, compact = false }:
     }
   };
 
-  // 如果是特殊类型（非 custom code），直接渲染
-  if (config.type && config.type !== 'custom') {
+  // 优先检查：如果有有效的自定义代码，渲染 CustomRenderer
+  if (hasValidCode) {
+    return (
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        {/* 控制按钮 */}
+        <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
+          {!isStarted ? (
+            <button
+              onClick={handleStart}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-lg"
+            >
+              <Play size={14} />
+              开始
+            </button>
+          ) : (
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-600 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors shadow-lg"
+            >
+              <RotateCcw size={14} />
+              重置
+            </button>
+          )}
+          {isStarted && (
+            <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-lg">
+              运行中
+            </span>
+          )}
+        </div>
+
+        {/* 未开始时显示提示 */}
+        {!isStarted && (
+          <div
+            className="flex items-center justify-center"
+            style={{ height: compact ? 300 : 500, backgroundColor: '#1e293b' }}
+          >
+            <div className="text-center">
+              <p className="text-slate-400 text-lg mb-2">点击左上角"开始"按钮</p>
+              <p className="text-slate-500 text-sm">启动模拟器</p>
+            </div>
+          </div>
+        )}
+
+        {/* 模拟器内容 */}
+        {isStarted && (
+          <div>
+            <CustomRenderer
+              key={key}
+              code={config.custom_code || ''}
+              variables={variables}
+              onVariableChange={handleVariableChange}
+            />
+
+            {/* 变量控制面板 */}
+            {config.variables && config.variables.length > 0 && (
+              <div className="p-4 bg-slate-800/50">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {config.variables.map((variable: any) => (
+                    <div key={variable.name || variable.id}>
+                      <div className="flex justify-between mb-1 text-sm">
+                        <span className="text-slate-400">{variable.label || variable.name}</span>
+                        <span className="text-slate-300">
+                          {variables[variable.name || variable.id]?.toFixed(1)}
+                          {variable.unit && ` ${variable.unit}`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={variable.min ?? 0}
+                        max={variable.max ?? 100}
+                        step={variable.step ?? 0.1}
+                        value={variables[variable.name || variable.id] ?? variable.default ?? 0}
+                        onChange={(e) => handleVariableChange(variable.name || variable.id, parseFloat(e.target.value))}
+                        className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 如果是特殊类型（非 custom/preset），直接渲染对应类型
+  if (config.type && !['custom', 'preset'].includes(config.type)) {
     return (
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         <div className="p-6">
@@ -130,8 +216,8 @@ export function SimulatorRenderer({ config, readOnly = false, compact = false }:
     );
   }
 
-  // 如果有 inputs/outputs 但没有 custom_code，显示交互界面
-  if (hasInputsOutputs && !hasValidCode) {
+  // 如果有 inputs/outputs，显示交互界面
+  if (hasInputsOutputs) {
     return (
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         <div className="p-6">
@@ -150,8 +236,8 @@ export function SimulatorRenderer({ config, readOnly = false, compact = false }:
     );
   }
 
-  // 如果没有有效代码，显示提示
-  if (!hasValidCode) {
+  // 如果没有有效配置，显示占位符
+  if (true) {
     return (
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         <div className="p-6">
@@ -170,86 +256,12 @@ export function SimulatorRenderer({ config, readOnly = false, compact = false }:
     );
   }
 
+  // 默认占位符（不应该到达这里）
   return (
     <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* 控制按钮 */}
-      <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
-        {!isStarted ? (
-          <button
-            onClick={handleStart}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-lg"
-          >
-            <Play size={14} />
-            开始
-          </button>
-        ) : (
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-600 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors shadow-lg"
-          >
-            <RotateCcw size={14} />
-            重置
-          </button>
-        )}
-        {isStarted && (
-          <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-lg">
-            运行中
-          </span>
-        )}
+      <div className="p-6">
+        <PlaceholderRenderer config={config} message="模拟器预览" />
       </div>
-
-      {/* 未开始时显示提示 */}
-      {!isStarted && (
-        <div
-          className="flex items-center justify-center"
-          style={{ height: compact ? 300 : 500, backgroundColor: '#1e293b' }}
-        >
-          <div className="text-center">
-            <p className="text-slate-400 text-lg mb-2">点击左上角"开始"按钮</p>
-            <p className="text-slate-500 text-sm">启动模拟器</p>
-          </div>
-        </div>
-      )}
-
-      {/* 模拟器内容 */}
-      {isStarted && (
-        <div>
-          <CustomRenderer
-            key={key}
-            code={config.custom_code || ''}
-            variables={variables}
-            onVariableChange={handleVariableChange}
-          />
-
-          {/* 变量控制面板 */}
-          {config.variables && config.variables.length > 0 && (
-            <div className="p-4 bg-slate-800/50">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {config.variables.map((variable: any) => (
-                  <div key={variable.name || variable.id}>
-                    <div className="flex justify-between mb-1 text-sm">
-                      <span className="text-slate-400">{variable.label || variable.name}</span>
-                      <span className="text-slate-300">
-                        {variables[variable.name || variable.id]?.toFixed(1)}
-                        {variable.unit && ` ${variable.unit}`}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={variable.min ?? 0}
-                      max={variable.max ?? 100}
-                      step={variable.step ?? 0.1}
-                      value={variables[variable.name || variable.id] ?? variable.default ?? 0}
-                      onChange={(e) => handleVariableChange(variable.name || variable.id, parseFloat(e.target.value))}
-                      className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
