@@ -394,27 +394,37 @@ async def evaluate_answers(request: EvaluateRequest):
     correct_count = 0
 
     for ans in request.answers:
-        is_correct = ans.user_answer.upper() == ans.correct_answer.upper()
+        # 处理空值情况
+        correct_answer = ans.correct_answer or ""
+        user_answer = ans.user_answer or ""
+
+        is_correct = user_answer.upper() == correct_answer.upper() if correct_answer else False
         if is_correct:
             correct_count += 1
 
         # 获取正确答案的完整内容
-        correct_index = ord(ans.correct_answer.upper()) - ord('A')
-        correct_option_text = ans.options[correct_index] if 0 <= correct_index < len(ans.options) else ans.correct_answer
+        if correct_answer and len(correct_answer) == 1:
+            correct_index = ord(correct_answer.upper()) - ord('A')
+            correct_option_text = ans.options[correct_index] if 0 <= correct_index < len(ans.options) else correct_answer
+        else:
+            correct_option_text = correct_answer or "未知"
 
         # 生成解析
         if is_correct:
-            explanation = f"正确！答案是 {ans.correct_answer}：{correct_option_text}"
+            explanation = f"正确！答案是 {correct_answer}：{correct_option_text}"
         else:
-            user_index = ord(ans.user_answer.upper()) - ord('A')
-            user_option_text = ans.options[user_index] if 0 <= user_index < len(ans.options) else ans.user_answer
-            explanation = f"正确答案是 {ans.correct_answer}：{correct_option_text}。你选择的「{user_option_text}」不正确。"
+            if user_answer and len(user_answer) == 1:
+                user_index = ord(user_answer.upper()) - ord('A')
+                user_option_text = ans.options[user_index] if 0 <= user_index < len(ans.options) else user_answer
+            else:
+                user_option_text = user_answer or "未选择"
+            explanation = f"正确答案是 {correct_answer or '未设置'}：{correct_option_text}。你选择的「{user_option_text}」不正确。"
 
         results.append({
             "question_index": ans.question_index,
             "is_correct": is_correct,
-            "user_answer": ans.user_answer,
-            "correct_answer": ans.correct_answer,
+            "user_answer": user_answer,
+            "correct_answer": correct_answer,
             "explanation": explanation
         })
 
