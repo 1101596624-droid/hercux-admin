@@ -276,24 +276,36 @@ class StudioGenerationService {
   }
 
   /**
-   * 暂停生成
+   * 暂停生成 - 取消当前请求，保留已完成的课时
    */
   pause() {
     if (this.isRunning && !this.isPaused) {
       this.isPaused = true;
-      useStudioStore.setState({ isPaused: true });
-      console.log('[GenerationService] Paused');
+      this.isRunning = false;
+      // 取消当前流式请求
+      if (this.cancelFn) {
+        this.cancelFn();
+        this.cancelFn = null;
+      }
+      useStudioStore.setState({ isPaused: true, isGenerating: false });
+      console.log('[GenerationService] Paused - request cancelled, progress saved');
     }
   }
 
   /**
-   * 继续生成
+   * 继续生成 - 从断点恢复
    */
   resume() {
-    if (this.isRunning && this.isPaused) {
+    if (this.isPaused) {
       this.isPaused = false;
       useStudioStore.setState({ isPaused: false });
-      console.log('[GenerationService] Resumed');
+      console.log('[GenerationService] Resuming from checkpoint...');
+
+      const store = useStudioStore.getState();
+      const processor = store.currentProcessor;
+
+      // 使用 retry 方法从断点继续
+      this.retry(processor);
     }
   }
 

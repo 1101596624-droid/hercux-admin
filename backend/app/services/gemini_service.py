@@ -28,12 +28,9 @@ class GeminiService:
     def __init__(self):
         self.api_key = settings.GEMINI_API_KEY
         self.base_url = settings.GEMINI_BASE_URL.rstrip('/')
-        # 图片生成模型 - 按可靠性排序
+        # 图片生成模型 - 只使用 Gemini 3 Pro
         self.image_models = [
-            "gemini-2.5-flash-image",           # Gemini 2.5 Flash 图片生成 (推荐)
-            "dall-e-3",                         # OpenAI DALL-E 3
-            "dall-e-2",                         # OpenAI DALL-E 2
-            "gemini-2.0-flash-exp-image-generation",  # Gemini 图片生成
+            "gemini-3-pro-image-preview",       # Gemini 3 Pro 图片生成 (最强)
         ]
 
     async def generate_image(
@@ -60,12 +57,23 @@ class GeminiService:
         # 构建增强的 prompt
         enhanced_prompt = self._build_enhanced_prompt(prompt, style)
 
-        # 尝试 OpenAI 兼容格式 (hiapi.online 使用这种格式)
+        # 尝试 OpenAI 兼容格式 - 最多尝试2次，失败则跳过
+        fail_count = 0
+        max_failures = 2
         for model in self.image_models:
+            if fail_count >= max_failures:
+                logger.warning(f"Image generation failed {max_failures} times, skipping...")
+                break
             logger.info(f"Trying image generation with model: {model}")
             result = await self._try_openai_image_format(enhanced_prompt, size, model)
             if result:
                 return result
+            fail_count += 1
+
+        # 如果已经失败2次，直接返回 None，不再尝试慢速方式
+        if fail_count >= max_failures:
+            logger.error(f"Image generation failed after {fail_count} attempts, continuing without image")
+            return None
 
         # 尝试 chat completion 方式生成图片 (某些模型支持)
         result = await self._try_chat_image_format(enhanced_prompt)
