@@ -3,11 +3,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import List, Optional
 from datetime import datetime, timezone
+import json
 
 from app.db.session import get_db
 from app.models.models import Course, CourseNode, LearningProgress, DifficultyLevel, User, NodeStatus
 from app.schemas.schemas import CourseResponse, CourseDetail
 from app.core.security import get_current_user
+
+
+def parse_tags(tags_value) -> list:
+    """Parse tags from database - handles both list and JSON string formats"""
+    if tags_value is None:
+        return []
+    if isinstance(tags_value, list):
+        return tags_value
+    if isinstance(tags_value, str):
+        try:
+            parsed = json.loads(tags_value)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
+
 
 router = APIRouter()
 
@@ -382,7 +399,7 @@ async def get_course_detail(
         name=course.name,
         description=course.description,
         difficulty=course.difficulty,
-        tags=course.tags or [],
+        tags=parse_tags(course.tags),
         instructor=course.instructor,
         duration_hours=course.duration_hours,
         thumbnail_url=course.thumbnail_url,

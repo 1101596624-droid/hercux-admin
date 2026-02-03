@@ -7,6 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.models.models import CourseNode, LearningProgress, NodeStatus, User
 from datetime import datetime, timezone
+import json
+
+
+def parse_json_field(value) -> dict:
+    """Parse JSON field from database - handles both dict and JSON string formats"""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
 
 
 class UnlockService:
@@ -30,7 +46,9 @@ class UnlockService:
             # No condition means always unlocked
             return True, None
 
-        condition_type = node.unlock_condition.get("type")
+        # Parse unlock_condition if it's a JSON string
+        unlock_condition = parse_json_field(node.unlock_condition)
+        condition_type = unlock_condition.get("type")
 
         if condition_type == "none":
             return True, None
@@ -55,7 +73,7 @@ class UnlockService:
 
         if condition_type == "prerequisites":
             # Check multiple prerequisite nodes
-            prereq_node_ids = node.unlock_condition.get("node_ids", [])
+            prereq_node_ids = unlock_condition.get("node_ids", [])
             for prereq_id in prereq_node_ids:
                 prereq_progress = await self._get_progress(user_id, prereq_id)
                 if not prereq_progress or prereq_progress.status != NodeStatus.COMPLETED:

@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
+import json
 from app.models.models import DifficultyLevel, NodeType, NodeStatus
 
 
@@ -54,6 +55,22 @@ class CourseBase(BaseModel):
     tags: List[str] = []
     instructor: Optional[str] = None
     duration_hours: Optional[float] = None
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def parse_tags(cls, v):
+        """Parse tags from JSON string if needed"""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
 
 
 class CourseCreate(CourseBase):
@@ -208,14 +225,14 @@ class RecommendedCourse(BaseModel):
 # ============ Achievement Schemas ============
 
 class AchievementResponse(BaseModel):
-    id: int
     badge_id: str
     badge_name: str
     badge_description: Optional[str] = None
     rarity: str
     icon_url: Optional[str] = None
-    unlocked_at: datetime
-    is_unlocked: bool = True
+    unlocked_at: Optional[datetime] = None
+    is_unlocked: bool = False
+    unlock_animation: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
