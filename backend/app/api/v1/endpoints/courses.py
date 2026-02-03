@@ -34,8 +34,8 @@ async def get_courses(
     difficulty: Optional[DifficultyLevel] = None,
     tags: Optional[str] = Query(None, description="Comma-separated tags"),
     search: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(20, ge=1, le=1000, description="Maximum number of records"),
     db: AsyncSession = Depends(get_db)
 ):
     """

@@ -43,6 +43,19 @@ SUPPORTED_EXTENSIONS = {
     'htm': 'HTML Document',
 }
 
+# Dangerous file extensions that should be blocked
+BLOCKED_EXTENSIONS = {
+    'php', 'php3', 'php4', 'php5', 'phtml', 'phar',
+    'exe', 'dll', 'bat', 'cmd', 'sh', 'bash', 'ps1',
+    'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs',
+    'py', 'pyc', 'pyo', 'pyw',
+    'rb', 'pl', 'cgi',
+    'asp', 'aspx', 'jsp', 'jspx',
+    'jar', 'war', 'ear',
+    'so', 'dylib',
+    'sql', 'sqlite', 'db',
+}
+
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 
@@ -179,6 +192,14 @@ async def upload_and_extract(file: UploadFile = File(...)):
 
     filename = file.filename
     ext = filename.lower().split('.')[-1] if '.' in filename else ''
+
+    # Security check: block dangerous file types
+    if ext in BLOCKED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File type '{ext}' is not allowed for security reasons"
+        )
+
     content = await file.read()
 
     if len(content) > MAX_FILE_SIZE:
