@@ -409,11 +409,36 @@ class StudioGenerationService:
         recommended_forms = lesson_outline.get("recommended_forms", ["text_content"])
         complexity = lesson_outline.get("complexity_level", "standard")
 
-        # Build context from previous lessons
+        # Build detailed context from previous lessons to avoid repetition
         prev_context = ""
+        used_simulators = []
+        covered_topics = []
         if previous_lessons:
             prev_titles = [l.get("title", "") for l in previous_lessons[-3:]]
-            prev_context = f"前面已完成的课时：{', '.join(prev_titles)}"
+            prev_context = f"前面已完成的课时：{', '.join(prev_titles)}\n"
+
+            # Collect used simulators and topics from ALL previous lessons
+            for prev_lesson in previous_lessons:
+                # Get lesson title as covered topic
+                if prev_lesson.get("title"):
+                    covered_topics.append(prev_lesson.get("title"))
+
+                # Extract simulators from script
+                for step in prev_lesson.get("script", []):
+                    if step.get("type") == "simulator":
+                        sim_spec = step.get("simulator_spec", {})
+                        sim_name = sim_spec.get("name", step.get("title", ""))
+                        if sim_name and sim_name not in used_simulators:
+                            used_simulators.append(sim_name)
+                        # Also track preset IDs
+                        preset_id = sim_spec.get("presetId") or sim_spec.get("preset_id")
+                        if preset_id and preset_id not in used_simulators:
+                            used_simulators.append(preset_id)
+
+            if used_simulators:
+                prev_context += f"【已使用的模拟器，请勿重复】：{', '.join(used_simulators)}\n"
+            if covered_topics:
+                prev_context += f"【已讲解的主题，请勿重复】：{', '.join(covered_topics)}\n"
 
         # 模板列表
         template_list = """
@@ -496,6 +521,8 @@ class StudioGenerationService:
 【生成要求】
 - 步骤数量：请生成 {ai_steps} 个左右的步骤
 - 每个步骤的正文内容至少 {min_content_len} 字
+- 【重要】不要重复前面课时已经讲解过的内容和已使用的模拟器
+- 每个课时应该讲解不同的知识点，模拟器应该展示不同的概念
 
 请生成完整的课时内容，以JSON格式输出：
 {{
@@ -883,11 +910,36 @@ function update(ctx) {{
         recommended_forms = lesson_outline.get("recommended_forms", ["text_content"])
         complexity = lesson_outline.get("complexity_level", "standard")
 
-        # Build context from previous lessons
+        # Build detailed context from previous lessons to avoid repetition
         prev_context = ""
+        used_simulators = []
+        covered_topics = []
         if previous_lessons:
             prev_titles = [l.get("title", "") for l in previous_lessons[-3:]]
-            prev_context = f"前面已完成的课时：{', '.join(prev_titles)}"
+            prev_context = f"前面已完成的课时：{', '.join(prev_titles)}\n"
+
+            # Collect used simulators and topics from ALL previous lessons
+            for prev_lesson in previous_lessons:
+                # Get lesson title as covered topic
+                if prev_lesson.get("title"):
+                    covered_topics.append(prev_lesson.get("title"))
+
+                # Extract simulators from script
+                for step in prev_lesson.get("script", []):
+                    if step.get("type") == "simulator":
+                        sim_spec = step.get("simulator_spec", {})
+                        sim_name = sim_spec.get("name", step.get("title", ""))
+                        if sim_name and sim_name not in used_simulators:
+                            used_simulators.append(sim_name)
+                        # Also track preset IDs
+                        preset_id = sim_spec.get("presetId") or sim_spec.get("preset_id")
+                        if preset_id and preset_id not in used_simulators:
+                            used_simulators.append(preset_id)
+
+            if used_simulators:
+                prev_context += f"【已使用的模拟器，请勿重复】：{', '.join(used_simulators)}\n"
+            if covered_topics:
+                prev_context += f"【已讲解的主题，请勿重复】：{', '.join(covered_topics)}\n"
 
         # 模板列表
         template_list = """
@@ -1192,11 +1244,36 @@ function update(ctx) {{
         recommended_forms = lesson_outline.get("recommended_forms", ["text_content"])
         complexity = lesson_outline.get("complexity_level", "standard")
 
-        # Build context from previous lessons
+        # Build detailed context from previous lessons to avoid repetition
         prev_context = ""
+        used_simulators = []
+        covered_topics = []
         if previous_lessons:
             prev_titles = [l.get("title", "") for l in previous_lessons[-3:]]
-            prev_context = f"前面已完成的课时：{', '.join(prev_titles)}"
+            prev_context = f"前面已完成的课时：{', '.join(prev_titles)}\n"
+
+            # Collect used simulators and topics from ALL previous lessons
+            for prev_lesson in previous_lessons:
+                # Get lesson title as covered topic
+                if prev_lesson.get("title"):
+                    covered_topics.append(prev_lesson.get("title"))
+
+                # Extract simulators from script
+                for step in prev_lesson.get("script", []):
+                    if step.get("type") == "simulator":
+                        sim_spec = step.get("simulator_spec", {})
+                        sim_name = sim_spec.get("name", step.get("title", ""))
+                        if sim_name and sim_name not in used_simulators:
+                            used_simulators.append(sim_name)
+                        # Also track preset IDs
+                        preset_id = sim_spec.get("presetId") or sim_spec.get("preset_id")
+                        if preset_id and preset_id not in used_simulators:
+                            used_simulators.append(preset_id)
+
+            if used_simulators:
+                prev_context += f"【已使用的模拟器，请勿重复】：{', '.join(used_simulators)}\n"
+            if covered_topics:
+                prev_context += f"【已讲解的主题，请勿重复】：{', '.join(covered_topics)}\n"
 
         # 模板列表
         template_list = """
