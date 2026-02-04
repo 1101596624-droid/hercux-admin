@@ -93,7 +93,7 @@ class CourseSupervisor:
             "content": prompt
         })
 
-        response = await self.claude_service.generate(
+        response = await self.claude_service.generate_raw_response(
             prompt=prompt,
             system_prompt=system_prompt,
             max_tokens=4000
@@ -644,7 +644,7 @@ function update(ctx) {
 """
 
         try:
-            response = await self.claude_service.generate(
+            response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是一位严格的课程质量审核专家。",
                 max_tokens=1000

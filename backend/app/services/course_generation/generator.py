@@ -35,7 +35,7 @@ class ChapterGenerator:
     ) -> ChapterResult:
         """生成单个章节"""
 
-        response = await self.claude_service.generate(
+        response = await self.claude_service.generate_raw_response(
             prompt=prompt,
             system_prompt=system_prompt,
             max_tokens=8000
