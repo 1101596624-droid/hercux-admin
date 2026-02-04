@@ -43,6 +43,13 @@ class RegisterWithCodeRequest(BaseModel):
     verification_code: str
 
 
+class ResetPasswordRequest(BaseModel):
+    """Request model for password reset"""
+    email: EmailStr
+    password: str
+    verification_code: str
+
+
 @router.post("/send-code", response_model=SendCodeResponse)
 async def send_verification_code(
     request: SendCodeRequest,
@@ -155,6 +162,46 @@ async def register(
     await db.refresh(user)
 
     return user
+
+
+@router.post("/reset-password", response_model=SendCodeResponse)
+async def reset_password(
+    request: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reset password with email verification code
+
+    Args:
+        request: Email, new password and verification code
+        db: Database session
+
+    Returns:
+        Success status and message
+    """
+    # Verify the code
+    is_valid, error_message = verify_code(request.email, request.verification_code, "reset_password")
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_message
+        )
+
+    # Find user
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该邮箱未注册"
+        )
+
+    # Update password
+    user.hashed_password = get_password_hash(request.password)
+    await db.commit()
+
+    return SendCodeResponse(success=True, message="密码重置成功")
 
 
 @router.post("/login", response_model=Token)
