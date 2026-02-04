@@ -16,6 +16,7 @@ from app.models.models import (
     Course,
     NodeStatus
 )
+from app.core.utils import status_equals
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class StatisticsService:
         completed_query = select(func.count(LearningProgress.id)).where(
             and_(
                 LearningProgress.user_id == user_id,
-                LearningProgress.status == NodeStatus.COMPLETED
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED)
             )
         )
         nodes_completed = await self.db.scalar(completed_query) or 0
@@ -213,7 +214,7 @@ class StatisticsService:
                     LearningProgress.node_id.in_(
                         select(CourseNode.id).where(CourseNode.course_id == course.id)
                     ),
-                    LearningProgress.status == NodeStatus.COMPLETED
+                    status_equals(LearningProgress.status, NodeStatus.COMPLETED)
                 )
             )
             completed_nodes = await self.db.scalar(completed_query) or 0
@@ -342,7 +343,7 @@ class StatisticsService:
         completed_query = select(func.count(LearningProgress.id)).where(
             and_(
                 LearningProgress.user_id == user_id,
-                LearningProgress.status == NodeStatus.COMPLETED,
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED),
                 LearningProgress.last_accessed >= day_start,
                 LearningProgress.last_accessed <= day_end
             )

@@ -13,8 +13,14 @@ from app.models.models import (
     User, Course, CourseNode, LearningProgress, NodeStatus, NodeType
 )
 from app.core.security import get_current_admin_user
+from app.core.utils import get_enum_value, status_equals
 
 router = APIRouter()
+
+
+def get_status_value(status_obj) -> str:
+    """Get status value, handling both enum and string types"""
+    return status_obj.value if hasattr(status_obj, 'value') else status_obj
 
 
 # ============ Progress List with Filters ============
@@ -55,7 +61,7 @@ async def list_progress(
         filters.append(CourseNode.course_id == course_id)
 
     if status is not None:
-        filters.append(LearningProgress.status == status)
+        filters.append(status_equals(LearningProgress.status, status))
 
     if filters:
         query = query.where(and_(*filters))
@@ -76,7 +82,7 @@ async def list_progress(
             CourseNode.course_id == course_id
         )
     if status is not None:
-        count_query = count_query.where(LearningProgress.status == status)
+        count_query = count_query.where(status_equals(LearningProgress.status, status))
 
     total_result = await db.execute(count_query)
     total = total_result.scalar()
@@ -101,8 +107,8 @@ async def list_progress(
             "course_name": course.name,
             "node_id": node.node_id,
             "node_title": node.title,
-            "node_type": node.type.value,
-            "status": progress.status.value,
+            "node_type": get_enum_value(node.type),
+            "status": get_status_value(progress.status),
             "completion_percentage": progress.completion_percentage,
             "time_spent_seconds": progress.time_spent_seconds,
             "time_spent_hours": round(progress.time_spent_seconds / 3600, 2),
@@ -171,10 +177,10 @@ async def get_progress_detail(
             "node_id": node.node_id,
             "title": node.title,
             "description": node.description,
-            "type": node.type.value,
+            "type": get_enum_value(node.type),
             "sequence": node.sequence
         },
-        "status": progress.status.value,
+        "status": get_status_value(progress.status),
         "completion_percentage": progress.completion_percentage,
         "time_spent_seconds": progress.time_spent_seconds,
         "time_spent_hours": round(progress.time_spent_seconds / 3600, 2),
@@ -224,7 +230,7 @@ async def update_progress(
 
     return {
         "id": progress.id,
-        "status": progress.status.value,
+        "status": get_status_value(progress.status),
         "completion_percentage": progress.completion_percentage,
         "completed_at": progress.completed_at,
         "message": "Progress updated successfully"
@@ -305,7 +311,7 @@ async def get_course_progress_overview(
         # Count users who completed this node
         completed_query = select(func.count()).select_from(LearningProgress).where(
             LearningProgress.node_id == node.id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
         completed_result = await db.execute(completed_query)
         completed_count = completed_result.scalar()
@@ -329,7 +335,7 @@ async def get_course_progress_overview(
         node_stats.append({
             "node_id": node.node_id,
             "title": node.title,
-            "type": node.type.value,
+            "type": get_enum_value(node.type),
             "sequence": node.sequence,
             "started_count": started_count,
             "completed_count": completed_count,
@@ -410,7 +416,7 @@ async def get_user_progress_overview(
         ).where(
             CourseNode.course_id == course.id,
             LearningProgress.user_id == user_id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
         completed_nodes_result = await db.execute(completed_nodes_query)
         completed_nodes = completed_nodes_result.scalar()

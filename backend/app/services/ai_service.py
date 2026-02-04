@@ -15,6 +15,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def get_enum_value(enum_obj) -> str:
+    """Get value from enum or string"""
+    if enum_obj is None:
+        return None
+    return enum_obj.value if hasattr(enum_obj, 'value') else enum_obj
+
+
 class AIService:
     """Service for AI-powered features using Claude API"""
 
@@ -306,7 +313,7 @@ class AIService:
 
 当前课程节点信���：
 - 标题：{node.title}
-- 类型：{node.type.value}
+- 类型：{get_enum_value(node.type)}
 - 描述：{node.description or '无'}
 
 教学原则：

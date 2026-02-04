@@ -61,3 +61,11 @@ export async function testAPIConnection(category: string): Promise<TestAPIRespon
   const { data } = await apiClient.post<TestAPIResponse>(`/admin/api-config/test/${category}`);
   return data;
 }
+
+/**
+ * 重启服务器
+ */
+export async function restartServer(): Promise<{ success: boolean; message: string; output?: string }> {
+  const { data } = await apiClient.post<{ success: boolean; message: string; output?: string }>('/admin/api-config/restart-server');
+  return data;
+}

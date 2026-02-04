@@ -111,8 +111,8 @@ class StorageService:
         file_size = len(content)
         mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
 
-        # Build file URL (relative path)
-        file_url = f"/media/{category}/{filename}"
+        # Build file URL (relative path) - 使用 /upload/ 前缀匹配静态文件挂载路径
+        file_url = f"/upload/{category}/{filename}"
 
         return {
             "filename": filename,
@@ -175,8 +175,8 @@ class StorageService:
         # Get file info
         file_size = os.path.getsize(file_path)
 
-        # Build file URL
-        file_url = f"/media/{category}/{filename}"
+        # Build file URL - 使用 /upload/ 前缀匹配静态文件挂载路径
+        file_url = f"/upload/{category}/{filename}"
 
         return {
             "filename": filename,

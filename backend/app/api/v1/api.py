@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     simulator,
     notes,
     settings,
+    ai,
     # 学生端功能
     training,
     grinder,
@@ -27,7 +28,8 @@ from app.api.v1.endpoints.admin import (
     ai_monitor as admin_ai_monitor,
     achievement_center as admin_achievement_center,
     api_config as admin_api_config,
-    settings as admin_settings
+    settings as admin_settings,
+    admins as admin_admins
 )
 
 api_router = APIRouter()
@@ -64,6 +66,7 @@ api_router.include_router(training.router, prefix="/planner", tags=["Training Pl
 api_router.include_router(grinder.router, prefix="/grinder", tags=["Grinder"])
 api_router.include_router(achievements.router, prefix="/achievements", tags=["Achievements"])
 api_router.include_router(ai_tutor.router, prefix="/ai-tutor", tags=["AI Tutor"])
+api_router.include_router(ai.router, prefix="/ai", tags=["AI"])
 
 # 图标库 API
 api_router.include_router(icons.router, prefix="/icon-library", tags=["Icon Library"])
@@ -86,3 +89,4 @@ api_router.include_router(admin_ai_monitor.router, prefix="/admin", tags=["Admin
 api_router.include_router(admin_achievement_center.router, prefix="/admin", tags=["Admin - Achievement Center"])
 api_router.include_router(admin_api_config.router, prefix="/admin", tags=["Admin - API Config"])
 api_router.include_router(admin_settings.router, prefix="/admin", tags=["Admin - Settings"])
+api_router.include_router(admin_admins.router, prefix="/admin", tags=["Admin - Admin Management"])

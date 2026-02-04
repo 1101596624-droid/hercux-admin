@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import BaseModel, EmailStr
 
 from app.core.config import settings
 from app.core.security import (
@@ -18,27 +19,92 @@ from app.core.security import (
 from app.db.session import get_db
 from app.models.models import User
 from app.schemas.schemas import Token, UserCreate, UserResponse
+from app.services.email_service import send_code_to_email, verify_code
 
 router = APIRouter()
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(
-    user_data: UserCreate,
+class SendCodeRequest(BaseModel):
+    """Request model for sending verification code"""
+    email: EmailStr
+    purpose: str = "register"  # register, reset_password, change_email
+
+
+class SendCodeResponse(BaseModel):
+    """Response model for send code"""
+    success: bool
+    message: str
+
+
+class RegisterWithCodeRequest(BaseModel):
+    """Request model for registration with verification code"""
+    email: EmailStr
+    password: str
+    verification_code: str
+
+
+@router.post("/send-code", response_model=SendCodeResponse)
+async def send_verification_code(
+    request: SendCodeRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Register a new user
+    Send verification code to email
 
     Args:
-        user_data: User registration data
+        request: Email and purpose
+        db: Database session
+
+    Returns:
+        Success status and message
+    """
+    # For registration, check if email already exists
+    if request.purpose == "register":
+        result = await db.execute(select(User).where(User.email == request.email))
+        if result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该邮箱已被注册"
+            )
+
+    # For password reset, check if email exists
+    if request.purpose == "reset_password":
+        result = await db.execute(select(User).where(User.email == request.email))
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该邮箱未注册"
+            )
+
+    # Send verification code
+    success, message = await send_code_to_email(request.email, request.purpose)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=message
+        )
+
+    return SendCodeResponse(success=True, message=message)
+
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    request: RegisterWithCodeRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Register a new user with email verification code
+
+    Args:
+        request: Registration data with verification code
         db: Database session
 
     Returns:
         Created user object
 
     Raises:
-        HTTPException: If email or username already exists
+        HTTPException: If email already exists or verification fails
     """
     # 检查是否允许注册
     from app.core.system_settings import get_user_settings
@@ -49,28 +115,37 @@ async def register(
             detail="注册功能已关闭，请联系管理员"
         )
 
-    # Check if email already exists
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    if result.scalar_one_or_none():
+    # Verify the code
+    is_valid, error_message = verify_code(request.email, request.verification_code, "register")
+    if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail=error_message
         )
 
-    # Check if username already exists
-    result = await db.execute(select(User).where(User.username == user_data.username))
+    # Check if email already exists
+    result = await db.execute(select(User).where(User.email == request.email))
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already taken"
+            detail="该邮箱已被注册"
         )
+
+    # Generate username from email (part before @)
+    username = request.email.split('@')[0]
+    # Check if username exists, if so, add random suffix
+    result = await db.execute(select(User).where(User.username == username))
+    if result.scalar_one_or_none():
+        import random
+        import string
+        username = username + '_' + ''.join(random.choices(string.digits, k=4))
 
     # Create new user
     user = User(
-        email=user_data.email,
-        username=user_data.username,
-        hashed_password=get_password_hash(user_data.password),
-        full_name=user_data.full_name,
+        email=request.email,
+        username=username,
+        hashed_password=get_password_hash(request.password),
+        full_name=username,  # Default full_name to username
         is_active=1,
         is_premium=0
     )

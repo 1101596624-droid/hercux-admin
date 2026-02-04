@@ -1,0 +1,160 @@
+{
+  "category": "special",
+  "description": "AI训练计划 - AI互动和训练相关勋章 (14个)",
+  "badges": [
+    {
+      "id": "ai_chat_1",
+      "name": "AI初次对话",
+      "name_en": "First AI Chat",
+      "icon": "🤖",
+      "description": "与AI助手进行第一次对话",
+      "category": "special",
+      "rarity": "common",
+      "points": 10,
+      "condition": {"type": "counter", "metric": "ai_conversations", "target": 1}
+    },
+    {
+      "id": "ai_chat_10",
+      "name": "AI对话新手",
+      "name_en": "AI Chat Novice",
+      "icon": "💬",
+      "description": "与AI助手进行10次对话",
+      "category": "special",
+      "rarity": "common",
+      "points": 20,
+      "condition": {"type": "counter", "metric": "ai_conversations", "target": 10}
+    },
+    {
+      "id": "ai_chat_50",
+      "name": "AI对话达人",
+      "name_en": "AI Chat Expert",
+      "icon": "🗣️",
+      "description": "与AI助手进行50次对话",
+      "category": "special",
+      "rarity": "rare",
+      "points": 50,
+      "condition": {"type": "counter", "metric": "ai_conversations", "target": 50}
+    },
+    {
+      "id": "ai_chat_100",
+      "name": "AI对话专家",
+      "name_en": "AI Chat Specialist",
+      "icon": "🎙️",
+      "description": "与AI助手进行100次对话",
+      "category": "special",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "counter", "metric": "ai_conversations", "target": 100}
+    },
+    {
+      "id": "ai_chat_500",
+      "name": "AI对话大师",
+      "name_en": "AI Chat Master",
+      "icon": "🎤",
+      "description": "与AI助手进行500次对话",
+      "category": "special",
+      "rarity": "epic",
+      "points": 200,
+      "condition": {"type": "counter", "metric": "ai_conversations", "target": 500}
+    },
+    {
+      "id": "training_plan_1",
+      "name": "训练计划启动",
+      "name_en": "First Training Plan",
+      "icon": "📋",
+      "description": "完成第一个AI训练计划",
+      "category": "special",
+      "rarity": "common",
+      "points": 20,
+      "condition": {"type": "counter", "metric": "training_plans_completed", "target": 1}
+    },
+    {
+      "id": "training_plan_5",
+      "name": "训练计划新手",
+      "name_en": "Training Novice",
+      "icon": "📊",
+      "description": "完成5个AI训练计划",
+      "category": "special",
+      "rarity": "common",
+      "points": 40,
+      "condition": {"type": "counter", "metric": "training_plans_completed", "target": 5}
+    },
+    {
+      "id": "training_plan_10",
+      "name": "训练计划达人",
+      "name_en": "Training Expert",
+      "icon": "📈",
+      "description": "完成10个AI训练计划",
+      "category": "special",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "counter", "metric": "training_plans_completed", "target": 10}
+    },
+    {
+      "id": "training_plan_25",
+      "name": "训练计划专家",
+      "name_en": "Training Specialist",
+      "icon": "🏋️",
+      "description": "完成25个AI训练计划",
+      "category": "special",
+      "rarity": "epic",
+      "points": 150,
+      "condition": {"type": "counter", "metric": "training_plans_completed", "target": 25}
+    },
+    {
+      "id": "training_plan_50",
+      "name": "训练计划大师",
+      "name_en": "Training Master",
+      "icon": "🏆",
+      "description": "完成50个AI训练计划",
+      "category": "special",
+      "rarity": "legendary",
+      "points": 300,
+      "condition": {"type": "counter", "metric": "training_plans_completed", "target": 50}
+    },
+    {
+      "id": "ai_question_10",
+      "name": "好奇宝宝",
+      "name_en": "Curious Mind",
+      "icon": "❓",
+      "description": "向AI提出10个问题",
+      "category": "special",
+      "rarity": "common",
+      "points": 15,
+      "condition": {"type": "counter", "metric": "ai_questions_asked", "target": 10}
+    },
+    {
+      "id": "ai_question_50",
+      "name": "求知探索者",
+      "name_en": "Knowledge Seeker",
+      "icon": "🔍",
+      "description": "向AI提出50个问题",
+      "category": "special",
+      "rarity": "rare",
+      "points": 50,
+      "condition": {"type": "counter", "metric": "ai_questions_asked", "target": 50}
+    },
+    {
+      "id": "ai_question_200",
+      "name": "问题专家",
+      "name_en": "Question Expert",
+      "icon": "💭",
+      "description": "向AI提出200个问题",
+      "category": "special",
+      "rarity": "epic",
+      "points": 150,
+      "condition": {"type": "counter", "metric": "ai_questions_asked", "target": 200}
+    },
+    {
+      "id": "ai_question_500",
+      "name": "问题大师",
+      "name_en": "Question Master",
+      "icon": "🧐",
+      "description": "向AI提出500个问题",
+      "category": "special",
+      "rarity": "legendary",
+      "points": 300,
+      "condition": {"type": "counter", "metric": "ai_questions_asked", "target": 500}
+    }
+  ]
+}

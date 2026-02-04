@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.models.models import CourseNode, LearningProgress, NodeStatus, User
+from app.core.utils import get_enum_value
 from datetime import datetime, timezone
 import json
 
@@ -62,7 +63,7 @@ class UnlockService:
 
             # Check if previous node is completed
             prev_progress = await self._get_progress(user_id, prev_node.id)
-            if prev_progress and prev_progress.status == NodeStatus.COMPLETED:
+            if prev_progress and get_enum_value(prev_progress.status) == NodeStatus.COMPLETED.value:
                 return True, None
             else:
                 return False, f"需要先完成: {prev_node.title}"
@@ -76,7 +77,7 @@ class UnlockService:
             prereq_node_ids = unlock_condition.get("node_ids", [])
             for prereq_id in prereq_node_ids:
                 prereq_progress = await self._get_progress(user_id, prereq_id)
-                if not prereq_progress or prereq_progress.status != NodeStatus.COMPLETED:
+                if not prereq_progress or get_enum_value(prereq_progress.status) != NodeStatus.COMPLETED.value:
                     prereq_node = await self.db.get(CourseNode, prereq_id)
                     return False, f"需要先完成前置课程: {prereq_node.title if prereq_node else '未知'}"
             return True, None
@@ -109,7 +110,7 @@ class UnlockService:
                 last_accessed=datetime.now(timezone.utc)
             )
             self.db.add(progress)
-        elif progress.status == NodeStatus.LOCKED:
+        elif get_enum_value(progress.status) == NodeStatus.LOCKED.value:
             progress.status = NodeStatus.UNLOCKED
             progress.last_accessed = datetime.now(timezone.utc)
 
@@ -259,8 +260,10 @@ class UnlockService:
         # Build progress map
         progress_map = {}
         for progress in progress_records:
+            # Handle both enum and string status values
+            status_value = progress.status.value if hasattr(progress.status, 'value') else progress.status
             progress_map[progress.node_id] = {
-                "status": progress.status.value,
+                "status": status_value,
                 "completion_percentage": progress.completion_percentage,
                 "last_accessed": progress.last_accessed,
                 "completed_at": progress.completed_at

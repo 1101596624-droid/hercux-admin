@@ -227,9 +227,9 @@ export function InputView({
                       </p>
                     </div>
                     <p className="text-xs text-slate-500">{processor.description}</p>
-                    {processor.tags && processor.tags.length > 0 && (
+                    {processor.tags && (Array.isArray(processor.tags) ? processor.tags : []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {processor.tags.map((tag) => (
+                        {(Array.isArray(processor.tags) ? processor.tags : (typeof processor.tags === 'string' ? JSON.parse(processor.tags) : [])).map((tag: string) => (
                           <span
                             key={tag}
                             className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded"

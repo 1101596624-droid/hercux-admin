@@ -19,6 +19,11 @@ from app.core.security import get_current_user
 router = APIRouter()
 
 
+def get_status_value(status_obj) -> str:
+    """Get status value, handling both enum and string types"""
+    return status_obj.value if hasattr(status_obj, 'value') else status_obj
+
+
 # ============ User Settings Schema ============
 
 class UserSettings(BaseModel):
@@ -167,7 +172,7 @@ async def get_active_course(
         "nodeId": node.node_id,
         "nodeTitle": node.title,
         "lastAccessed": progress.last_accessed.isoformat() if progress.last_accessed else None,
-        "status": progress.status.value,
+        "status": get_status_value(progress.status),
         "completionPercentage": progress.completion_percentage
     }
 

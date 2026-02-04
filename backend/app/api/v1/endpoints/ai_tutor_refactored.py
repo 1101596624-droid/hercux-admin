@@ -19,9 +19,21 @@ router = APIRouter(tags=["AI Tutor"])
 
 def get_sync_db():
     """获取同步 SQLite 连接"""
-    db_path = Path(__file__).parent.parent.parent.parent.parent / "hercu_dev.db"
-    if not db_path.exists():
-        db_path = Path(__file__).parent.parent.parent.parent / "hercu_dev.db"
+    # 优先使用生产环境数据库
+    possible_paths = [
+        Path("/www/wwwroot/hercu-backend/hercu.db"),  # 服务器生产环境
+        Path(__file__).parent.parent.parent.parent.parent / "hercu.db",
+        Path(__file__).parent.parent.parent.parent.parent / "hercu_dev.db",
+        Path(__file__).parent.parent.parent.parent / "hercu.db",
+        Path(__file__).parent.parent.parent.parent / "hercu_dev.db",
+    ]
+    db_path = None
+    for path in possible_paths:
+        if path.exists():
+            db_path = path
+            break
+    if db_path is None:
+        raise FileNotFoundError("Database file not found")
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     return conn

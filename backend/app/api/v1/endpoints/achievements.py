@@ -17,6 +17,7 @@ from app.models.models import (
     SkillAchievementConfig, UserSkillAchievement
 )
 from app.core.security import get_current_user
+from app.core.utils import status_equals
 
 router = APIRouter()
 
@@ -148,7 +149,7 @@ async def get_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
     completed_nodes_query = select(func.count(LearningProgress.id)).where(
         and_(
             LearningProgress.user_id == user_id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
     )
     completed_nodes = await db.scalar(completed_nodes_query) or 0
@@ -221,7 +222,7 @@ async def get_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
                 LearningProgress.node_id.in_(
                     select(CourseNode.id).where(CourseNode.course_id == course_id)
                 ),
-                LearningProgress.status == NodeStatus.COMPLETED
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED)
             )
         )
         completed = await db.scalar(completed_query) or 0
@@ -293,7 +294,7 @@ async def get_user_achievements(
     """
     Get user's unlocked and locked achievements
 
-    Returns all possible achievements with unlock status
+    从数据库 badge_configs 表读取勋章配置，包含 unlock_animation
     """
     # Check and unlock any new achievements first
     await check_and_unlock_achievements(current_user.id, db)
@@ -304,32 +305,46 @@ async def get_user_achievements(
     )
     result = await db.execute(unlocked_query)
     unlocked_achievements = result.scalars().all()
+    unlocked_badge_ids = {ach.badge_id: ach for ach in unlocked_achievements}
 
-    unlocked_badge_ids = {ach.badge_id for ach in unlocked_achievements}
+    # 从数据库读取勋章配置
+    badge_configs_query = select(BadgeConfig).where(BadgeConfig.is_active == 1)
+    result = await db.execute(badge_configs_query)
+    badge_configs = result.scalars().all()
 
-    # Build response with all achievements
     achievements_list = []
 
-    for badge_id, achievement_def in ACHIEVEMENT_DEFINITIONS.items():
-        is_unlocked = badge_id in unlocked_badge_ids
-        unlocked_at = None
+    # 如果数据库有配置，使用数据库配置
+    if badge_configs:
+        for badge in badge_configs:
+            is_unlocked = badge.id in unlocked_badge_ids
+            unlocked_at = unlocked_badge_ids[badge.id].unlocked_at if is_unlocked else None
 
-        if is_unlocked:
-            # Find the unlocked achievement
-            for ach in unlocked_achievements:
-                if ach.badge_id == badge_id:
-                    unlocked_at = ach.unlocked_at
-                    break
+            achievements_list.append(AchievementResponse(
+                badge_id=badge.id,
+                badge_name=badge.name,
+                badge_description=badge.description or "",
+                rarity=badge.rarity.value if hasattr(badge.rarity, 'value') else badge.rarity,
+                icon_url=badge.icon_url or f"/badges/{badge.id}.png",
+                is_unlocked=is_unlocked,
+                unlocked_at=unlocked_at,
+                unlock_animation=badge.unlock_animation  # 包含动画配置
+            ))
+    else:
+        # 回退到硬编码定义
+        for badge_id, achievement_def in ACHIEVEMENT_DEFINITIONS.items():
+            is_unlocked = badge_id in unlocked_badge_ids
+            unlocked_at = unlocked_badge_ids[badge_id].unlocked_at if is_unlocked else None
 
-        achievements_list.append(AchievementResponse(
-            badge_id=achievement_def["badge_id"],
-            badge_name=achievement_def["badge_name"],
-            badge_description=achievement_def["badge_description"],
-            rarity=achievement_def["rarity"],
-            icon_url=achievement_def["icon_url"],
-            is_unlocked=is_unlocked,
-            unlocked_at=unlocked_at
-        ))
+            achievements_list.append(AchievementResponse(
+                badge_id=achievement_def["badge_id"],
+                badge_name=achievement_def["badge_name"],
+                badge_description=achievement_def["badge_description"],
+                rarity=achievement_def["rarity"],
+                icon_url=achievement_def["icon_url"],
+                is_unlocked=is_unlocked,
+                unlocked_at=unlocked_at
+            ))
 
     # Sort: unlocked first, then by rarity
     rarity_order = {"legendary": 0, "epic": 1, "rare": 2, "common": 3}
@@ -410,7 +425,7 @@ async def get_leaderboard(
     ).join(
         LearningProgress, User.id == LearningProgress.user_id
     ).where(
-        LearningProgress.status == NodeStatus.COMPLETED
+        status_equals(LearningProgress.status, NodeStatus.COMPLETED)
     ).group_by(
         User.id, User.username, User.full_name, User.avatar_url
     ).order_by(

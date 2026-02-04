@@ -2,9 +2,10 @@
 Studio Schemas - Pydantic models for Studio API
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Any, Literal
 from datetime import datetime
+import json
 
 
 # ============================================
@@ -21,6 +22,22 @@ class ProcessorBase(BaseModel):
     tags: List[str] = []
     color: str = "#3B82F6"
     icon: str = "Sparkles"
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def parse_tags(cls, v):
+        """Parse tags from JSON string if needed"""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
 
 
 class ProcessorWithConfig(ProcessorBase):

@@ -21,9 +21,12 @@ class SyncDBManager:
             db_path: 数据库文件路径，如果为 None 则自动查找
         """
         if db_path is None:
-            # 自动查找数据库文件
+            # 自动查找数据库文件 - 优先使用生产环境数据库
             possible_paths = [
+                Path("/www/wwwroot/hercu-backend/hercu.db"),  # 服务器生产环境
+                Path(__file__).parent.parent.parent / "hercu.db",
                 Path(__file__).parent.parent.parent / "hercu_dev.db",
+                Path(__file__).parent.parent.parent.parent / "hercu.db",
                 Path(__file__).parent.parent.parent.parent / "hercu_dev.db",
             ]
             for path in possible_paths:
@@ -70,12 +73,10 @@ class SyncDBManager:
                 SELECT
                     id,
                     title,
-                    learning_objectives,
-                    content_l1,
-                    content_l2,
-                    content_l3,
-                    ai_tutor_config,
-                    quiz_data
+                    description,
+                    content,
+                    config,
+                    timeline_config
                 FROM course_nodes
                 WHERE id = ?
                 """,
@@ -87,15 +88,23 @@ class SyncDBManager:
                 return None
 
             # 解析 JSON 字段
+            content = json.loads(row["content"]) if row["content"] else {}
+            config = json.loads(row["config"]) if row["config"] else {}
+            timeline_config = json.loads(row["timeline_config"]) if row["timeline_config"] else {}
+
+            # 从 content 和 config 中提取 AI 相关配置
+            ai_tutor_config = config.get("ai_tutor", {}) or timeline_config.get("ai_tutor", {}) or {}
+            learning_objectives = content.get("learning_objectives", []) or config.get("learning_objectives", []) or []
+
             return {
                 "id": row["id"],
                 "title": row["title"],
-                "learning_objectives": json.loads(row["learning_objectives"]) if row["learning_objectives"] else [],
-                "content_l1": json.loads(row["content_l1"]) if row["content_l1"] else {},
-                "content_l2": json.loads(row["content_l2"]) if row["content_l2"] else {},
-                "content_l3": json.loads(row["content_l3"]) if row["content_l3"] else {},
-                "ai_tutor_config": json.loads(row["ai_tutor_config"]) if row["ai_tutor_config"] else {},
-                "quiz_data": json.loads(row["quiz_data"]) if row["quiz_data"] else {},
+                "description": row["description"] or "",
+                "learning_objectives": learning_objectives,
+                "content": content,
+                "config": config,
+                "timeline_config": timeline_config,
+                "ai_tutor_config": ai_tutor_config,
             }
 
     def get_ai_tutor_config(self, node_id: int) -> Dict[str, Any]:
@@ -112,7 +121,7 @@ class SyncDBManager:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT ai_tutor_config
+                SELECT config, timeline_config, content
                 FROM course_nodes
                 WHERE id = ?
                 """,
@@ -123,7 +132,19 @@ class SyncDBManager:
             if not row:
                 return {}
 
-            return json.loads(row["ai_tutor_config"]) if row["ai_tutor_config"] else {}
+            config = json.loads(row["config"]) if row["config"] else {}
+            timeline_config = json.loads(row["timeline_config"]) if row["timeline_config"] else {}
+            content = json.loads(row["content"]) if row["content"] else {}
+
+            # 从多个位置查找 ai_tutor 配置
+            ai_tutor_config = (
+                config.get("ai_tutor", {}) or
+                timeline_config.get("ai_tutor", {}) or
+                content.get("ai_tutor", {}) or
+                {}
+            )
+
+            return ai_tutor_config
 
 
 # 全局单例

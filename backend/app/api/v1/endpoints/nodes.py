@@ -9,6 +9,7 @@ from app.models.models import CourseNode, LearningProgress, NodeStatus, User
 from app.schemas.schemas import CourseNodeResponse, CourseNodeWithProgress, ProgressUpdate
 from app.services.unlock_service import UnlockService
 from app.core.security import get_current_user
+from app.core.utils import get_enum_value
 
 router = APIRouter()
 
@@ -53,7 +54,7 @@ async def get_node(
 
     # Check unlock status if node is locked
     unlock_service = UnlockService(db)
-    if not progress or progress.status == NodeStatus.LOCKED:
+    if not progress or get_enum_value(progress.status) == NodeStatus.LOCKED.value:
         can_unlock, reason = await unlock_service.check_unlock_condition(node, current_user.id)
         if can_unlock:
             # Auto-unlock if conditions are met
@@ -142,7 +143,7 @@ async def complete_node(
             select(CourseNode).where(CourseNode.id.in_(newly_unlocked_ids))
         )
         unlocked_nodes = [
-            {"node_id": n.node_id, "title": n.title, "type": n.type.value}
+            {"node_id": n.node_id, "title": n.title, "type": get_enum_value(n.type)}
             for n in result.scalars().all()
         ]
 
@@ -216,7 +217,7 @@ async def update_node_progress(
         db.add(progress)
 
     # Check if node is already completed - lock progress at 100%
-    is_completed = progress.status == NodeStatus.COMPLETED
+    is_completed = get_enum_value(progress.status) == NodeStatus.COMPLETED.value
 
     # Update fields (but respect completion lock)
     if progress_update.status is not None:
@@ -241,7 +242,7 @@ async def update_node_progress(
     progress.last_accessed = datetime.now(timezone.utc)
 
     # If status changed to IN_PROGRESS, mark as such
-    if progress_update.status == NodeStatus.IN_PROGRESS and progress.status == NodeStatus.UNLOCKED:
+    if progress_update.status == NodeStatus.IN_PROGRESS and get_enum_value(progress.status) == NodeStatus.UNLOCKED.value:
         progress.status = NodeStatus.IN_PROGRESS
 
     # Update user's cumulative usage time if time increased
@@ -299,7 +300,7 @@ async def get_course_map(
             "node_id": node.node_id,
             "title": node.title,
             "description": node.description,
-            "type": node.type.value,
+            "type": get_enum_value(node.type),
             "sequence": node.sequence,
             "parent_id": node.parent_id,
             "status": progress_info.get("status", NodeStatus.LOCKED.value),

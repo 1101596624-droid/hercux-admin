@@ -16,6 +16,7 @@ from app.models.models import (
     LearningProgress, CourseNode, NodeStatus, NodeType
 )
 from app.core.security import get_current_admin_user
+from app.core.utils import status_equals
 
 router = APIRouter()
 
@@ -35,11 +36,13 @@ class BadgeCreate(BaseModel):
     name: str
     name_en: Optional[str] = None
     icon: str
+    icon_url: Optional[str] = None
     description: str
     category: str
     rarity: str = "common"
     points: int = 10
     condition: dict
+    unlock_animation: Optional[str] = None
     is_active: bool = True
 
 
@@ -47,11 +50,13 @@ class BadgeUpdate(BaseModel):
     name: Optional[str] = None
     name_en: Optional[str] = None
     icon: Optional[str] = None
+    icon_url: Optional[str] = None
     description: Optional[str] = None
     category: Optional[str] = None
     rarity: Optional[str] = None
     points: Optional[int] = None
     condition: Optional[dict] = None
+    unlock_animation: Optional[str] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -221,11 +226,13 @@ async def get_badges(
             "name": badge.name,
             "nameEn": badge.name_en,
             "icon": badge.icon,
+            "iconUrl": badge.icon_url,
             "description": badge.description,
             "category": badge.category.value if hasattr(badge.category, 'value') else badge.category,
             "rarity": badge.rarity.value if hasattr(badge.rarity, 'value') else badge.rarity,
             "points": badge.points,
             "condition": badge.condition,
+            "unlockAnimation": badge.unlock_animation,
             "isActive": badge.is_active == 1,
             "sortOrder": badge.sort_order,
             "stats": {
@@ -262,11 +269,13 @@ async def create_badge(
         name=badge.name,
         name_en=badge.name_en,
         icon=badge.icon,
+        icon_url=badge.icon_url,
         description=badge.description,
         category=badge.category,
         rarity=badge.rarity,
         points=badge.points,
         condition=badge.condition,
+        unlock_animation=badge.unlock_animation,
         is_active=1 if badge.is_active else 0,
         created_by=str(current_user.id)
     )
@@ -756,7 +765,7 @@ async def get_user_learning_stats(user_id: int, db: AsyncSession) -> dict:
         select(func.count(LearningProgress.id)).where(
             and_(
                 LearningProgress.user_id == user_id,
-                LearningProgress.status == NodeStatus.COMPLETED
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED)
             )
         )
     ) or 0
@@ -837,7 +846,7 @@ async def get_user_learning_stats(user_id: int, db: AsyncSession) -> dict:
                     LearningProgress.node_id.in_(
                         select(CourseNode.id).where(CourseNode.course_id == course_id)
                     ),
-                    LearningProgress.status == NodeStatus.COMPLETED
+                    status_equals(LearningProgress.status, NodeStatus.COMPLETED)
                 )
             )
         ) or 0
@@ -850,7 +859,7 @@ async def get_user_learning_stats(user_id: int, db: AsyncSession) -> dict:
         select(func.count(LearningProgress.id)).where(
             and_(
                 LearningProgress.user_id == user_id,
-                LearningProgress.status == NodeStatus.COMPLETED,
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED),
                 LearningProgress.node_id.in_(
                     select(CourseNode.id).where(CourseNode.type == NodeType.QUIZ)
                 )
@@ -862,7 +871,7 @@ async def get_user_learning_stats(user_id: int, db: AsyncSession) -> dict:
         select(func.count(LearningProgress.id)).where(
             and_(
                 LearningProgress.user_id == user_id,
-                LearningProgress.status == NodeStatus.COMPLETED,
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED),
                 LearningProgress.node_id.in_(
                     select(CourseNode.id).where(CourseNode.type == NodeType.SIMULATOR)
                 )
@@ -1167,6 +1176,128 @@ async def generate_badge_with_ai(
             "success": False,
             "error": f"AI 返回的格式无法解析: {str(e)}",
             "raw_response": result_text if 'result_text' in locals() else None
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"AI 生成失败: {str(e)}"
+        }
+
+
+class GenerateAnimationRequest(BaseModel):
+    badge_name: str
+    badge_description: str
+    rarity: str
+
+
+@router.post("/achievement-center/generate-animation")
+async def generate_unlock_animation(
+    request: GenerateAnimationRequest,
+    current_user: User = Depends(get_current_admin_user)
+):
+    """使用 AI 生成勋章解锁动画代码"""
+    import anthropic
+
+    system_prompt = """你是一个专业的前端动画开发者。你需要为勋章解锁生成炫酷的动画代码。
+
+动画将在一个全屏遮罩层中播放，使用 CSS 动画和 JavaScript。
+
+## 技术要求
+- 使用纯 CSS 动画 + 少量 JavaScript
+- 动画时长 2-4 秒
+- 支持的 CSS 特性：transform, opacity, filter, box-shadow, animation, keyframes
+- 可以使用 CSS 变量
+- 动画结束后需要调用 window.onAnimationComplete() 回调
+
+## 代码结构
+返回一个包含 html, css, js 三个字段的 JSON 对象：
+```json
+{
+  "html": "<div class='badge-unlock'>...</div>",
+  "css": "@keyframes ... { } .badge-unlock { ... }",
+  "js": "// 动画控制代码"
+}
+```
+
+## 稀有度对应的视觉风格
+- epic (史诗): 紫色主题，光芒效果，粒子环绕
+- legendary (传说): 金色主题，闪电效果，震撼的视觉冲击
+
+## 示例效果描述
+- 勋章从中心放大出现，伴随光芒扩散
+- 粒子从四周汇聚到中心形成勋章
+- 闪电劈下，勋章在电光中显现
+
+只返回 JSON，不要其他文字。"""
+
+    user_message = f"""请为以下勋章生成解锁动画：
+
+勋章名称：{request.badge_name}
+动画效果描述：{request.badge_description}
+稀有度：{request.rarity}
+
+请生成一个炫酷的解锁动画。"""
+
+    try:
+        from app.core.config import settings
+
+        client = anthropic.Anthropic(
+            api_key=settings.ANTHROPIC_API_KEY,
+            base_url=settings.ANTHROPIC_BASE_URL
+        )
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}]
+        )
+
+        import json
+        result_text = response.content[0].text.strip()
+
+        # 尝试提取 JSON
+        if result_text.startswith("```"):
+            lines = result_text.split("\n")
+            json_lines = []
+            in_json = False
+            for line in lines:
+                if line.startswith("```") and not in_json:
+                    in_json = True
+                    continue
+                elif line.startswith("```") and in_json:
+                    break
+                elif in_json:
+                    json_lines.append(line)
+            result_text = "\n".join(json_lines)
+
+        animation_config = json.loads(result_text)
+
+        # 组合成完整的动画代码
+        animation_code = f"""/* 勋章解锁动画 - {request.badge_name} */
+
+/* HTML */
+{animation_config.get('html', '')}
+
+/* CSS */
+<style>
+{animation_config.get('css', '')}
+</style>
+
+/* JavaScript */
+<script>
+{animation_config.get('js', '')}
+</script>"""
+
+        return {
+            "success": True,
+            "animation_code": animation_code
+        }
+
+    except json.JSONDecodeError as e:
+        return {
+            "success": False,
+            "error": f"AI 返回的格式无法解析: {str(e)}"
         }
     except Exception as e:
         return {

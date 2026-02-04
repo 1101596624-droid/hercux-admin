@@ -424,7 +424,7 @@ export default function AdminPermissionsPage() {
                 <th className="py-3 px-6 text-sm font-medium text-slate-500">等级</th>
                 <th className="py-3 px-6 text-sm font-medium text-slate-500">状态</th>
                 <th className="py-3 px-6 text-sm font-medium text-slate-500">创建时间</th>
-                <th className="py-3 px-6 text-sm font-medium text-slate-500">最后登录</th>
+                <th className="py-3 px-6 text-sm font-medium text-slate-500">更新时间</th>
                 <th className="py-3 px-6 text-sm font-medium text-slate-500">操作</th>
               </tr>
             </thead>
@@ -460,7 +460,7 @@ export default function AdminPermissionsPage() {
                     {formatDate(admin.created_at)}
                   </td>
                   <td className="py-4 px-6 text-sm text-slate-600">
-                    {formatDate(admin.last_login_at)}
+                    {formatDate(admin.updated_at)}
                   </td>
                   <td className="py-4 px-6">
                     {admin.level !== 1 && (

@@ -7,6 +7,7 @@ import {
   getAPIConfig,
   updateAPIConfig,
   testAPIConnection,
+  restartServer,
   type APIConfigCategory,
   type APIConfigItem,
 } from '@/lib/api/admin/api-config';
@@ -192,6 +193,7 @@ export default function APIConfigPage() {
   const [testingCategory, setTestingCategory] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [isRestarting, setIsRestarting] = useState(false);
 
   // 加载配置
   const loadConfig = async () => {
@@ -225,6 +227,29 @@ export default function APIConfigPage() {
       alert(error instanceof Error ? error.message : '保存失败');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // 重启服务器
+  const handleRestartServer = async () => {
+    if (!confirm('确定要重启服务器吗？重启期间服务将短暂不可用。')) {
+      return;
+    }
+    setIsRestarting(true);
+    try {
+      const result = await restartServer();
+      if (result.success) {
+        alert('服务器重启成功！页面将在 5 秒后自动刷新。');
+        setTimeout(() => {
+          window.location.reload();
+        }, 5000);
+      } else {
+        alert(`重启失败: ${result.message}`);
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '重启失败');
+    } finally {
+      setIsRestarting(false);
     }
   };
 
@@ -296,16 +321,29 @@ export default function APIConfigPage() {
             管理所有 API 配置，共 <span className="text-red-500 font-medium">{stats.configured}/{stats.total}</span> 项已配置
           </p>
         </div>
-        <button
-          onClick={loadConfig}
-          className="flex items-center gap-2 px-5 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M23 4v6h-6M1 20v-6h6" />
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-          </svg>
-          刷新配置
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={loadConfig}
+            className="flex items-center gap-2 px-5 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M23 4v6h-6M1 20v-6h6" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+            刷新配置
+          </button>
+          <button
+            onClick={handleRestartServer}
+            disabled={isRestarting}
+            className="flex items-center gap-2 px-5 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12a9 9 0 11-6.219-8.56" />
+              <polyline points="21 3 21 9 15 9" />
+            </svg>
+            {isRestarting ? '重启中...' : '重启服务器'}
+          </button>
+        </div>
       </div>
 
       {/* 环境文件路径 */}

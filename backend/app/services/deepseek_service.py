@@ -31,7 +31,7 @@ class DeepSeekService:
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.api_key = api_key or settings.DEEPSEEK_API_KEY
         self.base_url = base_url or settings.DEEPSEEK_BASE_URL
-        self.model = "deepseek-chat"
+        self.model = settings.DEEPSEEK_MODEL  # 从配置读取模型名称
 
         if not self.api_key:
             raise ValueError("DEEPSEEK_API_KEY environment variable is required")

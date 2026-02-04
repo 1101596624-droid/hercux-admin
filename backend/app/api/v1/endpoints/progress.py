@@ -13,9 +13,15 @@ from app.models.models import (
     NodeStatus
 )
 from app.core.security import get_current_user
+from app.core.utils import get_enum_value, status_equals
 from pydantic import BaseModel
 
 router = APIRouter()
+
+
+def get_status_value(status_obj) -> str:
+    """Get status value, handling both enum and string types"""
+    return status_obj.value if hasattr(status_obj, 'value') else status_obj
 
 
 # ============ Schemas ============
@@ -81,11 +87,11 @@ async def get_progress_summary(
     )
     total_started = await db.scalar(started_query) or 0
 
-    # Get total nodes completed
+    # Get total nodes completed - use string value for comparison
     completed_query = select(func.count(LearningProgress.id)).where(
         and_(
             LearningProgress.user_id == current_user.id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
     )
     total_completed = await db.scalar(completed_query) or 0
@@ -191,10 +197,10 @@ async def get_node_progress(
             id=progress.id,
             node_id=node.node_id,
             node_title=node.title,
-            node_type=node.type.value,
+            node_type=get_enum_value(node.type),
             course_id=course.id,
             course_name=course.name,
-            status=progress.status.value,
+            status=get_status_value(progress.status),
             completion_percentage=progress.completion_percentage,
             time_spent_seconds=progress.time_spent_seconds,
             last_accessed=progress.last_accessed,
@@ -258,7 +264,7 @@ async def get_course_progress(
                 LearningProgress.node_id.in_(
                     select(CourseNode.id).where(CourseNode.course_id == course_id)
                 ),
-                LearningProgress.status == NodeStatus.COMPLETED
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED)
             )
         )
         completed_nodes = await db.scalar(completed_query) or 0
@@ -270,7 +276,7 @@ async def get_course_progress(
                 LearningProgress.node_id.in_(
                     select(CourseNode.id).where(CourseNode.course_id == course_id)
                 ),
-                LearningProgress.status == NodeStatus.IN_PROGRESS
+                status_equals(LearningProgress.status, NodeStatus.IN_PROGRESS)
             )
         )
         in_progress_nodes = await db.scalar(in_progress_query) or 0
@@ -282,7 +288,7 @@ async def get_course_progress(
                 LearningProgress.node_id.in_(
                     select(CourseNode.id).where(CourseNode.course_id == course_id)
                 ),
-                LearningProgress.status == NodeStatus.LOCKED
+                status_equals(LearningProgress.status, NodeStatus.LOCKED)
             )
         )
         locked_nodes = await db.scalar(locked_query) or 0
@@ -372,9 +378,9 @@ async def get_recent_progress(
         recent_activity.append({
             "node_id": node.node_id,
             "node_title": node.title,
-            "node_type": node.type.value,
+            "node_type": get_enum_value(node.type),
             "course_name": course.name,
-            "status": progress.status.value,
+            "status": get_status_value(progress.status),
             "completion_percentage": progress.completion_percentage,
             "time_spent_seconds": progress.time_spent_seconds,
             "last_accessed": progress.last_accessed.isoformat() if progress.last_accessed else None
@@ -405,7 +411,7 @@ async def get_growth_stats(
     completed_query = select(func.count(LearningProgress.id)).where(
         and_(
             LearningProgress.user_id == current_user.id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
     )
     completed_nodes = await db.scalar(completed_query) or 0

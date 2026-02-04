@@ -30,7 +30,7 @@ class ClaudeService:
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.api_key = api_key or settings.ANTHROPIC_API_KEY
         self.base_url = base_url or settings.ANTHROPIC_BASE_URL
-        self.model = "claude-3-5-sonnet-20241022"
+        self.model = settings.ANTHROPIC_MODEL  # 从配置读取模型名称
         self.anthropic_version = "2023-06-01"
 
         if not self.api_key:

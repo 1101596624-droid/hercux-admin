@@ -351,67 +351,85 @@ export default function AdminCoursesPage() {
             {courses.map((course) => (
               <div
                 key={course.id}
-                className={`bg-slate-50 rounded-xl p-5 transition-all border border-transparent ${
+                className={`bg-slate-50 rounded-xl overflow-hidden transition-all border border-transparent ${
                   !course.is_published
                     ? 'hover:shadow-md cursor-pointer group hover:border-red-200'
                     : 'opacity-80'
                 }`}
                 onClick={() => !course.is_published && handleEdit(course.id)}
               >
-                {/* Course Header */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-slate-900 group-hover:text-red-500 transition-colors">
-                      {course.name}
-                    </h3>
-                    <p className="text-sm text-red-500 font-mono">
-                      CSCS-{String(course.id).padStart(3, '0')}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
+                {/* Course Thumbnail */}
+                <div className="aspect-video bg-gradient-to-br from-slate-200 to-slate-300 relative overflow-hidden">
+                  {course.thumbnail_url ? (
+                    <img
+                      src={course.thumbnail_url}
+                      alt={course.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                    </div>
+                  )}
+                  {/* Status Badge on Thumbnail */}
+                  <div className="absolute top-2 left-2">
                     <StatusBadge status={course.is_published ? 'published' : 'draft'} />
-                    {canDeleteCourse && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(course.id, course.name);
-                        }}
-                        className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors flex items-center gap-1"
-                      >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        </svg>
-                        删除
-                      </button>
-                    )}
                   </div>
                 </div>
 
+                <div className="p-4">
+                {/* Course Header */}
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-slate-900 group-hover:text-red-500 transition-colors line-clamp-1">
+                      {course.name}
+                    </h3>
+                    <p className="text-xs text-red-500 font-mono">
+                      CSCS-{String(course.id).padStart(3, '0')}
+                    </p>
+                  </div>
+                  {canDeleteCourse && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(course.id, course.name);
+                      }}
+                      className="px-2 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors flex items-center gap-1"
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
                 {/* Description */}
-                <p className="text-sm text-slate-500 line-clamp-2 mb-4 min-h-[40px]">
+                <p className="text-sm text-slate-500 line-clamp-2 mb-3 min-h-[40px]">
                   {course.description || '暂无描述'}
                 </p>
 
                 {/* Stats */}
-                <div className="flex items-center gap-4 text-sm text-slate-600 mb-4">
+                <div className="flex items-center gap-3 text-xs text-slate-600 mb-3">
                   <div className="flex items-center gap-1">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="3" width="18" height="18" rx="2" />
                       <path d="M3 9h18" />
                       <path d="M9 21V9" />
                     </svg>
-                    <span>{course.total_nodes} 节点</span>
+                    <span>{course.total_nodes}节</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <circle cx="12" cy="12" r="10" />
                       <polyline points="12 6 12 12 16 14" />
                     </svg>
                     <span>{course.duration_hours || 0}h</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                       <circle cx="9" cy="7" r="4" />
                     </svg>
@@ -421,19 +439,19 @@ export default function AdminCoursesPage() {
 
                 {/* Footer */}
                 <div className="flex items-center justify-between pt-3 border-t border-slate-200">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <DifficultyBadge difficulty={course.difficulty} />
-                    {/* 显示标签 */}
-                    {course.tags && course.tags.length > 0 && course.tags.map((tag, idx) => (
+                    {/* 显示标签（最多2个） */}
+                    {course.tags && (Array.isArray(course.tags) ? course.tags : (typeof course.tags === 'string' ? JSON.parse(course.tags) : [])).slice(0, 2).map((tag: string, idx: number) => (
                       <span
                         key={idx}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-600"
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-600"
                       >
                         {tag}
                       </span>
                     ))}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     {/* 只有下架状态的课程可以编辑 */}
                     {!course.is_published ? (
                       <button
@@ -441,20 +459,12 @@ export default function AdminCoursesPage() {
                           e.stopPropagation();
                           handleEdit(course.id);
                         }}
-                        className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1"
+                        className="px-2 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
                       >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                        </svg>
                         编辑
                       </button>
                     ) : (
-                      <span className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50 rounded-lg flex items-center gap-1">
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                        </svg>
+                      <span className="px-2 py-1 text-xs font-medium text-slate-400 bg-slate-50 rounded-lg">
                         已锁定
                       </span>
                     )}
@@ -464,32 +474,17 @@ export default function AdminCoursesPage() {
                           e.stopPropagation();
                           handleTogglePublish(course.id, course.is_published, course.name);
                         }}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${
+                        className={`px-2 py-1 text-xs font-medium rounded-lg transition-colors ${
                           course.is_published
                             ? 'text-orange-600 bg-orange-50 hover:bg-orange-100'
                             : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
                         }`}
                       >
-                        {course.is_published ? (
-                          <>
-                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                              <line x1="1" y1="1" x2="23" y2="23" />
-                            </svg>
-                            下架
-                          </>
-                        ) : (
-                          <>
-                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                              <circle cx="12" cy="12" r="3" />
-                            </svg>
-                            上架
-                          </>
-                        )}
+                        {course.is_published ? '下架' : '上架'}
                       </button>
                     )}
                   </div>
+                </div>
                 </div>
               </div>
             ))}

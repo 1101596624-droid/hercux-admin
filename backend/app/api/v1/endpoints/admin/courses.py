@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.models.models import Course, CourseNode, User, UserCourse, LearningProgress, DifficultyLevel, NodeStatus, NodeType, ChatHistory, SimulatorResult
 from app.schemas.schemas import CourseResponse, CourseCreate, CourseUpdate
 from app.core.security import get_current_admin_user
+from app.core.utils import get_enum_value, status_equals
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -165,7 +166,7 @@ async def get_course_detail(
         .join(CourseNode, LearningProgress.node_id == CourseNode.id)
         .where(
             CourseNode.course_id == course_id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
     )
     completed_count = completed_result.scalar()
@@ -209,7 +210,7 @@ async def get_course_detail(
             {
                 "id": node.id,
                 "node_id": node.node_id,
-                "type": node.type.value if hasattr(node.type, 'value') else node.type,
+                "type": get_enum_value(node.type),
                 "title": node.title,
                 "sequence": node.sequence,
                 "parent_id": node.parent_id
@@ -417,15 +418,23 @@ async def delete_course(
         )
         logger.info("Deleted course_nodes")
 
-        # Delete course_packages record
+        # Delete course_packages record (table may not exist in some deployments)
         try:
-            await db.execute(
-                text("DELETE FROM course_packages WHERE course_id = :course_id"),
-                {"course_id": course_id}
+            # First check if table exists
+            table_check = await db.execute(
+                text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'course_packages')")
             )
-            logger.info("Deleted course_packages")
+            if table_check.scalar():
+                await db.execute(
+                    text("DELETE FROM course_packages WHERE course_id = :course_id"),
+                    {"course_id": course_id}
+                )
+                logger.info("Deleted course_packages")
+            else:
+                logger.info("course_packages table does not exist, skipping")
         except Exception as e:
             logger.warning(f"Failed to delete course_packages: {e}")
+            # Don't let this fail the whole transaction
 
         # Reset studio_packages.course_id to NULL and status to draft
         try:
@@ -559,7 +568,7 @@ async def get_course_statistics(
             .select_from(LearningProgress)
             .where(
                 LearningProgress.node_id == node.id,
-                LearningProgress.status == NodeStatus.COMPLETED
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED)
             )
         )
         completed = completed_result.scalar()
@@ -576,7 +585,7 @@ async def get_course_statistics(
         node_completion_rates.append({
             "node_id": node.node_id,
             "title": node.title,
-            "type": node.type.value,
+            "type": get_enum_value(node.type),
             "started": started,
             "completed": completed,
             "completion_rate": round(completion_rate, 2)
@@ -657,7 +666,7 @@ async def list_course_nodes(
             {
                 "id": node.id,
                 "node_id": node.node_id,
-                "type": node.type.value if hasattr(node.type, 'value') else node.type,
+                "type": get_enum_value(node.type),
                 "component_id": node.component_id,
                 "title": node.title,
                 "description": node.description,
@@ -712,7 +721,7 @@ async def get_node_detail(
         .select_from(LearningProgress)
         .where(
             LearningProgress.node_id == node.id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
     )
     completed = completed_count_result.scalar()
@@ -720,7 +729,7 @@ async def get_node_detail(
     return {
         "id": node.id,
         "node_id": node.node_id,
-        "type": node.type.value,
+        "type": get_enum_value(node.type),
         "component_id": node.component_id,
         "title": node.title,
         "description": node.description,
@@ -797,7 +806,7 @@ async def create_node(
     return {
         "id": node.id,
         "node_id": node.node_id,
-        "type": node.type.value,
+        "type": get_enum_value(node.type),
         "component_id": node.component_id,
         "title": node.title,
         "description": node.description,
@@ -860,7 +869,7 @@ async def update_course_node(
     return {
         "id": node.id,
         "node_id": node.node_id,
-        "type": node.type.value,
+        "type": get_enum_value(node.type),
         "component_id": node.component_id,
         "title": node.title,
         "description": node.description,
@@ -917,7 +926,7 @@ async def update_node(
     return {
         "id": node.id,
         "node_id": node.node_id,
-        "type": node.type.value,
+        "type": get_enum_value(node.type),
         "component_id": node.component_id,
         "title": node.title,
         "description": node.description,

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from app.db.session import get_db
 from app.models.models import User, UserCourse, LearningProgress, LearningStatistics, Achievement, NodeStatus, UserProfile
 from app.core.security import get_current_admin_user
+from app.core.utils import status_equals
 from app.services.user_profile_service import UserProfileService
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
@@ -171,7 +172,7 @@ async def list_users(
     if user_ids:
         progress_query = select(
             LearningProgress.user_id,
-            func.count(LearningProgress.id).filter(LearningProgress.status == NodeStatus.COMPLETED).label('completed'),
+            func.count(LearningProgress.id).filter(status_equals(LearningProgress.status, NodeStatus.COMPLETED)).label('completed'),
             func.sum(LearningProgress.time_spent_seconds).label('total_time'),
             func.max(LearningProgress.last_accessed).label('last_activity')
         ).where(LearningProgress.user_id.in_(user_ids)).group_by(LearningProgress.user_id)
@@ -257,7 +258,7 @@ async def get_user_detail(
         ).where(
             CourseNode.course_id == course.id,
             LearningProgress.user_id == user_id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
         completed_nodes_result = await db.execute(completed_nodes_query)
         completed_nodes = completed_nodes_result.scalar()
@@ -298,7 +299,7 @@ async def get_user_detail(
 
     completed_nodes_query = select(func.count()).select_from(LearningProgress).where(
         LearningProgress.user_id == user_id,
-        LearningProgress.status == NodeStatus.COMPLETED
+        status_equals(LearningProgress.status, NodeStatus.COMPLETED)
     )
     completed_nodes_result = await db.execute(completed_nodes_query)
     total_completed_nodes = completed_nodes_result.scalar()
@@ -485,7 +486,7 @@ async def get_user_statistics(
         ).where(
             CourseNode.course_id == course.id,
             LearningProgress.user_id == user_id,
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
         completed_nodes_result = await db.execute(completed_nodes_query)
         completed_nodes = completed_nodes_result.scalar()

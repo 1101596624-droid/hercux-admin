@@ -4,7 +4,7 @@ Provides comprehensive analytics data for the admin dashboard
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, case, extract, distinct
+from sqlalchemy import select, func, and_, case, extract, distinct, cast, String
 from typing import Optional
 from datetime import datetime, timedelta, timezone, date
 
@@ -14,6 +14,7 @@ from app.models.models import (
     Course, CourseNode, ChatHistory, NodeStatus, TokenUsage
 )
 from app.core.security import get_current_admin_user
+from app.core.utils import status_equals, status_in
 
 router = APIRouter()
 
@@ -101,10 +102,10 @@ async def get_analytics_overview(
     )
     published_courses = published_courses_result.scalar() or 0
 
-    # Average completion rate
+    # Average completion rate - use string values for comparison
     completion_result = await db.execute(
         select(func.avg(LearningProgress.completion_percentage)).where(
-            LearningProgress.status.in_([NodeStatus.IN_PROGRESS, NodeStatus.COMPLETED])
+            cast(LearningProgress.status, String).in_([NodeStatus.IN_PROGRESS.value, NodeStatus.COMPLETED.value])
         )
     )
     avg_completion = completion_result.scalar() or 0
@@ -281,7 +282,7 @@ async def get_learning_funnel(
     # Users who completed at least one node
     completed_node_users_result = await db.execute(
         select(func.count(distinct(LearningProgress.user_id))).where(
-            LearningProgress.status == NodeStatus.COMPLETED
+            status_equals(LearningProgress.status, NodeStatus.COMPLETED)
         )
     )
     completed_node_users = completed_node_users_result.scalar() or 0

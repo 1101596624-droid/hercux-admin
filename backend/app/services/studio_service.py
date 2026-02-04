@@ -16,6 +16,7 @@ from app.services.gemini_service import gemini_service
 from app.services.storage_service import storage_service
 from app.services.studio.templates import get_template, ALL_TEMPLATES
 from app.services.studio.sdl_compiler import SDLCompiler, SDLValidator, SDLAutoFixer
+from app.services.studio.validators import validate_simulator_spec, get_fix_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -829,6 +830,9 @@ function update(ctx) {{
             lesson["title"] = lesson.get("title", lesson_title)
             lesson["order"] = lesson_index
             lesson["total_steps"] = len(script)
+
+            # 验证并修复模拟器内容
+            lesson = self._validate_and_fix_simulators(lesson)
 
             logger.info(f"Successfully parsed lesson {lesson_index + 1} with {len(script)} steps")
             return lesson
@@ -1693,17 +1697,34 @@ function update(ctx) {{
                         if image_info:
                             diagram_spec["image_url"] = image_info["file_url"]
                             diagram_spec["image_generated"] = True
-                            step["diagram_spec"] = diagram_spec
                             logger.info(f"Image generated and saved: {image_info['file_url']}")
+                        else:
+                            logger.warning(f"Failed to save image for: {step_title}")
+                            diagram_spec["image_url"] = None
+                            diagram_spec["image_generated"] = False
                     else:
                         logger.warning(f"Failed to generate image for: {step_title}")
                         diagram_spec["image_url"] = None
                         diagram_spec["image_generated"] = False
 
                 except Exception as e:
-                    logger.error(f"Error generating image: {e}")
+                    logger.error(f"Error generating image for {step_title}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     diagram_spec["image_url"] = None
                     diagram_spec["image_generated"] = False
+
+                # 确保更新 step 中的 diagram_spec（无论成功还是失败）
+                step["diagram_spec"] = diagram_spec
+        else:
+            # 如果没有 diagram_spec，创建一个默认的
+            logger.warning(f"No diagram_spec found for illustrated_content: {step_title}, creating default")
+            step["diagram_spec"] = {
+                "type": "static_diagram",
+                "description": step_title,
+                "image_url": None,
+                "image_generated": False
+            }
 
         return step
 
@@ -1711,9 +1732,20 @@ function update(ctx) {{
         self,
         image_data: bytes,
         filename: str,
-        category: str = "images"
+        category: str = "images",
+        target_width: int = 800,
+        target_height: int = 600
     ) -> Optional[Dict[str, Any]]:
-        """保存生成的图片"""
+        """
+        保存生成的图片，自动转换格式并裁剪到目标尺寸
+
+        Args:
+            image_data: 图片二进制数据
+            filename: 文件名
+            category: 存储类别
+            target_width: 目标宽度
+            target_height: 目标高度
+        """
         try:
             from PIL import Image
             import io
@@ -1722,7 +1754,7 @@ function update(ctx) {{
             # 打开图片
             image = Image.open(io.BytesIO(image_data))
 
-            # 转换为 RGB
+            # 转换为 RGB (处理 RGBA、P 等模式)
             if image.mode == "RGBA":
                 background = Image.new("RGB", image.size, (255, 255, 255))
                 background.paste(image, mask=image.split()[3])
@@ -1730,25 +1762,28 @@ function update(ctx) {{
             elif image.mode != "RGB":
                 image = image.convert("RGB")
 
+            # 智能裁剪到目标比例
+            image = self._smart_crop_resize(image, target_width, target_height)
+
             # 确保目录存在
             storage_dir = storage_service.directories.get(category, storage_service.directories["images"])
             storage_dir.mkdir(parents=True, exist_ok=True)
 
-            # 生成唯一文件名
+            # 生成唯一文件名 (统一使用 .jpg 格式)
             unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
-            if not unique_filename.endswith(('.jpg', '.jpeg', '.png')):
+            if not unique_filename.endswith('.jpg'):
                 unique_filename = unique_filename.rsplit('.', 1)[0] + '.jpg'
 
             file_path = storage_dir / unique_filename
 
-            # 保存图片
-            image.save(file_path, "JPEG", quality=90, optimize=True)
+            # 保存为 JPEG 格式，优化质量和大小
+            image.save(file_path, "JPEG", quality=85, optimize=True)
 
-            # 返回文件信息
+            # 返回文件信息 (使用 /upload/ 前缀匹配静态文件挂载路径)
             return {
                 "filename": unique_filename,
                 "file_path": str(file_path),
-                "file_url": f"/media/{category}/{unique_filename}",
+                "file_url": f"/upload/{category}/{unique_filename}",
                 "width": image.size[0],
                 "height": image.size[1]
             }
@@ -1756,6 +1791,19 @@ function update(ctx) {{
         except Exception as e:
             logger.error(f"Failed to save generated image: {e}")
             return None
+
+    def _smart_crop_resize(self, image, target_width: int, target_height: int):
+        """
+        智能调整图片大小（不裁剪，保持完整内容）
+
+        使用拉伸/压缩方式适应目标尺寸，不丢失任何内容
+        """
+        from PIL import Image
+
+        # 直接缩放到目标尺寸（拉伸/压缩以适应画布）
+        image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+        return image
 
     def _mark_video_pending(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """标记视频为待处理状态"""
@@ -3009,6 +3057,291 @@ function update(ctx) {{
                 "type": "sequential"
             })
         return edges
+
+    def _validate_and_fix_simulators(self, lesson: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        验证并修复课时中的模拟器内容
+
+        检查每个 simulator 类型的步骤，验证其内容是否完整，
+        如果有问题则记录警告并尝试补充默认值
+        """
+        script = lesson.get("script", [])
+        if not script:
+            return lesson
+
+        fixed_script = []
+        for step in script:
+            if step.get("type") == "simulator":
+                simulator_spec = step.get("simulator_spec", {})
+
+                # 验证模拟器规格
+                is_valid, result = validate_simulator_spec(simulator_spec)
+
+                if not is_valid:
+                    logger.warning(f"Simulator validation failed for step {step.get('step_id')}: {result.errors}")
+
+                    # 尝试修复常见问题
+                    simulator_spec = self._fix_simulator_spec(simulator_spec, result)
+                    step["simulator_spec"] = simulator_spec
+
+                    # 添加验证警告到步骤元数据
+                    step["_validation_warnings"] = result.warnings
+                    step["_validation_suggestions"] = result.suggestions
+
+                elif result.warnings:
+                    logger.info(f"Simulator warnings for step {step.get('step_id')}: {result.warnings}")
+                    step["_validation_warnings"] = result.warnings
+
+            fixed_script.append(step)
+
+        lesson["script"] = fixed_script
+        return lesson
+
+    def _fix_simulator_spec(self, spec: Dict[str, Any], result) -> Dict[str, Any]:
+        """
+        尝试修复模拟器规格中的常见问题
+        """
+        sim_type = spec.get("type", "custom")
+
+        # 确保基础字段存在
+        if not spec.get("simulator_id"):
+            spec["simulator_id"] = f"SIM-{uuid.uuid4().hex[:8]}"
+
+        if not spec.get("name"):
+            spec["name"] = spec.get("title", "交互模拟器")
+
+        if not spec.get("description") or len(spec.get("description", "")) < 10:
+            spec["description"] = f"这是一个{spec.get('name', '交互')}模拟器，帮助你理解相关概念。"
+
+        if not spec.get("instructions"):
+            spec["instructions"] = ["观察模拟器的变化", "尝试调整参数", "思考变量之间的关系"]
+
+        # 根据类型修复特定字段
+        if sim_type == "custom":
+            self._fix_custom_simulator(spec)
+        elif sim_type == "timeline":
+            self._fix_timeline_simulator(spec)
+        elif sim_type == "decision":
+            self._fix_decision_simulator(spec)
+        elif sim_type == "comparison":
+            self._fix_comparison_simulator(spec)
+        elif sim_type == "concept-map":
+            self._fix_concept_map_simulator(spec)
+
+        return spec
+
+    def _fix_custom_simulator(self, spec: Dict[str, Any]):
+        """修复理科模拟器"""
+        inputs = spec.get("inputs", [])
+        outputs = spec.get("outputs", [])
+
+        # 确保至少有一个输入
+        if not inputs:
+            spec["inputs"] = [{
+                "id": "param1",
+                "name": "param1",
+                "label": "参数1",
+                "type": "slider",
+                "defaultValue": 50,
+                "min": 0,
+                "max": 100,
+                "step": 1,
+                "unit": ""
+            }]
+
+        # 确保至少有一个输出
+        if not outputs:
+            spec["outputs"] = [{
+                "id": "result1",
+                "name": "result1",
+                "label": "结果",
+                "type": "number",
+                "unit": "",
+                "formula": "input.param1 * 2"
+            }]
+
+        # 修复输入字段
+        for inp in spec.get("inputs", []):
+            if not inp.get("id"):
+                inp["id"] = inp.get("name", f"input_{uuid.uuid4().hex[:4]}")
+            if not inp.get("name"):
+                inp["name"] = inp.get("id")
+            if not inp.get("label"):
+                inp["label"] = inp.get("name", "参数")
+            if not inp.get("type"):
+                inp["type"] = "slider"
+            if inp.get("min") is None:
+                inp["min"] = 0
+            if inp.get("max") is None:
+                inp["max"] = 100
+
+        # 修复输出字段
+        for out in spec.get("outputs", []):
+            if not out.get("id"):
+                out["id"] = out.get("name", f"output_{uuid.uuid4().hex[:4]}")
+            if not out.get("name"):
+                out["name"] = out.get("id")
+            if not out.get("label"):
+                out["label"] = out.get("name", "结果")
+            if not out.get("formula"):
+                # 尝试生成一个简单的公式
+                first_input = spec.get("inputs", [{}])[0]
+                input_name = first_input.get("name", "param1")
+                out["formula"] = f"input.{input_name}"
+
+    def _fix_timeline_simulator(self, spec: Dict[str, Any]):
+        """修复时间线模拟器"""
+        timeline = spec.get("timeline", {})
+        if not timeline:
+            spec["timeline"] = {
+                "title": spec.get("name", "时间线"),
+                "events": []
+            }
+            timeline = spec["timeline"]
+
+        if not timeline.get("title"):
+            timeline["title"] = spec.get("name", "时间线")
+
+        events = timeline.get("events", [])
+        if not events:
+            timeline["events"] = [
+                {"id": "e1", "year": "阶段1", "title": "事件1", "description": "事件描述", "category": "默认", "highlight": True},
+                {"id": "e2", "year": "阶段2", "title": "事件2", "description": "事件描述", "category": "默认", "highlight": False},
+                {"id": "e3", "year": "阶段3", "title": "事件3", "description": "事件描述", "category": "默认", "highlight": False},
+            ]
+
+        # 修复每个事件
+        for i, event in enumerate(timeline.get("events", [])):
+            if not event.get("id"):
+                event["id"] = f"e{i+1}"
+            if not event.get("year"):
+                event["year"] = f"阶段{i+1}"
+            if not event.get("title"):
+                event["title"] = f"事件{i+1}"
+            if not event.get("description"):
+                event["description"] = "事件描述待补充"
+
+    def _fix_decision_simulator(self, spec: Dict[str, Any]):
+        """修复决策模拟器"""
+        decision = spec.get("decision", {})
+        if not decision:
+            spec["decision"] = {
+                "title": spec.get("name", "决策情景"),
+                "scenario": "请根据情景做出选择",
+                "question": "你会如何选择？",
+                "options": [],
+                "analysis": ""
+            }
+            decision = spec["decision"]
+
+        if not decision.get("title"):
+            decision["title"] = spec.get("name", "决策情景")
+        if not decision.get("scenario"):
+            decision["scenario"] = "请根据情景做出选择"
+        if not decision.get("question"):
+            decision["question"] = "你会如何选择？"
+
+        options = decision.get("options", [])
+        if len(options) < 2:
+            decision["options"] = [
+                {"id": "opt1", "label": "选项A", "result": "选择A的结果", "isOptimal": True},
+                {"id": "opt2", "label": "选项B", "result": "选择B的结果", "isOptimal": False},
+                {"id": "opt3", "label": "选项C", "result": "选择C的结果", "isOptimal": False},
+            ]
+
+        # 确保有最优选项
+        has_optimal = any(opt.get("isOptimal") for opt in decision.get("options", []))
+        if not has_optimal and decision.get("options"):
+            decision["options"][0]["isOptimal"] = True
+
+        # 修复每个选项
+        for i, opt in enumerate(decision.get("options", [])):
+            if not opt.get("id"):
+                opt["id"] = f"opt{i+1}"
+            if not opt.get("label"):
+                opt["label"] = f"选项{chr(65+i)}"
+            if not opt.get("result"):
+                opt["result"] = f"选择{opt.get('label', '')}的结果"
+
+    def _fix_comparison_simulator(self, spec: Dict[str, Any]):
+        """修复对比模拟器"""
+        comparison = spec.get("comparison", {})
+        if not comparison:
+            spec["comparison"] = {
+                "title": spec.get("name", "对比分析"),
+                "dimensions": ["维度1", "维度2", "维度3"],
+                "items": [],
+                "conclusion": ""
+            }
+            comparison = spec["comparison"]
+
+        if not comparison.get("title"):
+            comparison["title"] = spec.get("name", "对比分析")
+
+        dimensions = comparison.get("dimensions", [])
+        if len(dimensions) < 2:
+            comparison["dimensions"] = ["维度1", "维度2", "维度3"]
+            dimensions = comparison["dimensions"]
+
+        items = comparison.get("items", [])
+        if len(items) < 2:
+            comparison["items"] = [
+                {"id": "item1", "name": "对象A", "attributes": {d: f"A的{d}" for d in dimensions}},
+                {"id": "item2", "name": "对象B", "attributes": {d: f"B的{d}" for d in dimensions}},
+            ]
+
+        # 修复每个对比项
+        for i, item in enumerate(comparison.get("items", [])):
+            if not item.get("id"):
+                item["id"] = f"item{i+1}"
+            if not item.get("name"):
+                item["name"] = f"对象{chr(65+i)}"
+            if not item.get("attributes"):
+                item["attributes"] = {d: f"{item.get('name', '')}的{d}" for d in dimensions}
+
+    def _fix_concept_map_simulator(self, spec: Dict[str, Any]):
+        """修复概念图模拟器"""
+        concept_map = spec.get("concept_map", {})
+        if not concept_map:
+            spec["concept_map"] = {
+                "title": spec.get("name", "概念关系图"),
+                "nodes": [],
+                "relations": []
+            }
+            concept_map = spec["concept_map"]
+
+        if not concept_map.get("title"):
+            concept_map["title"] = spec.get("name", "概念关系图")
+
+        nodes = concept_map.get("nodes", [])
+        if len(nodes) < 3:
+            concept_map["nodes"] = [
+                {"id": "n1", "label": "核心概念", "description": "核心概念描述", "category": "核心"},
+                {"id": "n2", "label": "相关概念1", "description": "相关概念描述", "category": "相关"},
+                {"id": "n3", "label": "相关概念2", "description": "相关概念描述", "category": "相关"},
+                {"id": "n4", "label": "应用概念", "description": "应用概念描述", "category": "应用"},
+            ]
+
+        relations = concept_map.get("relations", [])
+        if len(relations) < 2:
+            concept_map["relations"] = [
+                {"from_id": "n1", "to": "n2", "label": "包含"},
+                {"from_id": "n1", "to": "n3", "label": "包含"},
+                {"from_id": "n2", "to": "n4", "label": "应用于"},
+            ]
+
+        # 修复每个节点
+        for i, node in enumerate(concept_map.get("nodes", [])):
+            if not node.get("id"):
+                node["id"] = f"n{i+1}"
+            if not node.get("label"):
+                node["label"] = f"概念{i+1}"
+
+        # 修复每个关系
+        for i, rel in enumerate(concept_map.get("relations", [])):
+            # 处理 from/from_id 字段名差异
+            if not rel.get("from_id") and rel.get("from"):
+                rel["from_id"] = rel.pop("from")
 
     def _create_fallback_lesson(
         self,

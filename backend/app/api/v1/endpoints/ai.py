@@ -11,6 +11,7 @@ from app.schemas.schemas import (
 from app.services.ai_service import AIService
 from app.models.models import CourseNode, User
 from app.core.security import get_current_user
+from app.core.utils import get_enum_value
 
 router = APIRouter()
 
@@ -54,19 +55,20 @@ async def ai_guide_chat(
 
     # Generate suggestions based on node type
     suggestions = []
-    if node.type.value == "simulator":
+    node_type = get_enum_value(node.type)
+    if node_type == "simulator":
         suggestions = [
             "这个参数如果改变会发生什么？",
             "为什么会出现这个结果？",
             "能解释一下背后的原理吗？"
         ]
-    elif node.type.value == "video":
+    elif node_type == "video":
         suggestions = [
             "能再解释一下这个概念吗？",
             "这个在实际中如何应用？",
             "有什么常见的误区？"
         ]
-    elif node.type.value == "quiz":
+    elif node_type == "quiz":
         suggestions = [
             "为什么这个答案是正确的？",
             "其他选项错在哪里？",

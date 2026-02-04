@@ -44,6 +44,7 @@ class User(Base):
     is_active = Column(Integer, default=1)
     is_premium = Column(Integer, default=0)
     is_admin = Column(Integer, default=0)  # Admin role flag
+    admin_level = Column(Integer, default=0)  # 管理员等级: 0=非管理员, 1=超级管理员, 2=高级管理员, 3=普通管理员
 
     # 使用统计汇总字段
     total_usage_seconds = Column(Integer, default=0)  # 累计使用时长（秒）
@@ -325,6 +326,7 @@ class BadgeConfig(Base):
     name = Column(String(100), nullable=False)
     name_en = Column(String(100))
     icon = Column(String(10), nullable=False)  # emoji
+    icon_url = Column(String(500))  # 自定义图标URL
     description = Column(Text)
 
     category = Column(Enum(BadgeCategory, values_callable=lambda x: [e.value for e in x]), nullable=False)
@@ -333,6 +335,9 @@ class BadgeConfig(Base):
 
     # 解锁条件 JSON: {"type": "counter", "metric": "nodes_completed", "target": 10}
     condition = Column(JSON, nullable=False)
+
+    # 解锁动画代码 (JavaScript/CSS)
+    unlock_animation = Column(Text)
 
     is_active = Column(Integer, default=1)
     sort_order = Column(Integer, default=0)

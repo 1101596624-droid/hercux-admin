@@ -14,8 +14,21 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * 获取服务器基础 URL（不含 /api 后缀）
+ */
+function getServerBaseUrl(): string {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://106.14.180.66:8001';
+  // 移除 /api 或 /api/v1 后缀，获取纯服务器地址
+  return apiUrl.replace(/\/api(\/v\d+)?$/, '');
+}
+
+/**
  * 获取完整的媒体文件 URL
  * 将相对路径转换为完整的服务器 URL
+ *
+ * 后端返回的 URL 格式：/upload/{category}/{filename}
+ * 静态文件挂载路径：/upload -> uploads 目录
+ *
  * @param url - 媒体文件 URL（可能是相对路径或完整 URL）
  * @returns 完整的 URL
  */
@@ -27,16 +40,20 @@ export function getMediaUrl(url: string | undefined | null): string {
     return url;
   }
 
+  const serverBaseUrl = getServerBaseUrl();
+
   // 移除开头的斜杠
   const cleanPath = url.startsWith('/') ? url.slice(1) : url;
 
-  // 如果是 media 路径，转换为 upload/media 路径
+  // 如果是旧的 media 路径格式，转换为 upload 路径
+  // /media/diagrams/xxx.jpg -> /upload/diagrams/xxx.jpg
   if (cleanPath.startsWith('media/')) {
-    return `${API_BASE_URL}/upload/${cleanPath}`;
+    const pathWithoutMedia = cleanPath.replace('media/', '');
+    return `${serverBaseUrl}/upload/${pathWithoutMedia}`;
   }
 
-  // 拼接服务器基础 URL
-  return `${API_BASE_URL}/${cleanPath}`;
+  // 直接拼接服务器基础 URL
+  return `${serverBaseUrl}/${cleanPath}`;
 }
 
 /**

@@ -13,6 +13,31 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
 
+  // 安全头配置 - 允许从后端服务器加载图片
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob: http://106.14.180.66:8001 https://106.14.180.66:8001 http://localhost:* https://*.hiapi.online https://*.aipor.cc",
+              "font-src 'self' data:",
+              "connect-src 'self' http://106.14.180.66:8001 https://106.14.180.66:8001 http://localhost:* ws://localhost:* wss://localhost:* https://*.hiapi.online https://*.aipor.cc",
+              "media-src 'self' http://106.14.180.66:8001 https://106.14.180.66:8001 blob:",
+              "frame-src 'self' blob:",
+              "worker-src 'self' blob:",
+            ].join('; '),
+          },
+        ],
+      },
+    ];
+  },
+
   // 性能优化配置
 
   // 1. 编译器优化

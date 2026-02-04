@@ -532,7 +532,7 @@ async def list_packages(
                 title=p.title,
                 description=p.description or "",
                 style=p.style or "default",
-                status=p.status.value if p.status else "draft",
+                status=(p.status.value if hasattr(p.status, 'value') else p.status) if p.status else "draft",
                 total_nodes=p.total_lessons or 0,
                 estimated_hours=p.estimated_hours or 0,
                 created_at=p.created_at.isoformat() if p.created_at else "",

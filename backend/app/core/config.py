@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_AUTH_TOKEN: str = ""  # 兼容 hercux 的配置名
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"  # Claude 模型名称
 
     @property
     def anthropic_key(self) -> str:
@@ -49,10 +50,12 @@ class Settings(BaseSettings):
     # DeepSeek AI
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-chat"  # DeepSeek 模型名称
 
     # Gemini AI (图片生成)
     GEMINI_API_KEY: str = ""
     GEMINI_BASE_URL: str = "https://hiapi.online/v1"
+    GEMINI_MODEL: str = "gemini-3-pro-image-preview-2k"  # Gemini 模型名称
 
     # AWS S3
     AWS_ACCESS_KEY_ID: str = ""

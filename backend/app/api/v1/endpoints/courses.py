@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.models.models import Course, CourseNode, LearningProgress, DifficultyLevel, User, NodeStatus
 from app.schemas.schemas import CourseResponse, CourseDetail
 from app.core.security import get_current_user
+from app.core.utils import status_equals
 
 
 def parse_tags(tags_value) -> list:
@@ -243,7 +244,7 @@ async def get_recommendations(
             Course.difficulty,
             func.count(LearningProgress.id).label("total_nodes"),
             func.sum(
-                case((LearningProgress.status == NodeStatus.COMPLETED, 1), else_=0)
+                case((status_equals(LearningProgress.status, NodeStatus.COMPLETED), 1), else_=0)
             ).label("completed_nodes")
         ).select_from(Course).join(
             CourseNode, Course.id == CourseNode.course_id
@@ -387,7 +388,7 @@ async def get_course_detail(
         LearningProgress.node_id.in_(
             select(CourseNode.id).where(CourseNode.course_id == course_id)
         ),
-        LearningProgress.status == "completed"
+        status_equals(LearningProgress.status, NodeStatus.COMPLETED)
     )
     completed_nodes = await db.scalar(completed_query) or 0
 
@@ -588,7 +589,7 @@ async def get_course_progress(
         LearningProgress.node_id.in_(
             select(CourseNode.id).where(CourseNode.course_id == course_id)
         ),
-        LearningProgress.status == NodeStatus.COMPLETED
+        status_equals(LearningProgress.status, NodeStatus.COMPLETED)
     )
     completed_nodes = await db.scalar(completed_query) or 0
 
@@ -598,7 +599,7 @@ async def get_course_progress(
         LearningProgress.node_id.in_(
             select(CourseNode.id).where(CourseNode.course_id == course_id)
         ),
-        LearningProgress.status == NodeStatus.IN_PROGRESS
+        status_equals(LearningProgress.status, NodeStatus.IN_PROGRESS)
     )
     in_progress_nodes = await db.scalar(in_progress_query) or 0
 

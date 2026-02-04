@@ -193,11 +193,11 @@ export default function CourseDetailPage() {
       </div>
 
       {/* Tags */}
-      {course.tags && course.tags.length > 0 && (
+      {course.tags && (Array.isArray(course.tags) ? course.tags : []).length > 0 && (
         <div className="bg-white rounded-lg shadow-sm p-6 border border-slate-200 mb-8">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">标签</h2>
           <div className="flex flex-wrap gap-2">
-            {course.tags.map((tag, index) => (
+            {(Array.isArray(course.tags) ? course.tags : (typeof course.tags === 'string' ? JSON.parse(course.tags) : [])).map((tag: string, index: number) => (
               <span
                 key={index}
                 className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded-full"

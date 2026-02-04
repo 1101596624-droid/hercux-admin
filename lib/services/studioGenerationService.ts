@@ -11,6 +11,7 @@ class StudioGenerationService {
   private cancelFn: (() => void) | null = null;
   private isRunning = false;
   private isPaused = false;
+  private isPausingOrCancelling = false;  // 标记是否正在主动暂停/取消
 
   /**
    * 开始生成课程
@@ -120,6 +121,11 @@ class StudioGenerationService {
           this.cancelFn = null;
         },
         onError: (message) => {
+          // 如果是主动暂停/取消，忽略错误
+          if (this.isPausingOrCancelling) {
+            console.log('[GenerationService] Ignoring error during pause/cancel:', message);
+            return;
+          }
           const s = useStudioStore.getState();
           s.setStreamStatus(`错误: ${message}`);
           s.setGenerationError(message);
@@ -139,11 +145,14 @@ class StudioGenerationService {
    * 取消生成
    */
   cancel() {
+    this.isPausingOrCancelling = true;
     if (this.cancelFn) {
       this.cancelFn();
       this.cancelFn = null;
     }
     this.isRunning = false;
+    // 延迟重置标记，确保错误回调被忽略
+    setTimeout(() => { this.isPausingOrCancelling = false; }, 100);
 
     const store = useStudioStore.getState();
     store.setIsGenerating(false);
@@ -245,6 +254,11 @@ class StudioGenerationService {
             this.cancelFn = null;
           },
           onError: (message) => {
+            // 如果是主动暂停/取消，忽略错误
+            if (this.isPausingOrCancelling) {
+              console.log('[GenerationService] Ignoring error during pause/cancel:', message);
+              return;
+            }
             const s = useStudioStore.getState();
             s.setStreamStatus(`错误: ${message}`);
             s.setGenerationError(message);
@@ -282,11 +296,14 @@ class StudioGenerationService {
     if (this.isRunning && !this.isPaused) {
       this.isPaused = true;
       this.isRunning = false;
+      this.isPausingOrCancelling = true;
       // 取消当前流式请求
       if (this.cancelFn) {
         this.cancelFn();
         this.cancelFn = null;
       }
+      // 延迟重置标记，确保错误回调被忽略
+      setTimeout(() => { this.isPausingOrCancelling = false; }, 100);
       useStudioStore.setState({ isPaused: true, isGenerating: false });
       console.log('[GenerationService] Paused - request cancelled, progress saved');
     }

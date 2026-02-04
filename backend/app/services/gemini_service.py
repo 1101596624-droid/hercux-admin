@@ -28,10 +28,8 @@ class GeminiService:
     def __init__(self):
         self.api_key = settings.GEMINI_API_KEY
         self.base_url = settings.GEMINI_BASE_URL.rstrip('/')
-        # 图片生成模型 - 只使用 Gemini 3 Pro
-        self.image_models = [
-            "gemini-3-pro-image-preview",       # Gemini 3 Pro 图片生成 (最强)
-        ]
+        # 图片生成模型 - 从配置读取
+        self.image_model = settings.GEMINI_MODEL
 
     async def generate_image(
         self,
@@ -57,25 +55,14 @@ class GeminiService:
         # 构建增强的 prompt
         enhanced_prompt = self._build_enhanced_prompt(prompt, style)
 
-        # 尝试 OpenAI 兼容格式 - 最多尝试2次，失败则跳过
-        fail_count = 0
-        max_failures = 2
-        for model in self.image_models:
-            if fail_count >= max_failures:
-                logger.warning(f"Image generation failed {max_failures} times, skipping...")
-                break
-            logger.info(f"Trying image generation with model: {model}")
-            result = await self._try_openai_image_format(enhanced_prompt, size, model)
-            if result:
-                return result
-            fail_count += 1
+        # 使用固定的模型生成图片
+        logger.info(f"Generating image with model: {self.image_model}")
+        result = await self._try_openai_image_format(enhanced_prompt, size, self.image_model)
+        if result:
+            return result
 
-        # 如果已经失败2次，直接返回 None，不再尝试慢速方式
-        if fail_count >= max_failures:
-            logger.error(f"Image generation failed after {fail_count} attempts, continuing without image")
-            return None
-
-        # 尝试 chat completion 方式生成图片 (某些模型支持)
+        # 如果失败，尝试 chat completion 方式
+        logger.warning(f"OpenAI format failed, trying chat completion format")
         result = await self._try_chat_image_format(enhanced_prompt)
         if result:
             return result
@@ -148,9 +135,9 @@ class GeminiService:
                     "Content-Type": "application/json"
                 }
 
-                # 使用支持图片生成的模型
+                # 使用固定的模型
                 payload = {
-                    "model": "gemini-2.5-flash-image",
+                    "model": self.image_model,
                     "messages": [
                         {
                             "role": "user",

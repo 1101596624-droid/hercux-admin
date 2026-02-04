@@ -1,0 +1,160 @@
+{
+  "category": "quiz",
+  "description": "做题家 - 测验和模拟器相关勋章 (14个)",
+  "badges": [
+    {
+      "id": "first_quiz",
+      "name": "初试牛刀",
+      "name_en": "First Quiz",
+      "icon": "📝",
+      "description": "完成第一次测验",
+      "category": "quiz",
+      "rarity": "common",
+      "points": 10,
+      "condition": {"type": "counter", "metric": "completed_quizzes", "target": 1}
+    },
+    {
+      "id": "quiz_5",
+      "name": "测验新手",
+      "name_en": "Quiz Novice",
+      "icon": "✍️",
+      "description": "完成5次测验",
+      "category": "quiz",
+      "rarity": "common",
+      "points": 20,
+      "condition": {"type": "counter", "metric": "completed_quizzes", "target": 5}
+    },
+    {
+      "id": "quiz_10",
+      "name": "测验达人",
+      "name_en": "Quiz Expert",
+      "icon": "📋",
+      "description": "完成10次测验",
+      "category": "quiz",
+      "rarity": "common",
+      "points": 30,
+      "condition": {"type": "counter", "metric": "completed_quizzes", "target": 10}
+    },
+    {
+      "id": "quiz_25",
+      "name": "测验高手",
+      "name_en": "Quiz Master",
+      "icon": "🎯",
+      "description": "完成25次测验",
+      "category": "quiz",
+      "rarity": "rare",
+      "points": 50,
+      "condition": {"type": "counter", "metric": "completed_quizzes", "target": 25}
+    },
+    {
+      "id": "quiz_50",
+      "name": "测验专家",
+      "name_en": "Quiz Specialist",
+      "icon": "🏅",
+      "description": "完成50次测验",
+      "category": "quiz",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "counter", "metric": "completed_quizzes", "target": 50}
+    },
+    {
+      "id": "quiz_100",
+      "name": "百题斩",
+      "name_en": "Century Quizzer",
+      "icon": "💯",
+      "description": "完成100次测验",
+      "category": "quiz",
+      "rarity": "epic",
+      "points": 150,
+      "condition": {"type": "counter", "metric": "completed_quizzes", "target": 100}
+    },
+    {
+      "id": "quiz_200",
+      "name": "做题机器",
+      "name_en": "Quiz Machine",
+      "icon": "🤖",
+      "description": "完成200次测验",
+      "category": "quiz",
+      "rarity": "legendary",
+      "points": 300,
+      "condition": {"type": "counter", "metric": "completed_quizzes", "target": 200}
+    },
+    {
+      "id": "first_simulator",
+      "name": "模拟初体验",
+      "name_en": "First Simulation",
+      "icon": "🎮",
+      "description": "完成第一个模拟器",
+      "category": "quiz",
+      "rarity": "common",
+      "points": 15,
+      "condition": {"type": "counter", "metric": "completed_simulators", "target": 1}
+    },
+    {
+      "id": "simulator_5",
+      "name": "模拟新手",
+      "name_en": "Simulator Novice",
+      "icon": "🕹️",
+      "description": "完成5个模拟器",
+      "category": "quiz",
+      "rarity": "common",
+      "points": 30,
+      "condition": {"type": "counter", "metric": "completed_simulators", "target": 5}
+    },
+    {
+      "id": "simulator_10",
+      "name": "模拟达人",
+      "name_en": "Simulator Expert",
+      "icon": "🎲",
+      "description": "完成10个模拟器",
+      "category": "quiz",
+      "rarity": "rare",
+      "points": 50,
+      "condition": {"type": "counter", "metric": "completed_simulators", "target": 10}
+    },
+    {
+      "id": "simulator_25",
+      "name": "模拟高手",
+      "name_en": "Simulator Master",
+      "icon": "🎰",
+      "description": "完成25个模拟器",
+      "category": "quiz",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "counter", "metric": "completed_simulators", "target": 25}
+    },
+    {
+      "id": "simulator_50",
+      "name": "模拟专家",
+      "name_en": "Simulator Specialist",
+      "icon": "🔬",
+      "description": "完成50个模拟器",
+      "category": "quiz",
+      "rarity": "epic",
+      "points": 150,
+      "condition": {"type": "counter", "metric": "completed_simulators", "target": 50}
+    },
+    {
+      "id": "simulator_100",
+      "name": "模拟大师",
+      "name_en": "Simulator Grandmaster",
+      "icon": "🧪",
+      "description": "完成100个模拟器",
+      "category": "quiz",
+      "rarity": "epic",
+      "points": 200,
+      "condition": {"type": "counter", "metric": "completed_simulators", "target": 100}
+    },
+    {
+      "id": "simulator_legend",
+      "name": "模拟传奇",
+      "name_en": "Simulator Legend",
+      "icon": "⚗️",
+      "description": "完成200个模拟器",
+      "category": "quiz",
+      "rarity": "legendary",
+      "points": 400,
+      "condition": {"type": "counter", "metric": "completed_simulators", "target": 200}
+    }
+  ]
+}

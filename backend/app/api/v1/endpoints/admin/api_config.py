@@ -243,6 +243,16 @@ async def get_api_config():
             is_secret=False,
             is_configured=bool(settings.ANTHROPIC_BASE_URL)
         ),
+        APIConfigItem(
+            key="ANTHROPIC_MODEL",
+            name="Claude 模型名称",
+            description="Claude AI 使用的模型（如 claude-3-5-sonnet-20241022）",
+            category="claude",
+            value=settings.ANTHROPIC_MODEL,
+            masked_value=settings.ANTHROPIC_MODEL,
+            is_secret=False,
+            is_configured=bool(settings.ANTHROPIC_MODEL)
+        ),
     ]
     categories.append(APIConfigCategory(
         name="Claude AI (Anthropic)",
@@ -272,6 +282,16 @@ async def get_api_config():
             is_secret=False,
             is_configured=bool(settings.DEEPSEEK_BASE_URL)
         ),
+        APIConfigItem(
+            key="DEEPSEEK_MODEL",
+            name="DeepSeek 模型名称",
+            description="DeepSeek AI 使用的模型（如 deepseek-chat）",
+            category="deepseek",
+            value=settings.DEEPSEEK_MODEL,
+            masked_value=settings.DEEPSEEK_MODEL,
+            is_secret=False,
+            is_configured=bool(settings.DEEPSEEK_MODEL)
+        ),
     ]
     categories.append(APIConfigCategory(
         name="DeepSeek AI",
@@ -300,6 +320,16 @@ async def get_api_config():
             masked_value=settings.GEMINI_BASE_URL,
             is_secret=False,
             is_configured=bool(settings.GEMINI_BASE_URL)
+        ),
+        APIConfigItem(
+            key="GEMINI_MODEL",
+            name="Gemini 模型名称",
+            description="图片生成使用的模型（如 gemini-3-pro-image-preview-2k）",
+            category="gemini",
+            value=settings.GEMINI_MODEL,
+            masked_value=settings.GEMINI_MODEL,
+            is_secret=False,
+            is_configured=bool(settings.GEMINI_MODEL)
         ),
     ]
     categories.append(APIConfigCategory(
@@ -538,3 +568,79 @@ async def test_api_connection(category: str):
 
     else:
         return {"success": False, "message": f"不支持的测试类别: {category}"}
+
+
+@router.post("/api-config/restart-server")
+async def restart_server():
+    """
+    重启后端服务器
+
+    通过 Supervisor 重启 hercu-backend 服务
+    仅在服务器环境下有效
+
+    注意：由于是自我重启，使用后台进程执行，立即返回成功
+    """
+    import subprocess
+    import os
+
+    # 检查是否在服务器环境
+    server_env_path = Path("/www/wwwroot/hercu-backend/.env")
+    if not server_env_path.exists():
+        return {
+            "success": False,
+            "message": "此功能仅在服务器环境下可用。本地开发环境请手动重启服务。"
+        }
+
+    try:
+        # 使用 Supervisor 重启服务
+        supervisor_cmd = "/www/server/panel/pyenv/bin/supervisorctl"
+
+        # 检查 supervisor 是否存在
+        if not Path(supervisor_cmd).exists():
+            return {
+                "success": False,
+                "message": "Supervisor 未安装或路径不正确"
+            }
+
+        # 创建重启脚本并在后台执行
+        # 这样可以让当前请求先完成，然后再重启服务
+        restart_script = """
+#!/bin/bash
+sleep 2
+{supervisor_cmd} stop hercu-backend
+sleep 2
+# 清理可能残留的端口占用
+lsof -t -i:8001 | xargs -r kill -9 2>/dev/null
+sleep 1
+{supervisor_cmd} start hercu-backend
+""".format(supervisor_cmd=supervisor_cmd)
+
+        # 写入临时脚本
+        script_path = "/tmp/hercu_restart.sh"
+        with open(script_path, 'w') as f:
+            f.write(restart_script)
+        os.chmod(script_path, 0o755)
+
+        # 后台执行重启脚本
+        subprocess.Popen(
+            ["/bin/bash", script_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+
+        return {
+            "success": True,
+            "message": "重启命令已发送，服务将在 2-5 秒后重启，请稍后刷新页面"
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "message": "重启命令超时，请手动检查服务状态"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"重启失败: {str(e)}"
+        }

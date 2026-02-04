@@ -16,19 +16,18 @@ export default defineConfig({
   ],
   use: {
     baseURL: 'http://localhost:3001',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
   },
 
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'msedge',  // Use system Edge
+      },
     },
   ],
 

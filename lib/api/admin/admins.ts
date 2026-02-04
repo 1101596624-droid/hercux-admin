@@ -12,10 +12,23 @@ export interface AdminListItem {
   id: number;
   username: string;
   email: string;
+  full_name: string | null;
   level: AdminLevel;
   is_active: boolean;
   created_at: string;
-  last_login_at: string | null;
+  updated_at: string | null;
+}
+
+// 后端返回的管理员响应
+interface BackendAdminResponse {
+  id: number;
+  username: string;
+  email: string;
+  full_name: string | null;
+  admin_level: number;
+  is_active: number;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 // 管理员列表响应
@@ -27,19 +40,26 @@ export interface AdminListResponse {
   total_pages: number;
 }
 
+// 后端返回的列表响应
+interface BackendAdminListResponse {
+  items: BackendAdminResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 // 创建管理员请求
 export interface CreateAdminRequest {
   username: string;
   email: string;
   password: string;
+  full_name?: string;
   level: AdminLevel;
 }
 
 // 更新管理员请求
 export interface UpdateAdminRequest {
-  username?: string;
-  email?: string;
-  password?: string;
+  full_name?: string;
   level?: AdminLevel;
   is_active?: boolean;
 }
@@ -49,60 +69,49 @@ export interface AdminFilters {
   page?: number;
   page_size?: number;
   level?: AdminLevel;
-  is_active?: boolean;
   search?: string;
 }
 
-// 模拟数据存储 (实际应用中应该从后端获取)
-let mockAdmins: AdminListItem[] = [
-  {
-    id: 1,
-    username: 'superadmin',
-    email: 'super@hercux.com',
-    level: 1,
-    is_active: true,
-    created_at: '2024-01-01T00:00:00Z',
-    last_login_at: new Date().toISOString(),
-  },
-];
-
-let nextAdminId = 2;
+// 转换后端响应为前端格式
+function transformAdminResponse(admin: BackendAdminResponse): AdminListItem {
+  return {
+    id: admin.id,
+    username: admin.username,
+    email: admin.email,
+    full_name: admin.full_name,
+    level: admin.admin_level as AdminLevel,
+    is_active: admin.is_active === 1,
+    created_at: admin.created_at || '',
+    updated_at: admin.updated_at,
+  };
+}
 
 /**
  * 获取管理员列表
  */
 export async function getAdmins(filters: AdminFilters = {}): Promise<AdminListResponse> {
-  const { page = 1, page_size = 20, level, is_active, search } = filters;
+  const { page = 1, page_size = 20, level, search } = filters;
 
-  // 模拟筛选
-  let filtered = [...mockAdmins];
-
+  const params = new URLSearchParams();
+  params.append('page', page.toString());
+  params.append('page_size', page_size.toString());
   if (level !== undefined) {
-    filtered = filtered.filter(a => a.level === level);
+    params.append('level', level.toString());
   }
-
-  if (is_active !== undefined) {
-    filtered = filtered.filter(a => a.is_active === is_active);
-  }
-
   if (search) {
-    const searchLower = search.toLowerCase();
-    filtered = filtered.filter(a =>
-      a.username.toLowerCase().includes(searchLower) ||
-      a.email.toLowerCase().includes(searchLower)
-    );
+    params.append('search', search);
   }
 
-  const total = filtered.length;
-  const total_pages = Math.ceil(total / page_size);
-  const start = (page - 1) * page_size;
-  const items = filtered.slice(start, start + page_size);
+  const { data: response } = await apiClient.get<BackendAdminListResponse>(`/admin/admins?${params.toString()}`);
+
+  const items = response.items.map(transformAdminResponse);
+  const total_pages = Math.ceil(response.total / response.page_size);
 
   return {
     items,
-    total,
-    page,
-    page_size,
+    total: response.total,
+    page: response.page,
+    page_size: response.page_size,
     total_pages,
   };
 }
@@ -111,80 +120,62 @@ export async function getAdmins(filters: AdminFilters = {}): Promise<AdminListRe
  * 获取单个管理员
  */
 export async function getAdmin(id: number): Promise<AdminListItem | null> {
-  return mockAdmins.find(a => a.id === id) || null;
+  try {
+    // 通过列表接口获取，因为后端没有单独的获取接口
+    const response = await getAdmins({ page: 1, page_size: 100 });
+    return response.items.find(a => a.id === id) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 获取当前管理员信息
+ */
+export async function getCurrentAdmin(): Promise<AdminListItem> {
+  const { data: response } = await apiClient.get<BackendAdminResponse>('/admin/admins/me');
+  return transformAdminResponse(response);
 }
 
 /**
  * 创建管理员
  */
 export async function createAdmin(data: CreateAdminRequest): Promise<AdminListItem> {
-  // 检查用户名和邮箱是否已存在
-  if (mockAdmins.some(a => a.username === data.username)) {
-    throw new Error('用户名已存在');
-  }
-  if (mockAdmins.some(a => a.email === data.email)) {
-    throw new Error('邮箱已存在');
-  }
-
-  const newAdmin: AdminListItem = {
-    id: nextAdminId++,
+  const { data: response } = await apiClient.post<BackendAdminResponse>('/admin/admins', {
     username: data.username,
     email: data.email,
-    level: data.level,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    last_login_at: null,
-  };
-
-  mockAdmins.push(newAdmin);
-  return newAdmin;
+    password: data.password,
+    full_name: data.full_name,
+    admin_level: data.level,
+  });
+  return transformAdminResponse(response);
 }
 
 /**
  * 更新管理员
  */
 export async function updateAdmin(id: number, data: UpdateAdminRequest): Promise<AdminListItem> {
-  const index = mockAdmins.findIndex(a => a.id === id);
-  if (index === -1) {
-    throw new Error('管理员不存在');
+  const updateData: Record<string, any> = {};
+
+  if (data.full_name !== undefined) {
+    updateData.full_name = data.full_name;
+  }
+  if (data.level !== undefined) {
+    updateData.admin_level = data.level;
+  }
+  if (data.is_active !== undefined) {
+    updateData.is_active = data.is_active ? 1 : 0;
   }
 
-  // 不能修改超级管理员的等级
-  if (mockAdmins[index].level === 1 && data.level && data.level !== 1) {
-    throw new Error('不能修改超级管理员的等级');
-  }
-
-  // 检查用户名和邮箱是否已被其他人使用
-  if (data.username && mockAdmins.some(a => a.id !== id && a.username === data.username)) {
-    throw new Error('用户名已存在');
-  }
-  if (data.email && mockAdmins.some(a => a.id !== id && a.email === data.email)) {
-    throw new Error('邮箱已存在');
-  }
-
-  mockAdmins[index] = {
-    ...mockAdmins[index],
-    ...data,
-  };
-
-  return mockAdmins[index];
+  const { data: response } = await apiClient.put<BackendAdminResponse>(`/admin/admins/${id}`, updateData);
+  return transformAdminResponse(response);
 }
 
 /**
  * 删除管理员
  */
 export async function deleteAdmin(id: number): Promise<void> {
-  const admin = mockAdmins.find(a => a.id === id);
-  if (!admin) {
-    throw new Error('管理员不存在');
-  }
-
-  // 不能删除超级管理员
-  if (admin.level === 1) {
-    throw new Error('不能删除超级管理员');
-  }
-
-  mockAdmins = mockAdmins.filter(a => a.id !== id);
+  await apiClient.delete(`/admin/admins/${id}`);
 }
 
 /**

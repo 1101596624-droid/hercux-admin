@@ -346,7 +346,7 @@ async def serve_media_file(
     mime_type = None
     if category == "videos":
         mime_type = "video/mp4"
-    elif category in ["images", "avatars", "thumbnails"]:
+    elif category in ["images", "avatars", "thumbnails", "diagrams"]:
         mime_type = "image/jpeg"
     elif category == "documents":
         import mimetypes

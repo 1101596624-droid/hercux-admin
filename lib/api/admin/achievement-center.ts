@@ -10,11 +10,13 @@ export interface BadgeConfig {
   name: string;
   name_en?: string;
   icon: string;
+  icon_url?: string;  // 自定义图标URL
   description?: string;
   category: BadgeCategory;
   rarity: BadgeRarity;
   points: number;
   condition: Record<string, any>;
+  unlock_animation?: string;  // 解锁动画代码
   is_active: number;
   sort_order: number;
   created_at?: string;
@@ -98,11 +100,13 @@ export interface BadgeUpdateInput {
   name?: string;
   name_en?: string;
   icon?: string;
+  icon_url?: string;
   description?: string;
   category?: BadgeCategory;
   rarity?: BadgeRarity;
   points?: number;
   condition?: Record<string, any>;
+  unlock_animation?: string;
   is_active?: number;
   sort_order?: number;
 }
@@ -181,25 +185,37 @@ export const achievementCenterAPI = {
   },
 
   // Badges
-  getBadges: async (params?: { category?: BadgeCategory; is_active?: number }): Promise<BadgeConfig[]> => {
-    const { data } = await apiClient.get<any>('/admin/achievement-center/badges', { params });
+  getBadges: async (params?: { category?: BadgeCategory; is_active?: number; page?: number; page_size?: number }): Promise<{ badges: BadgeConfig[]; pagination: { total: number; page: number; pageSize: number } }> => {
+    const { data } = await apiClient.get<any>('/admin/achievement-center/badges', {
+      params: { page: 1, page_size: 40, ...params }
+    });
     // Transform backend response - backend returns { data: [...], pagination: {...} }
     const badges = data.data || data;
-    return (Array.isArray(badges) ? badges : []).map((b: any) => ({
-      id: b.id,
-      name: b.name,
-      name_en: b.nameEn || b.name_en,
-      icon: b.icon,
-      description: b.description,
-      category: b.category,
-      rarity: b.rarity,
-      points: b.points,
-      condition: b.condition,
-      is_active: b.isActive ? 1 : (b.is_active ?? 0),
-      sort_order: b.sortOrder || b.sort_order || 0,
-      created_at: b.createdAt || b.created_at,
-      unlock_count: b.stats?.unlockedCount || b.unlock_count || 0,
-    }));
+    const pagination = data.pagination || { total: 0, page: 1, pageSize: 40 };
+    return {
+      badges: (Array.isArray(badges) ? badges : []).map((b: any) => ({
+        id: b.id,
+        name: b.name,
+        name_en: b.nameEn || b.name_en,
+        icon: b.icon,
+        description: b.description,
+        category: b.category,
+        rarity: b.rarity,
+        points: b.points,
+        condition: b.condition,
+        icon_url: b.iconUrl || b.icon_url,
+        unlock_animation: b.unlockAnimation || b.unlock_animation,
+        is_active: b.isActive ? 1 : (b.is_active ?? 0),
+        sort_order: b.sortOrder || b.sort_order || 0,
+        created_at: b.createdAt || b.created_at,
+        unlock_count: b.stats?.unlockedCount || b.unlock_count || 0,
+      })),
+      pagination: {
+        total: pagination.total || 0,
+        page: pagination.page || 1,
+        pageSize: pagination.pageSize || 40,
+      }
+    };
   },
 
   getBadge: async (id: string): Promise<BadgeConfig> => {
@@ -321,6 +337,20 @@ export const achievementCenterAPI = {
       unlock_description: unlockDescription,
       badge_name: badgeName,
       badge_category: badgeCategory,
+    });
+    return data;
+  },
+
+  // AI Animation Generation (for epic/legendary badges)
+  generateUnlockAnimation: async (badgeName: string, badgeDescription: string, rarity: BadgeRarity): Promise<{
+    success: boolean;
+    animation_code?: string;
+    error?: string;
+  }> => {
+    const { data } = await apiClient.post<any>('/admin/achievement-center/generate-animation', {
+      badge_name: badgeName,
+      badge_description: badgeDescription,
+      rarity: rarity,
     });
     return data;
   },

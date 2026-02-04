@@ -121,7 +121,7 @@ export const studioPackagesApi = {
   list: async (status?: string, limit: number = 50): Promise<{ packages: PackageListItem[]; total: number }> => {
     const params: Record<string, any> = { limit };
     if (status) params.status = status;
-    return studioApiClient.get('/api/packages', params);
+    return studioApiClient.get('/api/v1/studio/packages', params);
   },
 
   /**
@@ -139,42 +139,42 @@ export const studioPackagesApi = {
    * 获取单个课程包
    */
   get: async (id: string): Promise<CoursePackageV2> => {
-    return studioApiClient.get(`/api/packages/${id}`);
+    return studioApiClient.get(`/api/v1/studio/packages/${id}`);
   },
 
   /**
    * 删除课程包
    */
   delete: async (id: string): Promise<{ success: boolean }> => {
-    return studioApiClient.delete(`/api/packages/${id}`);
+    return studioApiClient.delete(`/api/v1/studio/packages/${id}`);
   },
 
   /**
    * 导出课程包 JSON
    */
   export: async (id: string): Promise<{ json: string }> => {
-    return studioApiClient.get(`/api/packages/${id}/export`);
+    return studioApiClient.get(`/api/v1/studio/packages/${id}/export`);
   },
 
   /**
    * 发布课程包
    */
   publish: async (id: string): Promise<{ success: boolean }> => {
-    return studioApiClient.post(`/api/packages/${id}/publish`);
+    return studioApiClient.post(`/api/v1/studio/packages/${id}/publish`);
   },
 
   /**
    * 归档课程包
    */
   archive: async (id: string): Promise<{ success: boolean }> => {
-    return studioApiClient.post(`/api/packages/${id}/archive`);
+    return studioApiClient.post(`/api/v1/studio/packages/${id}/archive`);
   },
 
   /**
    * 复制课程包
    */
   duplicate: async (id: string, newTitle?: string): Promise<{ success: boolean; package: CoursePackageV2 }> => {
-    return studioApiClient.post(`/api/packages/${id}/duplicate`, { new_title: newTitle });
+    return studioApiClient.post(`/api/v1/studio/packages/${id}/duplicate`, { new_title: newTitle });
   },
 };
 
@@ -189,7 +189,7 @@ export const studioGenerateApi = {
   generateStream: (data: GenerateRequestV2, callbacks: V2StreamCallbacks): (() => void) => {
     const controller = new AbortController();
 
-    fetch(`${STUDIO_API_BASE_URL}/api/packages/generate-v2`, {
+    fetch(`${STUDIO_API_BASE_URL}/api/v1/studio/packages/generate-v2`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -351,56 +351,56 @@ export const studioProcessorsApi = {
    * 获取所有处理器列表
    */
   list: async (includeDisabled: boolean = false): Promise<{ processors: ProcessorWithConfig[] }> => {
-    return studioApiClient.get('/api/processors', { include_disabled: includeDisabled });
+    return studioApiClient.get('/api/v1/studio/processors', { include_disabled: includeDisabled });
   },
 
   /**
    * 获取单个处理器信息
    */
   get: async (id: string): Promise<ProcessorWithConfig> => {
-    return studioApiClient.get(`/api/processors/${id}`);
+    return studioApiClient.get(`/api/v1/studio/processors/${id}`);
   },
 
   /**
    * 更新处理器配置
    */
   updateConfig: async (id: string, config: ProcessorConfigUpdate): Promise<{ message: string; config: ProcessorConfigUpdate }> => {
-    return studioApiClient.put(`/api/processors/${id}/config`, config);
+    return studioApiClient.put(`/api/v1/studio/processors/${id}/config`, config);
   },
 
   /**
    * 启用处理器
    */
   enable: async (id: string): Promise<{ message: string }> => {
-    return studioApiClient.post(`/api/processors/${id}/enable`);
+    return studioApiClient.post(`/api/v1/studio/processors/${id}/enable`);
   },
 
   /**
    * 禁用处理器
    */
   disable: async (id: string): Promise<{ message: string }> => {
-    return studioApiClient.post(`/api/processors/${id}/disable`);
+    return studioApiClient.post(`/api/v1/studio/processors/${id}/disable`);
   },
 
   /**
    * 创建自定义处理器
    */
   create: async (data: CreateProcessorRequest): Promise<{ message: string; processor: ProcessorWithConfig }> => {
-    return studioApiClient.post('/api/processors', data);
+    return studioApiClient.post('/api/v1/studio/processors', data);
   },
 
   /**
    * 更新自定义处理器
    */
   update: async (id: string, data: CreateProcessorRequest): Promise<{ message: string; processor: ProcessorWithConfig }> => {
-    return studioApiClient.put(`/api/processors/${id}`, data);
+    return studioApiClient.put(`/api/v1/studio/processors/${id}`, data);
   },
 
   /**
    * 删除自定义处理器
    */
   delete: async (id: string): Promise<{ message: string }> => {
-    return studioApiClient.delete(`/api/processors/${id}`);
+    return studioApiClient.delete(`/api/v1/studio/processors/${id}`);
   },
 };
 
@@ -415,7 +415,7 @@ export const studioUploadApi = {
   uploadFile: async (file: File): Promise<UploadResponse> => {
     const formData = new FormData();
     formData.append('file', file);
-    return studioApiClient.postFormData('/api/upload', formData);
+    return studioApiClient.postFormData('/api/v1/studio/upload', formData);
   },
 };
 
@@ -428,7 +428,7 @@ export const studioHealthApi = {
    * 检查 Studio API 健康状态
    */
   check: async (): Promise<{ status: string; version: string }> => {
-    return studioApiClient.get('/api/health');
+    return studioApiClient.get('/api/v1/studio/health');
   },
 };
 

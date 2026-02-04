@@ -1,0 +1,160 @@
+{
+  "category": "practice",
+  "description": "小课堂 - 快速学习和知识点相关勋章 (14个)",
+  "badges": [
+    {
+      "id": "mini_lesson_1",
+      "name": "小课堂初体验",
+      "name_en": "First Mini Lesson",
+      "icon": "🎬",
+      "description": "完成第一个小课堂",
+      "category": "practice",
+      "rarity": "common",
+      "points": 10,
+      "condition": {"type": "counter", "metric": "mini_lessons_completed", "target": 1}
+    },
+    {
+      "id": "mini_lesson_5",
+      "name": "小课堂新手",
+      "name_en": "Mini Lesson Novice",
+      "icon": "📺",
+      "description": "完成5个小课堂",
+      "category": "practice",
+      "rarity": "common",
+      "points": 20,
+      "condition": {"type": "counter", "metric": "mini_lessons_completed", "target": 5}
+    },
+    {
+      "id": "mini_lesson_10",
+      "name": "小课堂达人",
+      "name_en": "Mini Lesson Expert",
+      "icon": "📱",
+      "description": "完成10个小课堂",
+      "category": "practice",
+      "rarity": "common",
+      "points": 30,
+      "condition": {"type": "counter", "metric": "mini_lessons_completed", "target": 10}
+    },
+    {
+      "id": "mini_lesson_25",
+      "name": "小课堂高手",
+      "name_en": "Mini Lesson Master",
+      "icon": "💡",
+      "description": "完成25个小课堂",
+      "category": "practice",
+      "rarity": "rare",
+      "points": 50,
+      "condition": {"type": "counter", "metric": "mini_lessons_completed", "target": 25}
+    },
+    {
+      "id": "mini_lesson_50",
+      "name": "小课堂专家",
+      "name_en": "Mini Lesson Specialist",
+      "icon": "🌟",
+      "description": "完成50个小课堂",
+      "category": "practice",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "counter", "metric": "mini_lessons_completed", "target": 50}
+    },
+    {
+      "id": "mini_lesson_100",
+      "name": "小课堂大师",
+      "name_en": "Mini Lesson Grandmaster",
+      "icon": "✨",
+      "description": "完成100个小课堂",
+      "category": "practice",
+      "rarity": "epic",
+      "points": 150,
+      "condition": {"type": "counter", "metric": "mini_lessons_completed", "target": 100}
+    },
+    {
+      "id": "mini_lesson_200",
+      "name": "小课堂传奇",
+      "name_en": "Mini Lesson Legend",
+      "icon": "🎯",
+      "description": "完成200个小课堂",
+      "category": "practice",
+      "rarity": "legendary",
+      "points": 300,
+      "condition": {"type": "counter", "metric": "mini_lessons_completed", "target": 200}
+    },
+    {
+      "id": "knowledge_point_10",
+      "name": "知识点收集者",
+      "name_en": "Knowledge Collector",
+      "icon": "📌",
+      "description": "掌握10个知识点",
+      "category": "practice",
+      "rarity": "common",
+      "points": 15,
+      "condition": {"type": "counter", "metric": "knowledge_points_mastered", "target": 10}
+    },
+    {
+      "id": "knowledge_point_30",
+      "name": "知识点积累者",
+      "name_en": "Knowledge Accumulator",
+      "icon": "📍",
+      "description": "掌握30个知识点",
+      "category": "practice",
+      "rarity": "common",
+      "points": 30,
+      "condition": {"type": "counter", "metric": "knowledge_points_mastered", "target": 30}
+    },
+    {
+      "id": "knowledge_point_50",
+      "name": "知识点达人",
+      "name_en": "Knowledge Expert",
+      "icon": "🎯",
+      "description": "掌握50个知识点",
+      "category": "practice",
+      "rarity": "rare",
+      "points": 50,
+      "condition": {"type": "counter", "metric": "knowledge_points_mastered", "target": 50}
+    },
+    {
+      "id": "knowledge_point_100",
+      "name": "知识点专家",
+      "name_en": "Knowledge Specialist",
+      "icon": "🧠",
+      "description": "掌握100个知识点",
+      "category": "practice",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "counter", "metric": "knowledge_points_mastered", "target": 100}
+    },
+    {
+      "id": "knowledge_point_200",
+      "name": "知识点大师",
+      "name_en": "Knowledge Master",
+      "icon": "🎓",
+      "description": "掌握200个知识点",
+      "category": "practice",
+      "rarity": "epic",
+      "points": 150,
+      "condition": {"type": "counter", "metric": "knowledge_points_mastered", "target": 200}
+    },
+    {
+      "id": "knowledge_point_500",
+      "name": "知识点宗师",
+      "name_en": "Knowledge Grandmaster",
+      "icon": "👨‍🎓",
+      "description": "掌握500个知识点",
+      "category": "practice",
+      "rarity": "epic",
+      "points": 250,
+      "condition": {"type": "counter", "metric": "knowledge_points_mastered", "target": 500}
+    },
+    {
+      "id": "knowledge_point_1000",
+      "name": "知识点传奇",
+      "name_en": "Knowledge Legend",
+      "icon": "🏛️",
+      "description": "掌握1000个知识点",
+      "category": "practice",
+      "rarity": "legendary",
+      "points": 500,
+      "condition": {"type": "counter", "metric": "knowledge_points_mastered", "target": 1000}
+    }
+  ]
+}

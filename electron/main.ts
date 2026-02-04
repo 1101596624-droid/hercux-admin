@@ -14,8 +14,25 @@ const PORT = 23001;
 // 获取应用根目录（兼容开发和打包环境）
 function getAppRoot(): string {
   if (app.isPackaged) {
-    // 打包后，资源在 resources/app.asar 或 resources/app
-    return path.join(process.resourcesPath, 'app');
+    // 打包后，由于 asar: false，资源直接在 resources 目录下
+    // 检查多个可能的路径
+    const possiblePaths = [
+      path.join(process.resourcesPath, 'app'),
+      process.resourcesPath,
+      path.dirname(app.getPath('exe')),
+    ];
+
+    for (const p of possiblePaths) {
+      const serverPath = path.join(p, '.next/standalone/server.js');
+      console.log('[Electron] Checking path:', serverPath);
+      if (require('fs').existsSync(serverPath)) {
+        console.log('[Electron] Found server at:', p);
+        return p;
+      }
+    }
+
+    // 默认返回第一个路径
+    return possiblePaths[0];
   } else {
     // 开发环境
     return path.join(__dirname, '..');
@@ -31,6 +48,15 @@ async function startNextServer(): Promise<void> {
     console.log('[Electron] App root:', appRoot);
     console.log('[Electron] Server path:', serverPath);
     console.log('[Electron] Server cwd:', serverCwd);
+
+    // 检查服务器文件是否存在
+    const fs = require('fs');
+    if (!fs.existsSync(serverPath)) {
+      console.error('[Electron] Server file not found:', serverPath);
+      console.error('[Electron] Directory contents:', fs.readdirSync(appRoot));
+      reject(new Error(`Server file not found: ${serverPath}`));
+      return;
+    }
 
     // 使用 fork 启动 standalone 服务器
     nextServer = fork(serverPath, [], {
@@ -81,6 +107,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       spellcheck: false,
+      webSecurity: false,  // 允许跨域请求（Electron 本地应用）
     },
     backgroundColor: '#0F172A',
     show: false,
@@ -150,9 +177,10 @@ function createWindow() {
           "default-src 'self'",
           "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
           "style-src 'self' 'unsafe-inline' blob:",
-          "img-src 'self' data: https: blob:",
-          "connect-src 'self' http://localhost:* http://106.14.180.66:* https://api.hercu.com ws://localhost:*",
+          "img-src 'self' data: blob: http: https: http://106.14.180.66:8001 http://localhost:*",
+          "connect-src 'self' http://localhost:* http://106.14.180.66:* https://106.14.180.66:* https://api.hercu.com https://*.aipor.cc https://*.hiapi.online ws://localhost:*",
           "font-src 'self' data:",
+          "media-src 'self' http://106.14.180.66:8001 blob:",
         ].join('; '),
       },
     });

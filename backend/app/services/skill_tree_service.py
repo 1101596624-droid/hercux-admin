@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from app.db.neo4j import Neo4jClient
 from app.models.models import LearningProgress, CourseNode, NodeStatus
+from app.core.utils import status_equals
 
 
 class SkillTreeService:
@@ -168,7 +169,7 @@ class SkillTreeService:
         completed_query = select(func.count(LearningProgress.id)).where(
             and_(
                 LearningProgress.user_id == user_id,
-                LearningProgress.status == NodeStatus.COMPLETED
+                status_equals(LearningProgress.status, NodeStatus.COMPLETED)
             )
         )
         completed_result = await self.db.execute(completed_query)

@@ -1345,7 +1345,17 @@ export function PixiRenderer({ scene, onReady, onError, className }: PixiRendere
       // 最后销毁 PixiJS 应用
       if (appRef.current) {
         try {
-          appRef.current.destroy(true, { children: true, texture: false });
+          // 先移除所有子元素，避免纹理销毁问题
+          if (appRef.current.stage) {
+            appRef.current.stage.removeChildren();
+          }
+          // 使用更安全的销毁选项
+          appRef.current.destroy(true, {
+            children: true,
+            texture: false,
+            textureSource: false,
+            context: false
+          });
         } catch (e) {
           console.warn('PixiJS cleanup warning:', e);
         }

@@ -1,0 +1,292 @@
+{
+  "category": "learning",
+  "description": "课程学习相关勋章 (78个)",
+  "badges": [
+    {
+      "id": "first_step",
+      "name": "初次启程",
+      "name_en": "First Step",
+      "icon": "🚀",
+      "description": "完成第一个学习节点",
+      "category": "learning",
+      "rarity": "common",
+      "points": 10,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 1}
+    },
+    {
+      "id": "getting_started",
+      "name": "渐入佳境",
+      "name_en": "Getting Started",
+      "icon": "📖",
+      "description": "完成5个学习节点",
+      "category": "learning",
+      "rarity": "common",
+      "points": 15,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 5}
+    },
+    {
+      "id": "steady_learner",
+      "name": "稳步前行",
+      "name_en": "Steady Learner",
+      "icon": "📚",
+      "description": "完成10个学习节点",
+      "category": "learning",
+      "rarity": "common",
+      "points": 20,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 10}
+    },
+    {
+      "id": "knowledge_seeker",
+      "name": "求知若渴",
+      "name_en": "Knowledge Seeker",
+      "icon": "🔍",
+      "description": "完成20个学习节点",
+      "category": "learning",
+      "rarity": "common",
+      "points": 25,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 20}
+    },
+    {
+      "id": "diligent_student",
+      "name": "勤奋学子",
+      "name_en": "Diligent Student",
+      "icon": "✏️",
+      "description": "完成30个学习节点",
+      "category": "learning",
+      "rarity": "common",
+      "points": 30,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 30}
+    },
+    {
+      "id": "half_century",
+      "name": "半百之路",
+      "name_en": "Half Century",
+      "icon": "🎯",
+      "description": "完成50个学习节点",
+      "category": "learning",
+      "rarity": "rare",
+      "points": 50,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 50}
+    },
+    {
+      "id": "century_milestone",
+      "name": "百节里程碑",
+      "name_en": "Century Milestone",
+      "icon": "💯",
+      "description": "完成100个学习节点",
+      "category": "learning",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 100}
+    },
+    {
+      "id": "knowledge_collector",
+      "name": "知识收藏家",
+      "name_en": "Knowledge Collector",
+      "icon": "📦",
+      "description": "完成150个学习节点",
+      "category": "learning",
+      "rarity": "rare",
+      "points": 100,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 150}
+    },
+    {
+      "id": "learning_expert",
+      "name": "学习专家",
+      "name_en": "Learning Expert",
+      "icon": "🎓",
+      "description": "完成200个学习节点",
+      "category": "learning",
+      "rarity": "epic",
+      "points": 150,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 200}
+    },
+    {
+      "id": "knowledge_master",
+      "name": "知识大师",
+      "name_en": "Knowledge Master",
+      "icon": "👨‍🎓",
+      "description": "完成300个学习节点",
+      "category": "learning",
+      "rarity": "epic",
+      "points": 200,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 300}
+    },
+    {
+      "id": "learning_legend",
+      "name": "学习传奇",
+      "name_en": "Learning Legend",
+      "icon": "🏛️",
+      "description": "完成500个学习节点",
+      "category": "learning",
+      "rarity": "legendary",
+      "points": 500,
+      "condition": {"type": "counter", "metric": "completed_nodes", "target": 500}
+    },
+    {
+      "id": "first_course",
+      "name": "课程入门",
+      "name_en": "First Course",
+      "icon": "📗",
+      "description": "完成第一门课程",
+      "category": "learning",
+      "rarity": "common",
+      "points": 30,
+      "condition": {"type": "courses", "target": 1}
+    },
+    {
+      "id": "course_explorer",
+      "name": "课程探索者",
+      "name_en": "Course Explorer",
+      "icon": "🗺️",
+      "description": "完成3门课程",
+      "category": "learning",
+      "rarity": "common",
+      "points": 50,
+      "condition": {"type": "courses", "target": 3}
+    },
+    {
+      "id": "course_enthusiast",
+      "name": "课程爱好者",
+      "name_en": "Course Enthusiast",
+      "icon": "💝",
+      "description": "完成5门课程",
+      "category": "learning",
+      "rarity": "rare",
+      "points": 80,
+      "condition": {"type": "courses", "target": 5}
+    },
+    {
+      "id": "course_collector",
+      "name": "课程收藏家",
+      "name_en": "Course Collector",
+      "icon": "🏆",
+      "description": "完成10门课程",
+      "category": "learning",
+      "rarity": "rare",
+      "points": 120,
+      "condition": {"type": "courses", "target": 10}
+    },
+    {
+      "id": "course_conqueror",
+      "name": "课程征服者",
+      "name_en": "Course Conqueror",
+      "icon": "⚔️",
+      "description": "完成15门课程",
+      "category": "learning",
+      "rarity": "epic",
+      "points": 180,
+      "condition": {"type": "courses", "target": 15}
+    },
+    {
+      "id": "course_champion",
+      "name": "课程冠军",
+      "name_en": "Course Champion",
+      "icon": "👑",
+      "description": "完成20门课程",
+      "category": "learning",
+      "rarity": "epic",
+      "points": 250,
+      "condition": {"type": "courses", "target": 20}
+    },
+    {
+      "id": "course_grandmaster",
+      "name": "课程宗师",
+      "name_en": "Course Grandmaster",
+      "icon": "🐉",
+      "description": "完成30门课程",
+      "category": "learning",
+      "rarity": "legendary",
+      "points": 500,
+      "condition": {"type": "courses", "target": 30}
+    },
+    {
+      "id": "first_hour",
+      "name": "初尝学习",
+      "name_en": "First Hour",
+      "icon": "⏰",
+      "description": "累计学习1小时",
+      "category": "learning",
+      "rarity": "common",
+      "points": 10,
+      "condition": {"type": "time_based", "target": 1}
+    },
+    {
+      "id": "five_hours",
+      "name": "小有积累",
+      "name_en": "Five Hours",
+      "icon": "⏱️",
+      "description": "累计学习5小时",
+      "category": "learning",
+      "rarity": "common",
+      "points": 20,
+      "condition": {"type": "time_based", "target": 5}
+    },
+    {
+      "id": "ten_hours",
+      "name": "十小时达人",
+      "name_en": "Ten Hours",
+      "icon": "🕐",
+      "description": "累计学习10小时",
+      "category": "learning",
+      "rarity": "common",
+      "points": 30,
+      "condition": {"type": "time_based", "target": 10}
+    },
+    {
+      "id": "twenty_hours",
+      "name": "学习投入者",
+      "name_en": "Twenty Hours",
+      "icon": "🕑",
+      "description": "累计学习20小时",
+      "category": "learning",
+      "rarity": "common",
+      "points": 40,
+      "condition": {"type": "time_based", "target": 20}
+    },
+    {
+      "id": "fifty_hours",
+      "name": "半百时光",
+      "name_en": "Fifty Hours",
+      "icon": "🕒",
+      "description": "累计学习50小时",
+      "category": "learning",
+      "rarity": "rare",
+      "points": 60,
+      "condition": {"type": "time_based", "target": 50}
+    },
+    {
+      "id": "hundred_hours",
+      "name": "百小时学者",
+      "name_en": "Hundred Hours",
+      "icon": "🕓",
+      "description": "累计学习100小时",
+      "category": "learning",
+      "rarity": "rare",
+      "points": 100,
+      "condition": {"type": "time_based", "target": 100}
+    },
+    {
+      "id": "two_hundred_hours",
+      "name": "时间富翁",
+      "name_en": "Time Millionaire",
+      "icon": "🕔",
+      "description": "累计学习200小时",
+      "category": "learning",
+      "rarity": "epic",
+      "points": 180,
+      "condition": {"type": "time_based", "target": 200}
+    },
+    {
+      "id": "five_hundred_hours",
+      "name": "学习巨匠",
+      "name_en": "Learning Giant",
+      "icon": "🕕",
+      "description": "累计学习500小时",
+      "category": "learning",
+      "rarity": "legendary",
+      "points": 500,
+      "condition": {"type": "time_based", "target": 500}
+    }
+  ]
+}

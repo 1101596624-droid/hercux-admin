@@ -311,7 +311,9 @@ class IntelligentProcessor(BaseProcessor):
   }
 }""",
             "simulator": """
-【simulator 规格 - 简化版交互模拟器】
+【simulator 规格 - 高质量交互模拟器】
+
+⚠️ 重要：模拟器内容必须完整、详细、有教育价值！
 
 模拟器分为两大类：
 1. 理科模拟器（滑块调参、计算演示）
@@ -322,133 +324,221 @@ AI 应根据内容特性智能选择合适的类型。
 === 理科模拟器（参数计算型）===
 适用：物理公式演示、参数调节可视化、数据计算
 
+【质量要求】
+- inputs: 至少 2-3 个输入参数，每个都要有完整的 min/max/step/unit
+- outputs: 至少 1-2 个输出结果，每个都要有正确的计算公式
+- description: 至少 30 字，说明模拟器的教学目的
+- instructions: 至少 2-3 条使用说明
+
 {
   "step_id": "S00X",
   "type": "simulator",
-  "title": "XXX计算器",
+  "title": "牛顿第二定律计算器",
   "simulator_spec": {
     "simulator_id": "SIM-XXX",
-    "name": "模拟器名称",
-    "description": "模拟器描述",
+    "name": "牛顿第二定律交互演示",
+    "description": "通过调整力和质量参数，直观观察加速度的变化规律，深入理解 F=ma 公式的物理含义",
     "type": "custom",
     "inputs": [
       {
-        "id": "input1",
+        "id": "force",
         "name": "force",
-        "label": "力 (N)",
+        "label": "作用力",
         "type": "slider",
         "defaultValue": 100,
         "min": 0,
         "max": 500,
         "step": 10,
         "unit": "N"
+      },
+      {
+        "id": "mass",
+        "name": "mass",
+        "label": "物体质量",
+        "type": "slider",
+        "defaultValue": 50,
+        "min": 10,
+        "max": 200,
+        "step": 5,
+        "unit": "kg"
       }
     ],
     "outputs": [
       {
-        "id": "output1",
+        "id": "acceleration",
         "name": "acceleration",
         "label": "加速度",
         "type": "number",
         "unit": "m/s²",
-        "formula": "input.force / 50"
+        "formula": "input.force / input.mass"
+      },
+      {
+        "id": "momentum",
+        "name": "momentum",
+        "label": "动量变化率",
+        "type": "number",
+        "unit": "kg·m/s²",
+        "formula": "input.force"
       }
     ],
-    "instructions": ["调整滑块观察结果变化"]
+    "instructions": [
+      "拖动力滑块，观察加速度如何随力的增大而增大",
+      "拖动质量滑块，观察加速度如何随质量的增大而减小",
+      "尝试找出使加速度等于 10 m/s² 的力和质量组合"
+    ]
   }
 }
 
 === 文科模拟器 - 时间线 ===
 适用：历史事件、发展历程、演变过程
 
+【质量要求】
+- events: 至少 4-6 个事件，按时间顺序排列
+- 每个事件都要有详细的 description（至少 20 字）
+- 标记 1-2 个关键事件为 highlight: true
+- 使用 category 对事件进行分类
+
 {
   "step_id": "S00X",
   "type": "simulator",
-  "title": "XXX发展历程",
+  "title": "人工智能发展历程",
   "simulator_spec": {
     "simulator_id": "SIM-XXX",
-    "name": "时间线名称",
-    "description": "时间线描述",
+    "name": "AI发展里程碑时间线",
+    "description": "探索人工智能从诞生到今天的关键发展节点，了解每个时代的突破性进展",
     "type": "timeline",
     "timeline": {
-      "title": "时间线标题",
+      "title": "人工智能发展史",
       "events": [
-        {"id": "e1", "year": "1949", "title": "事件标题", "description": "事件描述", "category": "分类", "highlight": false}
+        {"id": "e1", "year": "1956", "title": "达特茅斯会议", "description": "人工智能作为一门学科正式诞生，麦卡锡首次提出'人工智能'这一术语", "category": "起源", "highlight": true},
+        {"id": "e2", "year": "1966", "title": "ELIZA诞生", "description": "第一个聊天机器人ELIZA问世，展示了自然语言处理的可能性", "category": "早期探索", "highlight": false},
+        {"id": "e3", "year": "1997", "title": "深蓝战胜卡斯帕罗夫", "description": "IBM深蓝计算机击败国际象棋世界冠军，标志着AI在特定领域超越人类", "category": "里程碑", "highlight": true},
+        {"id": "e4", "year": "2012", "title": "深度学习突破", "description": "AlexNet在ImageNet竞赛中大幅领先，开启深度学习革命", "category": "技术突破", "highlight": false},
+        {"id": "e5", "year": "2022", "title": "ChatGPT发布", "description": "OpenAI发布ChatGPT，大语言模型进入公众视野，引发AI应用热潮", "category": "大模型时代", "highlight": true}
       ]
-    }
+    },
+    "instructions": [
+      "点击时间线上的节点查看详细信息",
+      "注意观察高亮标记的关键转折点",
+      "思考每个阶段的技术特点和局限性"
+    ]
   }
 }
 
 === 文科模拟器 - 决策情景 ===
 适用：案例分析、决策训练、情景模拟
 
+【质量要求】
+- scenario: 至少 50 字的详细情景描述
+- options: 至少 3-4 个选项，每个都要有详细的 result 说明
+- 必须标记一个 isOptimal: true 的最优选项
+- analysis: 至少 30 字的综合分析
+
 {
   "step_id": "S00X",
   "type": "simulator",
-  "title": "XXX决策",
+  "title": "创业融资决策",
   "simulator_spec": {
     "simulator_id": "SIM-XXX",
-    "name": "决策名称",
-    "description": "决策描述",
+    "name": "创业融资策略选择",
+    "description": "模拟创业公司在不同发展阶段面临的融资决策，学习评估各种融资方式的利弊",
     "type": "decision",
     "decision": {
-      "title": "决策标题",
-      "scenario": "情景描述",
-      "question": "你会如何选择？",
+      "title": "A轮融资方案选择",
+      "scenario": "你的科技创业公司已完成产品开发，用户增长良好，现需要A轮融资扩大规模。目前有三家投资机构表示兴趣：一家顶级VC愿意投资2000万但要求35%股权；一家产业资本愿意投资1500万要求25%股权并提供行业资源；一家政府引导基金愿意投资1000万要求15%股权但审批流程较长。",
+      "question": "作为创始人，你会选择哪个融资方案？",
       "options": [
-        {"id": "opt1", "label": "选项A", "result": "选择A的结果", "isOptimal": true},
-        {"id": "opt2", "label": "选项B", "result": "选择B的结果", "isOptimal": false}
+        {"id": "opt1", "label": "选择顶级VC", "result": "获得充足资金和品牌背书，但股权稀释较多，后续融资估值压力大", "isOptimal": false},
+        {"id": "opt2", "label": "选择产业资本", "result": "资金适中，获得行业资源和渠道支持，有利于业务拓展，股权稀释合理", "isOptimal": true},
+        {"id": "opt3", "label": "选择政府引导基金", "result": "股权稀释最少，但资金较少且到账慢，可能错过市场窗口期", "isOptimal": false},
+        {"id": "opt4", "label": "继续等待更好的条件", "result": "保持灵活性，但可能面临资金链断裂风险，竞争对手可能抢先", "isOptimal": false}
       ],
-      "analysis": "综合分析"
-    }
+      "analysis": "在这个案例中，产业资本是最优选择。虽然资金不是最多，但25%的股权稀释合理，更重要的是能获得行业资源支持，这对早期创业公司的业务拓展至关重要。融资不仅是获取资金，更是获取战略资源。"
+    },
+    "instructions": [
+      "仔细阅读情景描述，理解公司当前状况",
+      "分析每个选项的利弊",
+      "做出你的选择，然后查看分析结果"
+    ]
   }
 }
 
 === 文科模拟器 - 对比分析 ===
 适用：概念对比、方案比较、特征分析
 
+【质量要求】
+- dimensions: 至少 3-4 个对比维度
+- items: 至少 2-3 个对比对象
+- 每个对象的 attributes 必须覆盖所有维度
+- conclusion: 至少 30 字的对比结论
+
 {
   "step_id": "S00X",
   "type": "simulator",
-  "title": "XXX对比",
+  "title": "编程语言对比",
   "simulator_spec": {
     "simulator_id": "SIM-XXX",
-    "name": "对比名称",
-    "description": "对比描述",
+    "name": "主流编程语言特性对比",
+    "description": "从多个维度对比主流编程语言的特点，帮助你根据项目需求选择合适的语言",
     "type": "comparison",
     "comparison": {
-      "title": "对比标题",
-      "dimensions": ["维度1", "维度2", "维度3"],
+      "title": "Python vs JavaScript vs Go 对比",
+      "dimensions": ["学习难度", "执行性能", "应用领域", "生态系统", "并发支持"],
       "items": [
-        {"id": "item1", "name": "对象A", "attributes": {"维度1": "值1", "维度2": "值2", "维度3": "值3"}},
-        {"id": "item2", "name": "对象B", "attributes": {"维度1": "值1", "维度2": "值2", "维度3": "值3"}}
+        {"id": "python", "name": "Python", "attributes": {"学习难度": "简单，语法清晰", "执行性能": "较慢，解释执行", "应用领域": "AI/数据科学/自动化", "生态系统": "丰富，科学计算库强大", "并发支持": "GIL限制，多进程为主"}},
+        {"id": "javascript", "name": "JavaScript", "attributes": {"学习难度": "中等，异步概念需理解", "执行性能": "V8引擎优化后较快", "应用领域": "Web前后端/移动应用", "生态系统": "npm最大，更新快", "并发支持": "事件循环，单线程异步"}},
+        {"id": "go", "name": "Go", "attributes": {"学习难度": "中等，概念简洁", "执行性能": "快，编译型语言", "应用领域": "云原生/微服务/系统编程", "生态系统": "精简，标准库强大", "并发支持": "goroutine原生支持，优秀"}}
       ],
-      "conclusion": "对比结论"
-    }
+      "conclusion": "选择编程语言应根据项目需求：AI和数据分析选Python；Web开发选JavaScript；高性能后端服务选Go。没有最好的语言，只有最适合的语言。"
+    },
+    "instructions": [
+      "横向对比同一维度下不同语言的特点",
+      "纵向了解每种语言的整体特性",
+      "思考你的项目最需要哪些特性"
+    ]
   }
 }
 
 === 文科模拟器 - 概念关系图 ===
 适用：知识结构、概念关系、因果链条
 
+【质量要求】
+- nodes: 至少 4-6 个概念节点，每个都要有 description
+- relations: 至少 3-5 个关系连接，每个都要有 label 说明关系类型
+- 使用 category 对节点进行分类
+
 {
   "step_id": "S00X",
   "type": "simulator",
-  "title": "XXX概念图",
+  "title": "机器学习概念图",
   "simulator_spec": {
     "simulator_id": "SIM-XXX",
-    "name": "概念图名称",
-    "description": "概念图描述",
+    "name": "机器学习核心概念关系",
+    "description": "可视化展示机器学习领域的核心概念及其相互关系，帮助建立系统的知识框架",
     "type": "concept-map",
     "concept_map": {
-      "title": "概念图标题",
+      "title": "机器学习知识图谱",
       "nodes": [
-        {"id": "n1", "label": "概念A", "description": "概念描述", "category": "分类"}
+        {"id": "ml", "label": "机器学习", "description": "让计算机从数据中学习规律的技术", "category": "核心"},
+        {"id": "supervised", "label": "监督学习", "description": "使用标注数据训练模型", "category": "学习范式"},
+        {"id": "unsupervised", "label": "无监督学习", "description": "从无标注数据中发现模式", "category": "学习范式"},
+        {"id": "dl", "label": "深度学习", "description": "使用多层神经网络的机器学习方法", "category": "技术分支"},
+        {"id": "nn", "label": "神经网络", "description": "模拟生物神经元的计算模型", "category": "基础模型"},
+        {"id": "cnn", "label": "卷积神经网络", "description": "擅长处理图像数据的神经网络", "category": "网络架构"}
       ],
       "relations": [
-        {"from": "n1", "to": "n2", "label": "关系描述"}
+        {"from_id": "ml", "to": "supervised", "label": "包含"},
+        {"from_id": "ml", "to": "unsupervised", "label": "包含"},
+        {"from_id": "ml", "to": "dl", "label": "发展出"},
+        {"from_id": "dl", "to": "nn", "label": "基于"},
+        {"from_id": "nn", "to": "cnn", "label": "演化为"}
       ]
-    }
+    },
+    "instructions": [
+      "从中心概念开始，逐步探索相关概念",
+      "注意概念之间的关系类型",
+      "尝试在脑中重建这个知识网络"
+    ]
   }
 }
 
@@ -458,6 +548,13 @@ AI 应根据内容特性智能选择合适的类型。
 - 有选择决策、案例分析 → decision
 - 有多对象比较、特征分析 → comparison
 - 有概念关系、知识结构 → concept-map
+
+【内容质量检查清单】
+✓ 所有必填字段都有值
+✓ description 至少 30 字
+✓ instructions 至少 2 条
+✓ 数据量充足（事件≥4个，选项≥3个，节点≥4个）
+✓ 内容有教育价值，不是占位符
 """,
             "ai_tutor": """
 【ai_tutor 规格】

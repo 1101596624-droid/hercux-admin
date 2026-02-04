@@ -17,6 +17,7 @@ from app.schemas.schemas import (
     NodeUpdate,
     PackageNodeConfig
 )
+from app.core.utils import get_enum_value
 
 router = APIRouter()
 
@@ -261,7 +262,7 @@ async def get_course(
             {
                 "id": node.id,
                 "nodeId": node.node_id,
-                "type": node.type.value,
+                "type": get_enum_value(node.type),
                 "componentId": node.component_id,
                 "title": node.title,
                 "description": node.description,
@@ -382,7 +383,7 @@ async def get_node(
         "id": node.id,
         "nodeId": node.node_id,
         "courseId": node.course_id,
-        "type": node.type.value,
+        "type": get_enum_value(node.type),
         "componentId": node.component_id,
         "title": node.title,
         "description": node.description,
@@ -426,7 +427,7 @@ async def update_node(
             "id": node.id,
             "nodeId": node.node_id,
             "courseId": node.course_id,
-            "type": node.type.value,
+            "type": get_enum_value(node.type),
             "componentId": node.component_id,
             "title": node.title,
             "description": node.description,
@@ -503,7 +504,7 @@ async def add_node_to_course(
                 "id": node.id,
                 "nodeId": node.node_id,
                 "courseId": node.course_id,
-                "type": node.type.value,
+                "type": get_enum_value(node.type),
                 "componentId": node.component_id,
                 "title": node.title,
                 "description": node.description,
