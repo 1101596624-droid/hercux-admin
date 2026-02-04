@@ -34,16 +34,28 @@ interface StudioState {
   streamStatus: string;
   generationProgress: GenerationProgress | null;
   isGenerating: boolean;
-  isPaused: boolean;  // 新增：暂停状态
+  isPaused: boolean;  // 暂停状态
   generationPhase: number;
   currentLessonIndex: number;
   totalLessons: number;
   lessonsOutline: LessonOutline[];
   completedLessons: number[];
-  completedLessonsData: any[];  // 已完成课时的完整数据（用于断点续传）
-  generationMeta: any | null;   // 课程元数据（用于断点续传）
+  completedLessonsData: any[];  // 已完成课时的完整数据
+  generationMeta: any | null;   // 课程元数据
   generationError: string | null;
   currentProcessor: ProcessorWithConfig | null;
+
+  // V3 特有状态
+  v3Outline: any | null;  // V3 大纲
+  v3CurrentAttempt: number;  // 当前章节尝试次数
+  v3ReviewResults: Array<{
+    index: number;
+    status: string;
+    score: number;
+    issues: string[];
+    simulatorIssues: string[];
+    comment: string;
+  }>;  // 审核结果历史
 
   // 流式步骤状态（用于实时渲染）
   streamingSteps: any[];  // 当前课时已完成的步骤
@@ -121,7 +133,7 @@ const initialState: StudioState = {
   streamStatus: '',
   generationProgress: null,
   isGenerating: false,
-  isPaused: false,  // 新增
+  isPaused: false,
   generationPhase: 0,
   currentLessonIndex: -1,
   totalLessons: 0,
@@ -131,6 +143,10 @@ const initialState: StudioState = {
   generationMeta: null,
   generationError: null,
   currentProcessor: null,
+  // V3 特有状态
+  v3Outline: null,
+  v3CurrentAttempt: 1,
+  v3ReviewResults: [],
   streamingSteps: [],
   streamingLessonInfo: null,
   generatedPackage: null,

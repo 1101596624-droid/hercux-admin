@@ -1,32 +1,32 @@
 /**
- * Studio Generation Service - 独立于组件生命周期的课程生成服务
+ * Studio Generation Service V3 - 监督者+生成者架构
  * 确保页面切换时生成不会中断
  */
 
 import { useStudioStore, getAllSourceMaterial } from '@/stores/studio/useStudioStore';
-import { studioGenerateApi } from '@/lib/api/studio';
+import { studioGenerateApi, V3StreamCallbacks, V3CourseOutline, V3GenerationStats } from '@/lib/api/studio';
 import type { ProcessorWithConfig } from '@/types/studio';
 
 class StudioGenerationService {
   private cancelFn: (() => void) | null = null;
   private isRunning = false;
   private isPaused = false;
-  private isPausingOrCancelling = false;  // 标记是否正在主动暂停/取消
+  private isPausingOrCancelling = false;
 
   /**
-   * 开始生成课程
+   * 开始��成课程 (V3 架构)
    */
   startGeneration(processor: ProcessorWithConfig | null) {
     const store = useStudioStore.getState();
     const { sources, courseTitle, sourceInfo, selectedProcessorId } = store;
 
     if (this.isRunning) {
-      console.warn('[GenerationService] Generation already in progress');
+      console.warn('[GenerationService V3] Generation already in progress');
       return;
     }
 
     if (sources.length === 0 || !courseTitle.trim()) {
-      console.error('[GenerationService] Missing sources or course title');
+      console.error('[GenerationService V3] Missing sources or course title');
       return;
     }
 
@@ -35,7 +35,7 @@ class StudioGenerationService {
     // Reset generation state
     store.setCurrentView('generating');
     store.setStreamedContent('');
-    store.setStreamStatus('正在初始化...');
+    store.setStreamStatus('监督者正在分析源材料...');
     store.setGenerationPhase(0);
     store.setCurrentLessonIndex(-1);
     store.setTotalLessons(0);
@@ -43,102 +43,156 @@ class StudioGenerationService {
     store.setIsGenerating(true);
     store.setGenerationError(null);
     store.setCurrentProcessor(processor);
-    // Clear completed lessons
-    useStudioStore.setState({ completedLessons: [], completedLessonsData: [], generationMeta: null });
+    // Clear completed lessons and V3 specific state
+    useStudioStore.setState({
+      completedLessons: [],
+      completedLessonsData: [],
+      generationMeta: null,
+      // V3 specific
+      v3Outline: null,
+      v3CurrentAttempt: 1,
+      v3ReviewResults: [],
+    });
 
-    // Start streaming generation
-    this.cancelFn = studioGenerateApi.generateStream(
+    // Start V3 streaming generation
+    this.cancelFn = studioGenerateApi.generateStreamV3(
       {
         course_title: courseTitle,
         source_material: getAllSourceMaterial(sources),
         source_info: sourceInfo || '',
         processor_id: selectedProcessorId,
       },
-      {
-        onPhase: (phase, message, processorInfo) => {
-          console.log('[GenerationService] onPhase:', { phase, message, processorInfo });
-          const s = useStudioStore.getState();
-          s.setStreamStatus(message);
-          if (phase === 1) s.setGenerationPhase(1);
-          else if (phase === 2) s.setGenerationPhase(2);
-        },
-        onStructure: (meta, lessonsCount, outline, processorInfo) => {
-          console.log('[GenerationService] onStructure:', { meta, lessonsCount, outline, processorInfo });
-          const s = useStudioStore.getState();
-          s.setTotalLessons(lessonsCount);
-          s.setLessonsOutline(outline || []);
-          s.setGenerationMeta(meta);
-          console.log('[GenerationService] Store after setLessonsOutline:', useStudioStore.getState().lessonsOutline);
-        },
-        onLessonStart: (index, total, title, recommendedForms, complexityLevel) => {
-          console.log('[GenerationService] onLessonStart:', { index, total, title });
-          const s = useStudioStore.getState();
-          s.setCurrentLessonIndex(index);
-          s.setTotalLessons(total);
-          s.setStreamStatus(`正在生成课时 ${index + 1}/${total}: ${title || ''}...`);
-          s.setStreamedContent('');
-          // 清空流式步骤，准备接收新课时
-          s.clearStreamingSteps();
-          s.setStreamingLessonInfo({ title: title || `课时 ${index + 1}` });
-        },
-        onChunk: (content, phase, lessonIndex) => {
-          console.log('[GenerationService] onChunk:', { contentLength: content?.length, phase, lessonIndex });
-          const s = useStudioStore.getState();
-          s.appendStreamedContent(content);
-        },
-        onStepComplete: (lessonIndex, stepIndex, step, totalSteps) => {
-          console.log('[GenerationService] onStepComplete:', { lessonIndex, stepIndex, stepTitle: step?.title, totalSteps });
-          const s = useStudioStore.getState();
-          s.addStreamingStep(step);
-          s.setStreamStatus(`正在生成步骤 ${stepIndex + 1}/${totalSteps}...`);
-        },
-        onLessonComplete: (index, total, lesson, warning) => {
-          console.log('[GenerationService] onLessonComplete:', {
-            index,
-            total,
-            lessonTitle: lesson?.title,
-            scriptLength: lesson?.script?.length,
-            scriptSteps: lesson?.script?.map((s: any) => s.title)
-          });
-          const s = useStudioStore.getState();
-          s.addCompletedLesson(index, lesson);
-          s.clearStreamingSteps();
-          // 验证存储后的数据
-          const afterState = useStudioStore.getState();
-          console.log('[GenerationService] After addCompletedLesson:', {
-            completedLessonsCount: afterState.completedLessonsData?.length,
-            lastLessonScriptLength: afterState.completedLessonsData?.[afterState.completedLessonsData.length - 1]?.script?.length
-          });
-        },
-        onComplete: (pkg) => {
-          const s = useStudioStore.getState();
-          s.setGeneratedPackage(pkg);
-          s.setSelectedLessonId(pkg.lessons[0]?.lesson_id || null);
-          s.setCurrentView('result');
-          s.setIsGenerating(false);
-          s.clearStreamingSteps();
-          this.isRunning = false;
-          this.cancelFn = null;
-        },
-        onError: (message) => {
-          // 如果是主动暂停/取消，忽略错误
-          if (this.isPausingOrCancelling) {
-            console.log('[GenerationService] Ignoring error during pause/cancel:', message);
-            return;
-          }
-          const s = useStudioStore.getState();
-          s.setStreamStatus(`错误: ${message}`);
-          s.setGenerationError(message);
-          s.setIsGenerating(false);
-          this.isRunning = false;
-          this.cancelFn = null;
-          console.error('[GenerationService] Error:', message);
-        },
-      }
+      this.createV3Callbacks()
     );
 
     // Store cancel function in store
     store.setCancelGeneration(() => this.cancel());
+  }
+
+  /**
+   * 创建 V3 回调
+   */
+  private createV3Callbacks(): V3StreamCallbacks {
+    return {
+      onPhase: (phase, message, processorInfo) => {
+        console.log('[GenerationService V3] onPhase:', { phase, message });
+        const s = useStudioStore.getState();
+        s.setStreamStatus(message);
+        s.setGenerationPhase(phase);
+      },
+
+      onOutline: (outline: V3CourseOutline) => {
+        console.log('[GenerationService V3] onOutline:', outline);
+        const s = useStudioStore.getState();
+        s.setTotalLessons(outline.total_chapters);
+        // 转换为 lessonsOutline 格式
+        const lessonsOutline = outline.chapters.map(ch => ({
+          title: ch.title,
+          recommended_forms: ['text_content', 'simulator', 'assessment'],
+          complexity_level: 'standard',
+          suggested_simulator: ch.suggested_simulator,
+        }));
+        s.setLessonsOutline(lessonsOutline);
+        s.setGenerationMeta({
+          description: outline.description,
+          estimated_hours: outline.estimated_hours,
+          difficulty: outline.difficulty,
+        });
+        // 保存完整大纲
+        useStudioStore.setState({ v3Outline: outline });
+      },
+
+      onChapterStart: (index, total, title, attempt) => {
+        console.log('[GenerationService V3] onChapterStart:', { index, total, title, attempt });
+        const s = useStudioStore.getState();
+        s.setCurrentLessonIndex(index);
+        s.setTotalLessons(total);
+        const attemptText = attempt > 1 ? ` (第${attempt}次尝试)` : '';
+        s.setStreamStatus(`正在生成第 ${index + 1}/${total} 章: ${title}${attemptText}...`);
+        s.setStreamedContent('');
+        s.clearStreamingSteps();
+        s.setStreamingLessonInfo({ title: title || `第 ${index + 1} 章` });
+        useStudioStore.setState({ v3CurrentAttempt: attempt });
+      },
+
+      onChunk: (content, chapterIndex, attempt) => {
+        const s = useStudioStore.getState();
+        s.appendStreamedContent(content);
+      },
+
+      onChapterReview: (index, status, score, issues, simulatorIssues, comment) => {
+        console.log('[GenerationService V3] onChapterReview:', { index, status, score, issues, simulatorIssues });
+        const s = useStudioStore.getState();
+
+        // 更新状态显示审核结果
+        const statusText = status === 'approved' ? '通过' : status === 'rejected' ? '不通过' : '需修改';
+        s.setStreamStatus(`第 ${index + 1} 章审核${statusText} (${score}分)`);
+
+        // 保存审核结果
+        const currentReviews = useStudioStore.getState().v3ReviewResults || [];
+        useStudioStore.setState({
+          v3ReviewResults: [...currentReviews, { index, status, score, issues, simulatorIssues, comment }]
+        });
+      },
+
+      onChapterRetry: (index, attempt, reason) => {
+        console.log('[GenerationService V3] onChapterRetry:', { index, attempt, reason });
+        const s = useStudioStore.getState();
+        s.setStreamStatus(`第 ${index + 1} 章需要重做 (第${attempt}次尝试)...`);
+        s.setStreamedContent('');
+        useStudioStore.setState({ v3CurrentAttempt: attempt });
+      },
+
+      onChapterComplete: (index, total, chapter, attempts) => {
+        console.log('[GenerationService V3] onChapterComplete:', {
+          index,
+          total,
+          chapterTitle: chapter?.title,
+          scriptLength: chapter?.script?.length,
+          attempts
+        });
+        const s = useStudioStore.getState();
+        s.addCompletedLesson(index, chapter);
+        s.clearStreamingSteps();
+
+        const attemptText = attempts > 1 ? ` (${attempts}次尝试后通过)` : '';
+        s.setStreamStatus(`第 ${index + 1}/${total} 章完成${attemptText}`);
+      },
+
+      onComplete: (pkg, stats: V3GenerationStats) => {
+        console.log('[GenerationService V3] onComplete:', {
+          lessonsCount: pkg.lessons?.length,
+          stats
+        });
+        const s = useStudioStore.getState();
+        s.setGeneratedPackage(pkg);
+        s.setSelectedLessonId(pkg.lessons[0]?.lesson_id || null);
+        s.setCurrentView('result');
+        s.setIsGenerating(false);
+        s.clearStreamingSteps();
+
+        // 显示生成统计
+        const timeMinutes = Math.round(stats.generation_time / 60);
+        s.setStreamStatus(`生成完成！共 ${stats.total_chapters} 章，${stats.total_simulators} 个模拟器，耗时 ${timeMinutes} 分钟`);
+
+        this.isRunning = false;
+        this.cancelFn = null;
+      },
+
+      onError: (message) => {
+        if (this.isPausingOrCancelling) {
+          console.log('[GenerationService V3] Ignoring error during pause/cancel:', message);
+          return;
+        }
+        const s = useStudioStore.getState();
+        s.setStreamStatus(`错误: ${message}`);
+        s.setGenerationError(message);
+        s.setIsGenerating(false);
+        this.isRunning = false;
+        this.cancelFn = null;
+        console.error('[GenerationService V3] Error:', message);
+      },
+    };
   }
 
   /**
@@ -151,7 +205,6 @@ class StudioGenerationService {
       this.cancelFn = null;
     }
     this.isRunning = false;
-    // 延迟重置标记，确保错误回调被忽略
     setTimeout(() => { this.isPausingOrCancelling = false; }, 100);
 
     const store = useStudioStore.getState();
@@ -160,126 +213,30 @@ class StudioGenerationService {
   }
 
   /**
-   * 重试生成（出错后从断点继续）
+   * 重试生成（V3 不支持断点续传，从头开始）
    */
   retry(processor: ProcessorWithConfig | null) {
-    const store = useStudioStore.getState();
-    const {
-      sources,
-      courseTitle,
-      sourceInfo,
-      selectedProcessorId,
-      completedLessons,
-      completedLessonsData,
-      lessonsOutline,
-      generationMeta,
-      currentLessonIndex,
-    } = store;
-
-    console.log('[GenerationService] Retry called', {
-      isRunning: this.isRunning,
-      completedLessonsData: completedLessonsData?.length,
-      lessonsOutline: lessonsOutline?.length,
-      sources: sources?.length,
-      courseTitle,
-    });
+    console.log('[GenerationService V3] Retry called - starting fresh');
 
     // Cancel any existing generation
     this.cancel();
-
-    // 强制重置 isRunning 状态
     this.isRunning = false;
 
-    // 检查是否有已完成的课时可以续传
-    const hasCompletedLessons = completedLessonsData && completedLessonsData.length > 0 && lessonsOutline && lessonsOutline.length > 0;
+    // Clear all state and start fresh
+    const store = useStudioStore.getState();
+    store.setGeneratedPackage(null);
+    store.setGenerationError(null);
+    store.setStreamedContent('');
+    useStudioStore.setState({
+      completedLessons: [],
+      completedLessonsData: [],
+      generationMeta: null,
+      v3Outline: null,
+      v3CurrentAttempt: 1,
+      v3ReviewResults: [],
+    });
 
-    console.log('[GenerationService] hasCompletedLessons:', hasCompletedLessons);
-
-    if (hasCompletedLessons) {
-      // 断点续传模式
-      console.log('[GenerationService] Resuming from lesson', completedLessonsData.length);
-
-      this.isRunning = true;
-
-      // 保持已有状态，只清除错误
-      store.setCurrentView('generating');
-      store.setStreamedContent('');
-      store.setStreamStatus(`从课时 ${completedLessonsData.length + 1} 继续生成...`);
-      store.setIsGenerating(true);
-      store.setGenerationError(null);
-      store.setCurrentProcessor(processor);
-
-      // 从断点继续
-      this.cancelFn = studioGenerateApi.generateStream(
-        {
-          course_title: courseTitle,
-          source_material: getAllSourceMaterial(sources),
-          source_info: sourceInfo || '',
-          processor_id: selectedProcessorId,
-          // 断点续传参数
-          resume_from_lesson: completedLessonsData.length,
-          completed_lessons: completedLessonsData,
-          lessons_outline: lessonsOutline,
-          meta: generationMeta,
-        },
-        {
-          onPhase: (phase, message, processorInfo) => {
-            const s = useStudioStore.getState();
-            s.setStreamStatus(message);
-            s.setGenerationPhase(phase);
-          },
-          onStructure: (meta, lessonsCount, outline, processorInfo) => {
-            // 续传时结构已经有了，不需要更新
-          },
-          onLessonStart: (index, total, title, recommendedForms, complexityLevel) => {
-            const s = useStudioStore.getState();
-            s.setCurrentLessonIndex(index);
-            s.setStreamStatus(`正在生成课时 ${index + 1}/${total}: ${title || ''}...`);
-          },
-          onChunk: (content, phase, lessonIndex) => {
-            const s = useStudioStore.getState();
-            s.appendStreamedContent(content);
-          },
-          onLessonComplete: (index, total, lesson, warning) => {
-            const s = useStudioStore.getState();
-            s.addCompletedLesson(index, lesson);
-          },
-          onComplete: (pkg) => {
-            const s = useStudioStore.getState();
-            s.setGeneratedPackage(pkg);
-            s.setSelectedLessonId(pkg.lessons[0]?.lesson_id || null);
-            s.setCurrentView('result');
-            s.setIsGenerating(false);
-            this.isRunning = false;
-            this.cancelFn = null;
-          },
-          onError: (message) => {
-            // 如果是主动暂停/取消，忽略错误
-            if (this.isPausingOrCancelling) {
-              console.log('[GenerationService] Ignoring error during pause/cancel:', message);
-              return;
-            }
-            const s = useStudioStore.getState();
-            s.setStreamStatus(`错误: ${message}`);
-            s.setGenerationError(message);
-            s.setIsGenerating(false);
-            this.isRunning = false;
-            this.cancelFn = null;
-            console.error('[GenerationService] Resume Error:', message);
-          },
-        }
-      );
-
-      store.setCancelGeneration(() => this.cancel());
-    } else {
-      // 没有已完成的课时，从头开始
-      console.log('[GenerationService] No completed lessons, starting fresh');
-      store.setGeneratedPackage(null);
-      store.setGenerationError(null);
-      store.setStreamedContent('');
-      useStudioStore.setState({ completedLessons: [], completedLessonsData: [], generationMeta: null });
-      this.startGeneration(processor);
-    }
+    this.startGeneration(processor);
   }
 
   /**
@@ -290,38 +247,34 @@ class StudioGenerationService {
   }
 
   /**
-   * 暂停生成 - 取消当前请求，保留已完成的课时
+   * 暂停生成
    */
   pause() {
     if (this.isRunning && !this.isPaused) {
       this.isPaused = true;
       this.isRunning = false;
       this.isPausingOrCancelling = true;
-      // 取消当前流式请求
       if (this.cancelFn) {
         this.cancelFn();
         this.cancelFn = null;
       }
-      // 延迟重置标记，确保错误回调被忽略
       setTimeout(() => { this.isPausingOrCancelling = false; }, 100);
       useStudioStore.setState({ isPaused: true, isGenerating: false });
-      console.log('[GenerationService] Paused - request cancelled, progress saved');
+      console.log('[GenerationService V3] Paused');
     }
   }
 
   /**
-   * 继续生成 - 从断点恢复
+   * 继续生成（V3 从头开始，因为监督者需要完整上下文）
    */
   resume() {
     if (this.isPaused) {
       this.isPaused = false;
       useStudioStore.setState({ isPaused: false });
-      console.log('[GenerationService] Resuming from checkpoint...');
+      console.log('[GenerationService V3] Resuming - starting fresh due to supervisor context requirements');
 
       const store = useStudioStore.getState();
       const processor = store.currentProcessor;
-
-      // 使用 retry 方法从断点继续
       this.retry(processor);
     }
   }

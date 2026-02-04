@@ -340,7 +340,202 @@ export const studioGenerateApi = {
 
     return () => controller.abort();
   },
+
+  /**
+   * V3 流式生成课程 (监督者+生成者架构)
+   * 新架构特点：
+   * - 监督者AI生成大纲并审核每个章节
+   * - 生成者AI根据指令生成章节
+   * - 自动重试不合格的章节（最多3次）
+   * - 高质量模拟器标准
+   */
+  generateStreamV3: (data: GenerateRequestV2, callbacks: V3StreamCallbacks): (() => void) => {
+    const controller = new AbortController();
+
+    fetch(`${STUDIO_API_BASE_URL}/api/v1/studio/packages/generate-v3`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let receivedComplete = false;
+
+        const processEvent = (eventType: string, dataStr: string) => {
+          if (!eventType || !dataStr) {
+            console.warn('[SSE V3] Empty event or data, skipping');
+            return;
+          }
+          try {
+            const eventData = JSON.parse(dataStr);
+
+            switch (eventType) {
+              case 'phase':
+                callbacks.onPhase(eventData.phase, eventData.message, eventData.processor);
+                break;
+              case 'outline':
+                // V3 新事件：大纲生成完成
+                callbacks.onOutline(eventData.outline);
+                break;
+              case 'chapter_start':
+                callbacks.onChapterStart(
+                  eventData.index,
+                  eventData.total,
+                  eventData.title,
+                  eventData.attempt
+                );
+                break;
+              case 'chunk':
+                callbacks.onChunk(eventData.content, eventData.chapter_index, eventData.attempt);
+                break;
+              case 'chapter_review':
+                // V3 新事件：章节审核结果
+                callbacks.onChapterReview(
+                  eventData.index,
+                  eventData.status,
+                  eventData.score,
+                  eventData.issues,
+                  eventData.simulator_issues,
+                  eventData.comment
+                );
+                break;
+              case 'chapter_retry':
+                // V3 新事件：章节重试
+                callbacks.onChapterRetry(
+                  eventData.index,
+                  eventData.attempt,
+                  eventData.reason
+                );
+                break;
+              case 'chapter_complete':
+                callbacks.onChapterComplete(
+                  eventData.index,
+                  eventData.total,
+                  eventData.chapter,
+                  eventData.attempts
+                );
+                break;
+              case 'complete':
+                receivedComplete = true;
+                callbacks.onComplete(eventData.package, eventData.stats);
+                break;
+              case 'error':
+                callbacks.onError(eventData.message);
+                break;
+            }
+          } catch (e) {
+            console.error(`[SSE V3] Failed to parse ${eventType} event:`, e, 'Data preview:', dataStr.substring(0, 500));
+          }
+        };
+
+        const processBuffer = (buf: string): string => {
+          const events = buf.split('\n\n');
+          const remaining = events.pop() || '';
+
+          for (const eventBlock of events) {
+            if (!eventBlock.trim()) continue;
+
+            const lines = eventBlock.split('\n');
+            let currentEvent = '';
+            let dataLines: string[] = [];
+
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                currentEvent = line.slice(7).trim();
+              } else if (line.startsWith('data: ')) {
+                dataLines.push(line.slice(6));
+              } else if (line.startsWith('data:')) {
+                dataLines.push(line.slice(5));
+              }
+            }
+
+            if (currentEvent && dataLines.length > 0) {
+              const fullData = dataLines.join('');
+              processEvent(currentEvent, fullData);
+            }
+          }
+
+          return remaining;
+        };
+
+        while (reader) {
+          const { done, value } = await reader.read();
+
+          if (value) {
+            buffer += decoder.decode(value, { stream: !done });
+            buffer = processBuffer(buffer);
+          }
+
+          if (done) {
+            if (buffer.trim()) {
+              processBuffer(buffer + '\n\n');
+            }
+            if (!receivedComplete) {
+              console.error('[SSE V3] Stream ended without complete event');
+              callbacks.onError('生成流意外中断，请重试');
+            }
+            break;
+          }
+        }
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') {
+          callbacks.onError(error.message || 'V3 流式生成失败');
+        }
+      });
+
+    return () => controller.abort();
+  },
 };
+
+/**
+ * V3 流式生成回调接口
+ */
+export interface V3StreamCallbacks {
+  onPhase: (phase: number, message: string, processor?: any) => void;
+  onOutline: (outline: V3CourseOutline) => void;
+  onChapterStart: (index: number, total: number, title: string, attempt: number) => void;
+  onChunk: (content: string, chapterIndex: number, attempt: number) => void;
+  onChapterReview: (
+    index: number,
+    status: 'approved' | 'rejected' | 'needs_revision',
+    score: number,
+    issues: string[],
+    simulatorIssues: string[],
+    comment: string
+  ) => void;
+  onChapterRetry: (index: number, attempt: number, reason: string) => void;
+  onChapterComplete: (index: number, total: number, chapter: any, attempts: number) => void;
+  onComplete: (pkg: CoursePackageV2, stats: V3GenerationStats) => void;
+  onError: (message: string) => void;
+}
+
+export interface V3CourseOutline {
+  title: string;
+  description: string;
+  total_chapters: number;
+  estimated_hours: number;
+  difficulty: string;
+  chapters: Array<{
+    index: number;
+    title: string;
+    chapter_type: string;
+    suggested_simulator: string | null;
+  }>;
+}
+
+export interface V3GenerationStats {
+  total_chapters: number;
+  total_simulators: number;
+  generation_time: number;
+}
 
 // ============================================
 // Processors API (Plugin System)
