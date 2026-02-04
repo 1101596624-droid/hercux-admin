@@ -527,6 +527,7 @@ function CustomRendererInner({
 
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
 
       if (simulatorRef.current?.cleanup) {
@@ -536,23 +537,38 @@ function CustomRendererInner({
           console.warn('Cleanup error:', e);
         }
       }
+      simulatorRef.current = null;
 
-      if (elementsRef.current) {
-        elementsRef.current.forEach(elem => {
-          if (elem && typeof elem.destroy === 'function') {
-            elem.destroy();
-          }
-        });
-        elementsRef.current.clear();
-      }
+      // 清空元素引用（不销毁，让 app.destroy 处理）
+      elementsRef.current.clear();
 
       if (appRef.current) {
-        try {
-          appRef.current.destroy(true, { children: true });
-        } catch (e) {
-          console.warn('PixiJS cleanup warning:', e);
-        }
-        appRef.current = null;
+        const appToDestroy = appRef.current;
+        appRef.current = null; // 先清空引用，防止重复销毁
+
+        // 使用 setTimeout 延迟销毁，避免纹理竞态条件
+        setTimeout(() => {
+          try {
+            // 先停止渲染
+            if (appToDestroy.ticker) {
+              appToDestroy.ticker.stop();
+            }
+            // 移除所有子元素
+            if (appToDestroy.stage) {
+              appToDestroy.stage.removeChildren();
+            }
+            // 使用最安全的销毁选项 - 不销毁纹理
+            appToDestroy.destroy(false, {
+              children: false,
+              texture: false,
+              textureSource: false,
+              context: false
+            });
+          } catch (e) {
+            // 忽略销毁时的错误，组件已卸载
+            console.warn('PixiJS cleanup warning (deferred):', e);
+          }
+        }, 0);
       }
     };
   }, [code, compileCode, createContext, animate, onReady, onError]);

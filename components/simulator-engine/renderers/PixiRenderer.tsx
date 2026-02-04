@@ -1297,25 +1297,41 @@ export function PixiRenderer({ scene, onReady, onError, className }: PixiRendere
 
       // 清理动画控制器
       if (animationControllerRef.current) {
-        animationControllerRef.current.destroy();
+        try {
+          animationControllerRef.current.destroy();
+        } catch (e) {
+          console.warn('AnimationController cleanup warning:', e);
+        }
         animationControllerRef.current = null;
       }
 
       // 清理交互管理器
       if (interactionManagerRef.current) {
-        interactionManagerRef.current.destroy();
+        try {
+          interactionManagerRef.current.destroy();
+        } catch (e) {
+          console.warn('InteractionManager cleanup warning:', e);
+        }
         interactionManagerRef.current = null;
       }
 
       // 清理粒子系统
       if (particleSystemRef.current) {
-        particleSystemRef.current.destroy();
+        try {
+          particleSystemRef.current.destroy();
+        } catch (e) {
+          console.warn('ParticleSystem cleanup warning:', e);
+        }
         particleSystemRef.current = null;
       }
 
       // 清理公式动画系统
       if (formulaAnimationRef.current) {
-        formulaAnimationRef.current.clear();
+        try {
+          formulaAnimationRef.current.clear();
+        } catch (e) {
+          console.warn('FormulaAnimation cleanup warning:', e);
+        }
         formulaAnimationRef.current = null;
       }
 
@@ -1339,27 +1355,37 @@ export function PixiRenderer({ scene, onReady, onError, className }: PixiRendere
       });
       stageIndicatorsRef.current.clear();
 
-      // 清理元素引用
+      // 清理元素引用（不销毁，让 app.destroy 处理）
       elementsRef.current.clear();
 
       // 最后销毁 PixiJS 应用
       if (appRef.current) {
-        try {
-          // 先移除所有子元素，避免纹理销毁问题
-          if (appRef.current.stage) {
-            appRef.current.stage.removeChildren();
+        const appToDestroy = appRef.current;
+        appRef.current = null; // 先清空引用，防止重复销毁
+
+        // 使用 setTimeout 延迟销毁，避免纹理竞态条件
+        setTimeout(() => {
+          try {
+            // 先停止渲染
+            if (appToDestroy.ticker) {
+              appToDestroy.ticker.stop();
+            }
+            // 移除所有子元素
+            if (appToDestroy.stage) {
+              appToDestroy.stage.removeChildren();
+            }
+            // 使用最安全的销毁选项 - 不销毁纹理
+            appToDestroy.destroy(false, {
+              children: false,
+              texture: false,
+              textureSource: false,
+              context: false
+            });
+          } catch (e) {
+            // 忽略销毁时的错误，组件已卸载
+            console.warn('PixiJS cleanup warning (deferred):', e);
           }
-          // 使用更安全的销毁选项
-          appRef.current.destroy(true, {
-            children: true,
-            texture: false,
-            textureSource: false,
-            context: false
-          });
-        } catch (e) {
-          console.warn('PixiJS cleanup warning:', e);
-        }
-        appRef.current = null;
+        }, 0);
       }
     };
   }, [scene.id]); // 只依赖 scene.id，避免重复初始化
