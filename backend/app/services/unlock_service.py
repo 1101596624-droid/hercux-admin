@@ -49,7 +49,9 @@ class UnlockService:
 
         # Parse unlock_condition if it's a JSON string
         unlock_condition = parse_json_field(node.unlock_condition)
-        condition_type = unlock_condition.get("type")
+
+        # Support both "type" and "strategy" field names
+        condition_type = unlock_condition.get("type") or unlock_condition.get("strategy")
 
         if condition_type == "none":
             return True, None
@@ -82,8 +84,8 @@ class UnlockService:
                     return False, f"需要先完成前置课程: {prereq_node.title if prereq_node else '未知'}"
             return True, None
 
-        # Unknown condition type
-        return False, "未知的解锁条件"
+        # Unknown condition type - default to unlocked for safety
+        return True, None
 
     async def unlock_node(self, user_id: int, node_id: int) -> bool:
         """

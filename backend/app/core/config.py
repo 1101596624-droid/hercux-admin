@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     GEMINI_BASE_URL: str = "https://hiapi.online/v1"
     GEMINI_MODEL: str = "gemini-3-pro-image-preview-2k"  # Gemini 模型名称
 
+    # Tavily Search API (网络搜索)
+    TAVILY_API_KEY: str = ""
+
     # AWS S3
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""

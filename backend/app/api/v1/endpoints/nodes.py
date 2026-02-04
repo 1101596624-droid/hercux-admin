@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from typing import List
 from datetime import datetime, timezone
+import json
 
 from app.db.session import get_db
 from app.models.models import CourseNode, LearningProgress, NodeStatus, User
@@ -295,6 +296,22 @@ async def get_course_map(
     node_map = []
     for node in nodes:
         progress_info = progress_map.get(node.id, {})
+
+        # Parse content and config if they are strings (double-serialized JSON)
+        content = node.content
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        config = node.config
+        if isinstance(config, str):
+            try:
+                config = json.loads(config)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         node_map.append({
             "id": node.id,
             "node_id": node.node_id,
@@ -306,8 +323,8 @@ async def get_course_map(
             "status": progress_info.get("status", NodeStatus.LOCKED.value),
             "completion_percentage": progress_info.get("completion_percentage", 0.0),
             "unlock_condition": node.unlock_condition or {},
-            "content": node.content,  # Include lesson content
-            "config": node.config,    # Include node config
+            "content": content,  # Include lesson content (parsed)
+            "config": config,    # Include node config (parsed)
         })
 
     return {

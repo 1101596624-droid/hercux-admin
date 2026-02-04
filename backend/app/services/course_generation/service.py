@@ -5,8 +5,10 @@
 import json
 import logging
 import uuid
+import io
 from typing import AsyncGenerator, Dict, Any, Optional, List
 from datetime import datetime
+from pathlib import Path
 
 from .supervisor import CourseSupervisor
 from .generator import ChapterGenerator, GeneratorPromptBuilder
@@ -14,6 +16,8 @@ from .models import (
     GenerationState, CourseOutline, ChapterResult, ReviewResult,
     ReviewStatus, ChapterQualityStandards
 )
+from app.services.gemini_service import gemini_service
+from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -157,13 +161,25 @@ class CourseGenerationService:
                         chapter = self.generator.parse_streaming_response(full_response)
                     except ValueError as e:
                         logger.error(f"Failed to parse chapter {chapter_index + 1}: {e}")
+
+                        # 让监督者分析 JSON 错误并生成修复指导
+                        json_fix_guidance = await self.supervisor.analyze_json_error(
+                            raw_response=full_response,
+                            error_message=str(e),
+                            chapter_index=chapter_index
+                        )
+
                         state.increment_attempt()
+                        state.last_json_error = str(e)
+                        state.json_fix_guidance = json_fix_guidance
+
                         yield {
                             "event": "chapter_retry",
                             "data": {
                                 "index": chapter_index,
                                 "attempt": state.current_attempt,
-                                "reason": f"解析失败: {str(e)}"
+                                "reason": f"JSON解析失败: {str(e)}",
+                                "fix_guidance": json_fix_guidance
                             }
                         }
                         continue
@@ -210,12 +226,16 @@ class CourseGenerationService:
                 if chapter:
                     state.add_completed_chapter(chapter)
 
+                    # 处理章节中的图片
+                    chapter_dict = self._chapter_to_dict(chapter)
+                    chapter_dict = await self._process_chapter_images(chapter_dict, state.course_title)
+
                     yield {
                         "event": "chapter_complete",
                         "data": {
                             "index": chapter_index,
                             "total": outline.total_chapters,
-                            "chapter": self._chapter_to_dict(chapter),
+                            "chapter": chapter_dict,
                             "attempts": state.current_attempt + 1
                         }
                     }
@@ -333,3 +353,147 @@ class CourseGenerationService:
                 "covered_topics": state.covered_topics
             }
         }
+
+    async def _process_illustrated_content(
+        self,
+        step_dict: Dict[str, Any],
+        course_title: str,
+        lesson_title: str
+    ) -> Dict[str, Any]:
+        """处理图文内容，生成所需图片"""
+        diagram_spec = step_dict.get("diagram_spec")
+        step_title = step_dict.get("title", "图文内容")
+
+        if diagram_spec:
+            # 检查是否已有图片
+            if not diagram_spec.get("image_url"):
+                logger.info(f"Generating image for illustrated content: {step_title}")
+
+                try:
+                    # 调用 Gemini 生成图片
+                    image_data = await gemini_service.generate_diagram(
+                        diagram_spec=diagram_spec,
+                        course_title=course_title,
+                        lesson_title=lesson_title
+                    )
+
+                    if image_data:
+                        # 保存图片
+                        diagram_id = diagram_spec.get("diagram_id", str(uuid.uuid4())[:8])
+                        filename = f"diagram_{diagram_id}.png"
+
+                        # 使用 storage_service 保存
+                        image_info = await self._save_generated_image(
+                            image_data, filename, "diagrams"
+                        )
+
+                        if image_info:
+                            diagram_spec["image_url"] = image_info["file_url"]
+                            diagram_spec["image_generated"] = True
+                            logger.info(f"Image generated and saved: {image_info['file_url']}")
+                        else:
+                            logger.warning(f"Failed to save image for: {step_title}")
+                            diagram_spec["image_url"] = None
+                            diagram_spec["image_generated"] = False
+                    else:
+                        logger.warning(f"Failed to generate image for: {step_title}")
+                        diagram_spec["image_url"] = None
+                        diagram_spec["image_generated"] = False
+
+                except Exception as e:
+                    logger.error(f"Error generating image for {step_title}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    diagram_spec["image_url"] = None
+                    diagram_spec["image_generated"] = False
+
+                # 确保更新 step 中的 diagram_spec
+                step_dict["diagram_spec"] = diagram_spec
+        else:
+            # 如果没有 diagram_spec，创建一个默认的
+            logger.warning(f"No diagram_spec found for illustrated_content: {step_title}, creating default")
+            step_dict["diagram_spec"] = {
+                "type": "static_diagram",
+                "description": step_title,
+                "image_url": None,
+                "image_generated": False
+            }
+
+        return step_dict
+
+    async def _save_generated_image(
+        self,
+        image_data: bytes,
+        filename: str,
+        category: str = "images",
+        target_width: int = 800,
+        target_height: int = 600
+    ) -> Optional[Dict[str, Any]]:
+        """
+        保存生成的图片，自动转换格式并裁剪到目标尺寸
+
+        Args:
+            image_data: 图片二进制数据
+            filename: 文件名
+            category: 存储类别
+            target_width: 目标宽度
+            target_height: 目标高度
+        """
+        try:
+            from PIL import Image
+
+            # 打开图片
+            image = Image.open(io.BytesIO(image_data))
+
+            # 转换为 RGB (处理 RGBA、P 等模式)
+            if image.mode == "RGBA":
+                background = Image.new("RGB", image.size, (255, 255, 255))
+                background.paste(image, mask=image.split()[3])
+                image = background
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+
+            # 智能调整到目标尺寸
+            image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+            # 确保目录存在
+            storage_dir = storage_service.directories.get(category, storage_service.directories["images"])
+            storage_dir.mkdir(parents=True, exist_ok=True)
+
+            # 生成唯一文件名 (统一使用 .jpg 格式)
+            unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
+            if not unique_filename.endswith('.jpg'):
+                unique_filename = unique_filename.rsplit('.', 1)[0] + '.jpg'
+
+            file_path = storage_dir / unique_filename
+
+            # 保存为 JPEG 格式，优化质量和大小
+            image.save(file_path, "JPEG", quality=85, optimize=True)
+
+            # 返回文件信息 (使用 /upload/ 前缀匹配静态文件挂载路径)
+            return {
+                "filename": unique_filename,
+                "file_path": str(file_path),
+                "file_url": f"/upload/{category}/{unique_filename}",
+                "width": image.size[0],
+                "height": image.size[1]
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to save generated image: {e}")
+            return None
+
+    async def _process_chapter_images(
+        self,
+        chapter_dict: Dict[str, Any],
+        course_title: str
+    ) -> Dict[str, Any]:
+        """处理章节中的所有图片"""
+        lesson_title = chapter_dict.get("title", "")
+
+        for step in chapter_dict.get("script", []):
+            step_type = step.get("type", "")
+            if step_type == "illustrated_content":
+                await self._process_illustrated_content(step, course_title, lesson_title)
+
+        return chapter_dict

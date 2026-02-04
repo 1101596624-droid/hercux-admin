@@ -1,6 +1,6 @@
 """
 Grinder API - 做题家模块后端代理
-代理前端请求到 Claude API
+支持监督式题目生成，确保内容质量和时效性
 """
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,12 +10,15 @@ import httpx
 import json
 import ssl
 import certifi
+import logging
 
 from app.models.models import User
 from app.core.security import get_current_user
 from app.core.config import settings
+from app.services.grinder.service import grinder_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # 创建使用 certifi 证书的 SSL 上下文
@@ -203,3 +206,60 @@ async def grinder_chat_stream(
             "Connection": "keep-alive",
         }
     )
+
+
+# ============ 监督式题目生成 API ============
+
+class ExamGenerateRequest(BaseModel):
+    """考试生成请求"""
+    topic: str
+    question_count: int = 5
+    focus_categories: Optional[List[str]] = None
+
+
+@router.post("/generate-exam")
+async def generate_exam_supervised(
+    request: ExamGenerateRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    监督式生成考试题目
+
+    特点：
+    1. 自动搜索最新信息确保内容时效性
+    2. AI 监督者审核题目质量
+    3. 验证答案正确性
+    4. 自动修复 JSON 格式问题
+    """
+    try:
+        logger.info(f"Generating supervised exam for topic: {request.topic}")
+
+        result = await grinder_service.generate_exam(
+            topic=request.topic,
+            question_count=request.question_count,
+            focus_categories=request.focus_categories
+        )
+
+        return {
+            "success": True,
+            "exam": result.get('exam'),
+            "review": result.get('review'),
+            "metadata": {
+                "latest_info_used": result.get('latest_info_used', False),
+                "generation_attempts": result.get('attempts', 1),
+                "warning": result.get('warning')
+            }
+        }
+
+    except ValueError as e:
+        logger.error(f"Exam generation failed: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"题目生成失败: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in exam generation: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"服务器错误: {str(e)}"
+        )

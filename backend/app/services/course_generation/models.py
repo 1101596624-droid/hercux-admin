@@ -29,7 +29,7 @@ class SimulatorQualityStandards:
     """模拟器质量标准 - 高标准"""
 
     # === 代码质量标准 ===
-    min_code_lines: int = 25                    # 最少代码行数
+    min_code_lines: int = 60                    # 最少代码行数（提高到60行）
     must_have_setup: bool = True                # 必须有 setup 函数
     must_have_update: bool = True               # 必须有 update 函数
     must_use_variables: bool = True             # 必须使用变量（与滑块联动）
@@ -37,9 +37,11 @@ class SimulatorQualityStandards:
     max_variables: int = 5                      # 最多变量数量
 
     # === 视觉质量标准 ===
-    min_visual_elements: int = 3                # 最少视觉元素（圆、矩形、文本等）
+    min_visual_elements: int = 5                # 最少视觉元素（提高到5种）
     must_have_animation: bool = True            # 必须有动画效果
     must_have_labels: bool = True               # 必须有文字标签说明
+    must_have_legend: bool = True               # 必须有图例
+    must_have_data_display: bool = True         # 必须有数据显示面板
     recommended_colors: List[str] = field(default_factory=lambda: [
         '#3B82F6',  # 蓝色
         '#10B981',  # 绿色
@@ -282,6 +284,10 @@ class GenerationState:
     current_chapter_index: int = 0
     current_attempt: int = 0
     max_attempts: int = 3  # 每章最多重试次数
+
+    # JSON 解析错误信息（用于监督者指导修复）
+    last_json_error: Optional[str] = None
+    json_fix_guidance: Optional[str] = None
 
     # 监督者对话状态
     supervisor_conversation_id: Optional[str] = None

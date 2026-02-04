@@ -21,7 +21,7 @@ from app.schemas.studio import (
     PackageListItem, CoursePackageV2, GenerateRequestV2,
     UploadResponse, ProcessorListResponse, PackageListResponse, HealthResponse
 )
-from app.services.studio_service import get_studio_service, DEFAULT_PROCESSORS
+from app.services.studio_service import DEFAULT_PROCESSORS
 
 logger = logging.getLogger(__name__)
 
@@ -745,114 +745,6 @@ async def duplicate_package(
 
 
 # ============================================
-# Generation API (SSE Streaming)
-# ============================================
-
-@router.post("/packages/generate-v2")
-async def generate_course_v2(
-    request: GenerateRequestV2,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Generate course with SSE streaming
-
-    Returns Server-Sent Events stream with:
-    - phase: Generation phase updates
-    - structure: Course structure (meta, outline)
-    - lesson_start: Starting new lesson
-    - chunk: Content chunks
-    - lesson_complete: Lesson completed
-    - complete: Generation complete with full package
-    - error: Error occurred
-    """
-    # Get processor system prompt if custom
-    processor_prompt = None
-    if request.processor_id:
-        result = await db.execute(
-            select(StudioProcessor).where(StudioProcessor.id == request.processor_id)
-        )
-        processor = result.scalar_one_or_none()
-        if processor:
-            processor_prompt = processor.system_prompt
-
-    service = get_studio_service()
-
-    async def event_generator():
-        try:
-            async for event in service.generate_course_stream(
-                course_title=request.course_title,
-                source_material=request.source_material,
-                source_info=request.source_info,
-                processor_id=request.processor_id,
-                processor_prompt=processor_prompt,
-                resume_from_lesson=request.resume_from_lesson,
-                completed_lessons=request.completed_lessons,
-                lessons_outline=request.lessons_outline,
-                existing_meta=request.meta
-            ):
-                event_type = event.get("event", "message")
-                event_data = event.get("data", {})
-
-                # Save package to DB on complete (don't block the stream)
-                if event_type == "complete" and "package" in event_data:
-                    pkg = event_data["package"]
-                    try:
-                        await _save_package_to_db(db, pkg, request.processor_id)
-                    except Exception as save_error:
-                        logger.error(f"Failed to save package (non-blocking): {str(save_error)}")
-
-                yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-
-        except Exception as e:
-            logger.error(f"Generation stream error: {str(e)}")
-            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
-
-
-async def _save_package_to_db(db: AsyncSession, pkg: dict, processor_id: str):
-    """Save generated package to database"""
-    try:
-        # Debug: Log simulator_spec data before saving
-        for lesson_idx, lesson in enumerate(pkg.get("lessons", [])):
-            for step_idx, step in enumerate(lesson.get("script", [])):
-                if step.get("type") == "simulator":
-                    sim_spec = step.get("simulator_spec", {})
-                    logger.info(f"[SavePackage] Lesson {lesson_idx}, Step {step_idx}: simulator_spec keys = {list(sim_spec.keys())}")
-                    logger.info(f"[SavePackage] mode = {sim_spec.get('mode')}, custom_code exists = {bool(sim_spec.get('custom_code'))}")
-
-        meta = pkg.get("meta", {})
-        package = StudioPackage(
-            id=pkg.get("id", str(uuid.uuid4())),
-            title=meta.get("title", "Untitled"),
-            description=meta.get("description", ""),
-            source_info=meta.get("source_info", ""),
-            style=meta.get("style", processor_id),
-            status=StudioPackageStatus.DRAFT,
-            meta=meta,
-            lessons=pkg.get("lessons", []),
-            edges=pkg.get("edges", []),
-            global_ai_config=pkg.get("global_ai_config", {}),
-            total_lessons=meta.get("total_lessons", len(pkg.get("lessons", []))),
-            estimated_hours=meta.get("estimated_hours", 0),
-            processor_id=processor_id
-        )
-        db.add(package)
-        await db.commit()
-        logger.info(f"Package saved: {package.id}")
-    except Exception as e:
-        logger.error(f"Failed to save package: {str(e)}")
-
-
-# ============================================
 # Generation API V3 (Supervisor-Generator Architecture)
 # ============================================
 
@@ -928,6 +820,32 @@ async def generate_course_v3(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+async def _save_package_to_db(db: AsyncSession, pkg: dict, processor_id: str):
+    """Save generated package to database"""
+    try:
+        meta = pkg.get("meta", {})
+        package = StudioPackage(
+            id=pkg.get("id", str(uuid.uuid4())),
+            title=meta.get("title", "Untitled"),
+            description=meta.get("description", ""),
+            source_info=meta.get("source_info", ""),
+            style=meta.get("style", processor_id),
+            status=StudioPackageStatus.DRAFT,
+            meta=meta,
+            lessons=pkg.get("lessons", []),
+            edges=pkg.get("edges", []),
+            global_ai_config=pkg.get("global_ai_config", {}),
+            total_lessons=meta.get("total_lessons", len(pkg.get("lessons", []))),
+            estimated_hours=meta.get("estimated_hours", 0),
+            processor_id=processor_id
+        )
+        db.add(package)
+        await db.commit()
+        logger.info(f"Package saved: {package.id}")
+    except Exception as e:
+        logger.error(f"Failed to save package: {str(e)}")
 
 
 # ============================================

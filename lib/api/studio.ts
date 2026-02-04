@@ -10,7 +10,6 @@ import type {
   PackageListItem,
   CoursePackageV2,
   GenerateRequestV2,
-  V2StreamCallbacks,
   UploadResponse,
 } from '@/types/studio';
 import { apiClient } from './admin/client';
@@ -179,168 +178,10 @@ export const studioPackagesApi = {
 };
 
 // ============================================
-// V2 Generation API (Lesson-based with Processors)
+// V3 Generation API (Supervisor-Generator Architecture)
 // ============================================
 
 export const studioGenerateApi = {
-  /**
-   * V2 流式生成课程 (基于 Lesson 结构)
-   */
-  generateStream: (data: GenerateRequestV2, callbacks: V2StreamCallbacks): (() => void) => {
-    const controller = new AbortController();
-
-    fetch(`${STUDIO_API_BASE_URL}/api/v1/studio/packages/generate-v2`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let receivedComplete = false;
-
-        const processEvent = (eventType: string, dataStr: string) => {
-          if (!eventType || !dataStr) {
-            console.warn('[SSE] Empty event or data, skipping');
-            return;
-          }
-          try {
-            const eventData = JSON.parse(dataStr);
-
-            switch (eventType) {
-              case 'phase':
-                callbacks.onPhase(eventData.phase, eventData.message, eventData.processor);
-                break;
-              case 'structure':
-                callbacks.onStructure(
-                  eventData.meta,
-                  eventData.lessons_count,
-                  eventData.lessons_outline,
-                  eventData.processor
-                );
-                break;
-              case 'lesson_start':
-                callbacks.onLessonStart(
-                  eventData.index,
-                  eventData.total,
-                  eventData.title,
-                  eventData.recommended_forms,
-                  eventData.complexity_level
-                );
-                break;
-              case 'chunk':
-                callbacks.onChunk(eventData.content, eventData.phase, eventData.lesson_index);
-                break;
-              case 'step_complete':
-                if (callbacks.onStepComplete) {
-                  callbacks.onStepComplete(
-                    eventData.lesson_index,
-                    eventData.step_index,
-                    eventData.step,
-                    eventData.total_steps
-                  );
-                }
-                break;
-              case 'lesson_complete':
-                console.log('[SSE] lesson_complete received:', {
-                  index: eventData.index,
-                  total: eventData.total,
-                  hasLesson: !!eventData.lesson,
-                  lessonTitle: eventData.lesson?.title,
-                  scriptLength: eventData.lesson?.script?.length,
-                  scriptSteps: eventData.lesson?.script?.map((s: any) => s.title)
-                });
-                callbacks.onLessonComplete(
-                  eventData.index,
-                  eventData.total,
-                  eventData.lesson,
-                  eventData.warning
-                );
-                break;
-              case 'complete':
-                receivedComplete = true;
-                callbacks.onComplete(eventData.package);
-                break;
-              case 'error':
-                callbacks.onError(eventData.message);
-                break;
-            }
-          } catch (e) {
-            console.error(`[SSE] Failed to parse ${eventType} event:`, e, 'Data length:', dataStr.length, 'Data preview:', dataStr.substring(0, 500));
-          }
-        };
-
-        // 改进的 SSE 解析：正确处理多行 data 和事件边界
-        const processBuffer = (buf: string): string => {
-          // SSE 事件以双换行符分隔
-          const events = buf.split('\n\n');
-          // 最后一个可能是不完整的事件，保留到下次处理
-          const remaining = events.pop() || '';
-
-          for (const eventBlock of events) {
-            if (!eventBlock.trim()) continue;
-
-            const lines = eventBlock.split('\n');
-            let currentEvent = '';
-            let dataLines: string[] = [];
-
-            for (const line of lines) {
-              if (line.startsWith('event: ')) {
-                currentEvent = line.slice(7).trim();
-              } else if (line.startsWith('data: ')) {
-                dataLines.push(line.slice(6));
-              } else if (line.startsWith('data:')) {
-                // 处理 "data:" 后面没有空格的情况
-                dataLines.push(line.slice(5));
-              }
-            }
-
-            // 合并所有 data 行
-            if (currentEvent && dataLines.length > 0) {
-              const fullData = dataLines.join('');
-              processEvent(currentEvent, fullData);
-            }
-          }
-
-          return remaining;
-        };
-
-        while (reader) {
-          const { done, value } = await reader.read();
-
-          if (value) {
-            buffer += decoder.decode(value, { stream: !done });
-            buffer = processBuffer(buffer);
-          }
-
-          if (done) {
-            // 处理剩余的缓冲区
-            if (buffer.trim()) {
-              processBuffer(buffer + '\n\n');
-            }
-            if (!receivedComplete) {
-              console.error('[SSE] Stream ended without complete event');
-              callbacks.onError('生成流意外中断，请重试');
-            }
-            break;
-          }
-        }
-      })
-      .catch((error) => {
-        if (error.name !== 'AbortError') {
-          callbacks.onError(error.message || 'V2 流式生成失败');
-        }
-      });
-
-    return () => controller.abort();
-  },
-
   /**
    * V3 流式生成课程 (监督者+生成者架构)
    * 新架构特点：

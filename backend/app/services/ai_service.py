@@ -1,6 +1,7 @@
 """
 AI Service - Claude API Integration
 Implements the "AI Muscles" for Socratic guidance and training plan generation
+With web search integration for latest information
 """
 from typing import List, Dict, Optional, Any
 from anthropic import AsyncAnthropic
@@ -23,7 +24,7 @@ def get_enum_value(enum_obj) -> str:
 
 
 class AIService:
-    """Service for AI-powered features using Claude API"""
+    """Service for AI-powered features using Claude API with web search"""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -40,15 +41,44 @@ class AIService:
         self.max_retries = 3
         self.timeout = 120  # Increased timeout for training plan generation
 
+        # Initialize search service
+        self._search_service = None
+
+    @property
+    def search_service(self):
+        """Lazy load search service"""
+        if self._search_service is None:
+            from app.services.tavily_service import get_tavily_service
+            self._search_service = get_tavily_service()
+        return self._search_service
+
+    async def search_latest_info(self, topic: str, context_type: str = "general") -> str:
+        """
+        搜索最新信息
+
+        Args:
+            topic: 搜索主题
+            context_type: 上下文类型 ("general", "academic", "news")
+
+        Returns:
+            格式化的搜索结果
+        """
+        try:
+            return await self.search_service.search_for_context(topic, context_type)
+        except Exception as e:
+            logger.warning(f"Search failed: {e}")
+            return ""
+
     async def guide_chat(
         self,
         user_id: int,
         node_id: int,
         user_message: str,
-        node_context: Optional[Dict] = None
+        node_context: Optional[Dict] = None,
+        enable_search: bool = True  # 默认启用搜索
     ) -> str:
         """
-        AI tutor conversation with Socratic guidance
+        AI tutor conversation with Socratic guidance and web search
         Used in the right sidebar of the Learning Workstation
 
         Args:
@@ -56,6 +86,7 @@ class AIService:
             node_id: Current course node ID
             user_message: User's question/message
             node_context: Additional context (simulator state, video timestamp, etc.)
+            enable_search: Whether to search for latest information
 
         Returns:
             AI assistant's response
@@ -68,8 +99,14 @@ class AIService:
         if not node:
             return "抱歉，无法找到当前课程节点信息。"
 
-        # Build system prompt with node context
-        system_prompt = self._build_guide_system_prompt(node, node_context)
+        # Search for latest information if enabled
+        search_context = ""
+        if enable_search and self._should_search(user_message):
+            search_topic = self._extract_search_topic(user_message, node.title)
+            search_context = await self.search_latest_info(search_topic)
+
+        # Build system prompt with node context and search results
+        system_prompt = self._build_guide_system_prompt(node, node_context, search_context)
 
         # Build message history
         messages = []
@@ -105,6 +142,24 @@ class AIService:
         except Exception as e:
             print(f"Claude API error: {e}")
             return "抱歉，AI 导师暂时无法响应。请稍后再试。"
+
+    def _should_search(self, message: str) -> bool:
+        """判断是否需要搜索最新信息"""
+        # 包含这些关键词时触发搜索
+        search_triggers = [
+            "最新", "最近", "现在", "目前", "当前",
+            "2024", "2025", "2026",
+            "新闻", "研究", "发现", "进展",
+            "是什么", "怎么样", "如何",
+            "数据", "统计", "报告"
+        ]
+        return any(trigger in message for trigger in search_triggers)
+
+    def _extract_search_topic(self, message: str, node_title: str) -> str:
+        """从消息中提取搜索主题"""
+        # 简单实现：使用消息的前50个字符 + 节点标题
+        topic = message[:50] if len(message) > 50 else message
+        return f"{node_title} {topic}"
 
     async def generate_training_plan(
         self,
@@ -305,13 +360,14 @@ class AIService:
     def _build_guide_system_prompt(
         self,
         node: CourseNode,
-        context: Optional[Dict] = None
+        context: Optional[Dict] = None,
+        search_context: str = ""
     ) -> str:
         """Build system prompt for AI guide based on node context"""
 
         base_prompt = f"""你是 HERCU 学习平台的 AI 导师。你的角色是通过苏格拉底式提问引导学生深入思考，而不是直接给出答案。
 
-当前课程节点信���：
+当前课程节点信息：
 - 标题：{node.title}
 - 类型：{get_enum_value(node.type)}
 - 描述：{node.description or '无'}
@@ -323,6 +379,21 @@ class AIService:
 4. 鼓励学生观察、实验、推理
 5. 当学生遇到困难时，提供渐进式的提示
 6. 使用简洁、友好的语言
+7. 【重要】优先使用最新的网络搜索信息，确保回答准确、时效性强
+
+"""
+
+        # Add search context if available
+        if search_context:
+            base_prompt += f"""
+【最新网络信息】
+以下是关于当前话题的最新信息，请在回答时参考：
+{search_context}
+
+请注意：
+- 优先使用上述最新信息回答问题
+- 如果信息与你的知识有冲突，以最新信息为准
+- 引用信息时可以提及来源
 
 """
 
