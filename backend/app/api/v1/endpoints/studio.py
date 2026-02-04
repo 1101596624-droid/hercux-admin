@@ -853,6 +853,84 @@ async def _save_package_to_db(db: AsyncSession, pkg: dict, processor_id: str):
 
 
 # ============================================
+# Generation API V3 (Supervisor-Generator Architecture)
+# ============================================
+
+@router.post("/packages/generate-v3")
+async def generate_course_v3(
+    request: GenerateRequestV2,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate course with Supervisor-Generator architecture (V3)
+
+    This new architecture uses:
+    - Supervisor AI: Generates outline, reviews chapters, decides retries
+    - Generator AI: Generates individual chapters based on supervisor's instructions
+
+    Returns Server-Sent Events stream with:
+    - phase: Generation phase updates
+    - outline: Course outline generated
+    - chapter_start: Starting new chapter
+    - chunk: Content chunks
+    - chapter_review: Chapter review result
+    - chapter_retry: Chapter needs retry
+    - chapter_complete: Chapter completed
+    - complete: Generation complete with full package
+    - error: Error occurred
+    """
+    from app.services.course_generation import CourseGenerationService
+
+    # Get processor system prompt if custom
+    processor_prompt = None
+    if request.processor_id:
+        result = await db.execute(
+            select(StudioProcessor).where(StudioProcessor.id == request.processor_id)
+        )
+        processor = result.scalar_one_or_none()
+        if processor:
+            processor_prompt = processor.system_prompt
+
+    service = CourseGenerationService()
+
+    async def event_generator():
+        try:
+            async for event in service.generate_course_stream(
+                course_title=request.course_title,
+                source_material=request.source_material,
+                source_info=request.source_info,
+                processor_id=request.processor_id,
+                processor_prompt=processor_prompt
+            ):
+                event_type = event.get("event", "message")
+                event_data = event.get("data", {})
+
+                # Save package to DB on complete
+                if event_type == "complete" and "package" in event_data:
+                    pkg = event_data["package"]
+                    try:
+                        await _save_package_to_db(db, pkg, request.processor_id)
+                    except Exception as save_error:
+                        logger.error(f"Failed to save package (non-blocking): {str(save_error)}")
+
+                yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Generation V3 stream error: {str(e)}", exc_info=True)
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+# ============================================
 # Health API
 # ============================================
 
