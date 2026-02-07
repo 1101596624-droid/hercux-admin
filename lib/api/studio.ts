@@ -270,6 +270,16 @@ export const studioGenerateApi = {
               case 'error':
                 callbacks.onError(eventData.message);
                 break;
+              case 'simulator_progress':
+                callbacks.onSimulatorProgress?.(
+                  eventData.simulator_name,
+                  eventData.step_index,
+                  eventData.round,
+                  eventData.max_rounds,
+                  eventData.stage,
+                  eventData.message
+                );
+                break;
             }
           } catch (e) {
             console.error(`[SSE V3] Failed to parse ${eventType} event:`, e, 'Data preview:', dataStr.substring(0, 500));
@@ -356,6 +366,14 @@ export interface V3StreamCallbacks {
   onChapterComplete: (index: number, total: number, chapter: any, attempts: number) => void;
   onComplete: (pkg: CoursePackageV2, stats: V3GenerationStats) => void;
   onError: (message: string) => void;
+  onSimulatorProgress?: (
+    simulatorName: string,
+    stepIndex: number,
+    round: number,
+    maxRounds: number,
+    stage: string,
+    message: string
+  ) => void;
 }
 
 export interface V3CourseOutline {

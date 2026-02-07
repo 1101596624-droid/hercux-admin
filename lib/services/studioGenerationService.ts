@@ -143,6 +143,12 @@ class StudioGenerationService {
         useStudioStore.setState({ v3CurrentAttempt: attempt });
       },
 
+      onSimulatorProgress: (simulatorName, _stepIndex, round, maxRounds, stage, message) => {
+        console.log('[GenerationService V3] onSimulatorProgress:', { simulatorName, round, maxRounds, stage });
+        const s = useStudioStore.getState();
+        s.setStreamStatus(`模拟器 "${simulatorName}": ${message}`);
+      },
+
       onChapterComplete: (index, total, chapter, attempts) => {
         console.log('[GenerationService V3] onChapterComplete:', {
           index,

@@ -170,6 +170,8 @@ function CustomRendererInner({
   const timeRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
+  const errorCountRef = useRef<number>(0);
+  const MAX_UPDATE_ERRORS = 3;
   const elementIdCounter = useRef<number>(0);
 
   const [error, setError] = useState<Error | null>(null);
@@ -238,16 +240,42 @@ function CustomRendererInner({
       },
 
       // 创建线条
-      createLine: (points, color, lineWidth = 2) => {
+      createLine: (...args: any[]) => {
         const id = generateId();
         const graphics = new PIXI.Graphics();
-        if (points.length > 1) {
-          graphics.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length; i++) {
-            graphics.lineTo(points[i].x, points[i].y);
+        let pts: Array<{x: number, y: number}>;
+        let color: string;
+        let lineWidth = 2;
+
+        // 兼容两种调用方式:
+        // 正确: createLine([{x,y},{x,y}], color, lineWidth)
+        // AI常见错误: createLine(x1, y1, x2, y2, {color, width}) 或 createLine(x1, y1, x2, y2, color, width)
+        if (Array.isArray(args[0])) {
+          pts = args[0];
+          color = args[1] || '#ffffff';
+          lineWidth = args[2] || 2;
+        } else if (typeof args[0] === 'number') {
+          pts = [{x: args[0], y: args[1]}, {x: args[2], y: args[3]}];
+          if (typeof args[4] === 'object' && args[4] !== null) {
+            color = args[4].color || '#ffffff';
+            lineWidth = args[4].width || args[4].lineWidth || 2;
+          } else {
+            color = args[4] || '#ffffff';
+            lineWidth = args[5] || 2;
+          }
+        } else {
+          pts = [];
+          color = '#ffffff';
+        }
+
+        if (pts.length > 1) {
+          graphics.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) {
+            graphics.lineTo(pts[i].x, pts[i].y);
           }
           graphics.stroke({ color: parseColor(color), width: lineWidth });
         }
+        (graphics as any)._lineData = { pts, color, lineWidth };
         app.stage.addChild(graphics);
         elementsRef.current.set(id, graphics);
         return id;
@@ -318,9 +346,21 @@ function CustomRendererInner({
       },
 
       // 设置位置
-      setPosition: (id, x, y) => {
+      setPosition: (id: string, x: number, y: number, x2?: number, y2?: number) => {
         const elem = elementsRef.current.get(id);
-        if (elem) elem.position.set(x, y);
+        if (!elem) return;
+        // 线段支持4坐标重绘: setPosition(id, x1, y1, x2, y2)
+        if (x2 !== undefined && y2 !== undefined && (elem as any)._lineData) {
+          const ld = (elem as any)._lineData;
+          (elem as any).clear();
+          (elem as any).moveTo(x, y);
+          (elem as any).lineTo(x2, y2);
+          (elem as any).stroke({ color: parseColor(ld.color), width: ld.lineWidth });
+          ld.pts = [{x, y}, {x: x2, y: y2}];
+          elem.position.set(0, 0);
+        } else {
+          elem.position.set(x, y);
+        }
       },
 
       // 设置缩放
@@ -443,8 +483,8 @@ function CustomRendererInner({
 
       return simulator;
     } catch (err) {
-      console.error('代码编译失败:', err);
-      setError(err as Error);
+      console.error('代码编译失败:', (err as Error).message);
+      setError(new Error('模拟器加载失败，请点击重试或联系老师'));
       onError?.(err as Error);
       return null;
     }
@@ -464,13 +504,21 @@ function CustomRendererInner({
       try {
         const ctx = createContext(deltaTime);
         simulatorRef.current.update(ctx);
+        errorCountRef.current = 0;
       } catch (err) {
         console.error('更新循环错误:', err);
+        errorCountRef.current += 1;
+        if (errorCountRef.current >= MAX_UPDATE_ERRORS) {
+          console.error('模拟器原始错误:', (err as Error).message);
+          setError(new Error('模拟器运行出错，请点击重试或联系老师'));
+          onError?.(err as Error);
+          return;
+        }
       }
     }
 
     animationFrameRef.current = requestAnimationFrame(animate);
-  }, [createContext]);
+  }, [createContext, onError]);
 
   // 初始化
   useEffect(() => {
@@ -592,8 +640,30 @@ function CustomRendererInner({
           borderRadius: '8px',
           color: '#fecaca',
           fontSize: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
         }}>
-          <strong>错误：</strong> {error.message}
+          <span>{error.message}</span>
+          <button
+            onClick={() => {
+              setError(null);
+              errorCountRef.current = 0;
+            }}
+            style={{
+              marginLeft: '12px',
+              padding: '4px 12px',
+              backgroundColor: '#dc2626',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            重试
+          </button>
         </div>
       )}
     </div>

@@ -786,18 +786,55 @@ async def generate_course_v3(
     service = CourseGenerationService()
 
     async def event_generator():
-        try:
-            async for event in service.generate_course_stream(
-                course_title=request.course_title,
-                source_material=request.source_material,
-                source_info=request.source_info,
-                processor_id=request.processor_id,
-                processor_prompt=processor_prompt
-            ):
-                event_type = event.get("event", "message")
-                event_data = event.get("data", {})
+        import asyncio
 
-                # Save package to DB on complete
+        queue = asyncio.Queue()
+        done = False
+
+        async def produce_events():
+            nonlocal done
+            try:
+                async for event in service.generate_course_stream(
+                    course_title=request.course_title,
+                    source_material=request.source_material,
+                    source_info=request.source_info,
+                    processor_id=request.processor_id,
+                    processor_prompt=processor_prompt
+                ):
+                    await queue.put(event)
+            except Exception as e:
+                await queue.put({"_error": str(e)})
+            finally:
+                done = True
+                await queue.put(None)
+
+        async def produce_heartbeats():
+            while not done:
+                await asyncio.sleep(15)
+                if not done:
+                    await queue.put({"_heartbeat": True})
+
+        event_task = asyncio.create_task(produce_events())
+        heartbeat_task = asyncio.create_task(produce_heartbeats())
+
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+
+                if isinstance(item, dict) and item.get("_heartbeat"):
+                    yield ": heartbeat\n\n"
+                    continue
+
+                if isinstance(item, dict) and "_error" in item:
+                    logger.error(f"Generation V3 stream error: {item['_error']}")
+                    yield f"event: error\ndata: {json.dumps({'message': item['_error']})}\n\n"
+                    break
+
+                event_type = item.get("event", "message")
+                event_data = item.get("data", {})
+
                 if event_type == "complete" and "package" in event_data:
                     pkg = event_data["package"]
                     try:
@@ -810,6 +847,10 @@ async def generate_course_v3(
         except Exception as e:
             logger.error(f"Generation V3 stream error: {str(e)}", exc_info=True)
             yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+        finally:
+            heartbeat_task.cancel()
+            if not event_task.done():
+                event_task.cancel()
 
     return StreamingResponse(
         event_generator(),
