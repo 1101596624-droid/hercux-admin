@@ -5,10 +5,43 @@
  * 根据组件类型显示不同的配置表单
  */
 
-import React from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import type { ComponentType, NodeConfig, VideoConfig, QuizConfig, TextConfig, QuizQuestion, IllustratedConfig } from '@/types/editor';
 import { Input } from '@/components/ui/Input';
 import { SimulatorConfigEditor } from './SimulatorConfigEditor';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+
+/** Helper: upload file via multipart/form-data */
+async function uploadFile(
+  endpoint: string,
+  file: File,
+  extraFields?: Record<string, string>,
+  onProgress?: (pct: number) => void,
+): Promise<any> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}${endpoint}`);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        try { reject(new Error(JSON.parse(xhr.responseText).detail || `上传失败 (${xhr.status})`)); }
+        catch { reject(new Error(`上传失败 (${xhr.status})`)); }
+      }
+    };
+    xhr.onerror = () => reject(new Error('网络错误'));
+    const fd = new FormData();
+    fd.append('file', file);
+    if (extraFields) Object.entries(extraFields).forEach(([k, v]) => fd.append(k, v));
+    xhr.send(fd);
+  });
+}
 
 interface ConfigEditorProps {
   type: ComponentType;
@@ -60,7 +93,7 @@ export function ConfigEditor({ type, config, onChange }: ConfigEditorProps) {
     default:
       return (
         <div className="text-dark-500 text-sm">
-          请选择组件类型
+          该组件类型暂不支持编辑
         </div>
       );
   }
@@ -74,15 +107,130 @@ interface VideoConfigEditorProps {
 
 function VideoConfigEditor({ config, onChange }: VideoConfigEditorProps) {
   const currentConfig: VideoConfig = config || { videoUrl: '' };
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = useCallback(async (file: File) => {
+    const validTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/x-flv', 'video/x-ms-wmv', 'video/x-m4v'];
+    if (!file.type.startsWith('video/')) {
+      setError('请选择视频文件');
+      return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      setError('视频文件不能超过 100MB');
+      return;
+    }
+    setUploading(true);
+    setProgress(0);
+    setError(null);
+    try {
+      const result = await uploadFile('/upload/video', file, undefined, setProgress);
+      onChange({ ...currentConfig, videoUrl: result.file_url });
+    } catch (e: any) {
+      setError(e.message || '上传失败');
+    } finally {
+      setUploading(false);
+    }
+  }, [currentConfig, onChange]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleUpload(file);
+  }, [handleUpload]);
+
+  const handleDelete = () => {
+    onChange({ ...currentConfig, videoUrl: '' });
+  };
 
   return (
     <div className="space-y-4">
-      <Input
-        label="视频 URL"
-        placeholder="https://example.com/video.mp4"
-        value={currentConfig.videoUrl}
-        onChange={(e) => onChange({ ...currentConfig, videoUrl: e.target.value })}
+      {/* Upload area or video preview */}
+      {currentConfig.videoUrl ? (
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-dark-700">视频预览</label>
+          <video
+            src={currentConfig.videoUrl}
+            controls
+            className="w-full rounded-lg border border-dark-200"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="text-sm text-primary-600 hover:text-primary-700"
+            >
+              重新上传
+            </button>
+            <button onClick={handleDelete} className="text-sm text-red-500 hover:text-red-600">
+              删除视频
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <label className="block text-sm font-medium text-dark-700 mb-1.5">上传视频</label>
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            onClick={() => !uploading && fileInputRef.current?.click()}
+            className="border-2 border-dashed border-dark-300 rounded-lg p-8 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
+          >
+            {uploading ? (
+              <div className="space-y-2">
+                <p className="text-sm text-dark-500">上传中... {progress}%</p>
+                <div className="w-full bg-dark-200 rounded-full h-2">
+                  <div className="bg-primary-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                </div>
+              </div>
+            ) : (
+              <>
+                <svg className="w-10 h-10 mx-auto text-dark-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p className="text-sm text-dark-500">拖拽视频到此处，或点击选择文件</p>
+                <p className="text-xs text-dark-400 mt-1">支持 mp4, webm, mov 等格式，最大 100MB</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
       />
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      {/* Collapsible URL input */}
+      <div>
+        <button
+          onClick={() => setShowUrlInput(!showUrlInput)}
+          className="text-xs text-dark-400 hover:text-dark-600 flex items-center gap-1"
+        >
+          <svg className={`w-3 h-3 transition-transform ${showUrlInput ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          手动输入 URL
+        </button>
+        {showUrlInput && (
+          <div className="mt-2">
+            <Input
+              label="视频 URL"
+              placeholder="https://example.com/video.mp4"
+              value={currentConfig.videoUrl}
+              onChange={(e) => onChange({ ...currentConfig, videoUrl: e.target.value })}
+            />
+          </div>
+        )}
+      </div>
+
       <Input
         label="字幕 URL（可选）"
         placeholder="https://example.com/subtitle.vtt"
@@ -310,20 +458,124 @@ interface IllustratedConfigEditorProps {
 function IllustratedConfigEditor({ textConfig, illustratedConfig, onChange }: IllustratedConfigEditorProps) {
   const currentTextConfig: TextConfig = textConfig || { content: '', format: 'markdown' };
   const currentIllustratedConfig: IllustratedConfig = illustratedConfig || {};
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('请选择图片文件');
+      return;
+    }
+    setUploading(true);
+    setError(null);
+    try {
+      const result = await uploadFile('/upload/image', file, { category: 'images' });
+      onChange({
+        illustratedConfig: { ...currentIllustratedConfig, imageUrl: result.file_url }
+      });
+    } catch (e: any) {
+      setError(e.message || '上传失败');
+    } finally {
+      setUploading(false);
+    }
+  }, [currentIllustratedConfig, onChange]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleUpload(file);
+  }, [handleUpload]);
+
+  const handleDeleteImage = () => {
+    onChange({
+      illustratedConfig: { ...currentIllustratedConfig, imageUrl: '' }
+    });
+  };
 
   return (
     <div className="space-y-6">
       {/* 图片配置 */}
       <div className="space-y-4">
         <h4 className="text-sm font-medium text-dark-700 border-b border-dark-200 pb-2">图片配置</h4>
-        <Input
-          label="图片 URL"
-          placeholder="https://example.com/image.jpg"
-          value={currentIllustratedConfig.imageUrl || ''}
-          onChange={(e) => onChange({
-            illustratedConfig: { ...currentIllustratedConfig, imageUrl: e.target.value }
-          })}
+
+        {/* Upload area or image preview */}
+        {currentIllustratedConfig.imageUrl ? (
+          <div className="space-y-2">
+            <img
+              src={currentIllustratedConfig.imageUrl}
+              alt={currentIllustratedConfig.imageAlt || ''}
+              className="max-w-full h-auto rounded-lg border border-dark-200 object-contain"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="text-sm text-primary-600 hover:text-primary-700"
+              >
+                重新上传
+              </button>
+              <button onClick={handleDeleteImage} className="text-sm text-red-500 hover:text-red-600">
+                删除图片
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            onClick={() => !uploading && fileInputRef.current?.click()}
+            className="border-2 border-dashed border-dark-300 rounded-lg p-8 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
+          >
+            {uploading ? (
+              <p className="text-sm text-dark-500">上传中...</p>
+            ) : (
+              <>
+                <svg className="w-10 h-10 mx-auto text-dark-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <p className="text-sm text-dark-500">拖拽图片到此处，或点击选择文件</p>
+                <p className="text-xs text-dark-400 mt-1">支持 jpg, png, gif, webp 格式</p>
+              </>
+            )}
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
         />
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        {/* Collapsible URL input */}
+        <div>
+          <button
+            onClick={() => setShowUrlInput(!showUrlInput)}
+            className="text-xs text-dark-400 hover:text-dark-600 flex items-center gap-1"
+          >
+            <svg className={`w-3 h-3 transition-transform ${showUrlInput ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            手动输入 URL
+          </button>
+          {showUrlInput && (
+            <div className="mt-2">
+              <Input
+                label="图片 URL"
+                placeholder="https://example.com/image.jpg"
+                value={currentIllustratedConfig.imageUrl || ''}
+                onChange={(e) => onChange({
+                  illustratedConfig: { ...currentIllustratedConfig, imageUrl: e.target.value }
+                })}
+              />
+            </div>
+          )}
+        </div>
+
         <Input
           label="图片描述（Alt）"
           placeholder="图片的描述文字"
@@ -393,16 +645,6 @@ function IllustratedConfigEditor({ textConfig, illustratedConfig, onChange }: Il
           />
         </div>
       </div>
-    </div>
-  );
-}
-
-// Placeholder editors for other types
-function DiagramConfigEditor() {
-  return (
-    <div className="p-4 bg-dark-50 rounded-lg text-center text-dark-500">
-      <p className="mb-2">图表配置</p>
-      <p className="text-sm">图表编辑器开发中...</p>
     </div>
   );
 }

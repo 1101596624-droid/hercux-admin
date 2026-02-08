@@ -15,7 +15,7 @@ interface ComponentTypeSelectorProps {
   onChange: (type: ComponentType) => void;
 }
 
-const componentTypeConfig: Record<ComponentType, { icon: React.ReactNode; description: string; color: string }> = {
+const componentTypeConfig: Partial<Record<ComponentType, { icon: React.ReactNode; description: string; color: string }>> = {
   video: {
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -80,42 +80,6 @@ const componentTypeConfig: Record<ComponentType, { icon: React.ReactNode; descri
     description: '快速检测',
     color: 'bg-teal-50 border-teal-200 text-teal-700',
   },
-  practice: {
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-      </svg>
-    ),
-    description: '简单练习',
-    color: 'bg-yellow-50 border-yellow-200 text-yellow-700',
-  },
-  exam: {
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-      </svg>
-    ),
-    description: '考试',
-    color: 'bg-red-50 border-red-200 text-red-700',
-  },
-  model_3d: {
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-      </svg>
-    ),
-    description: '3D 模型',
-    color: 'bg-pink-50 border-pink-200 text-pink-700',
-  },
-  reading: {
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-      </svg>
-    ),
-    description: '阅读材料',
-    color: 'bg-cyan-50 border-cyan-200 text-cyan-700',
-  },
 };
 
 export function ComponentTypeSelector({ value, onChange }: ComponentTypeSelectorProps) {
@@ -127,6 +91,7 @@ export function ComponentTypeSelector({ value, onChange }: ComponentTypeSelector
       <div className="grid grid-cols-2 gap-3">
         {(Object.keys(componentTypeConfig) as ComponentType[]).map((type) => {
           const config = componentTypeConfig[type];
+          if (!config) return null;
           const isSelected = value === type;
 
           return (

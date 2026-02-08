@@ -27,7 +27,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body className={`${inter.variable} ${notoSansSC.variable} ${poppins.variable} font-sans antialiased`}>
+      <body className={`${inter.variable} ${notoSansSC.variable} ${poppins.variable} font-sans antialiased bg-slate-50`}>
         {children}
       </body>
     </html>

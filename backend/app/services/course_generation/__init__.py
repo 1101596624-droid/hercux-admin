@@ -4,7 +4,8 @@ from .generator import ChapterGenerator, GeneratorPromptBuilder
 from .models import (
     GenerationState, CourseOutline, ChapterOutline, ChapterResult,
     ReviewResult, ReviewStatus, ChapterType, ChapterQualityStandards,
-    SimulatorQualityStandards, SimulatorSpec, ChapterStep
+    SimulatorQualityStandards, SimulatorSpec, ChapterStep,
+    CodeSyntaxError, SyntaxErrorType, CodeQualityScore
 )
 from .service import CourseGenerationService
 
@@ -28,5 +29,10 @@ __all__ = [
     'ChapterQualityStandards',
     'SimulatorQualityStandards',
     'SimulatorSpec',
-    'ChapterStep'
+    'ChapterStep',
+
+    # New: Error and Quality
+    'CodeSyntaxError',
+    'SyntaxErrorType',
+    'CodeQualityScore'
 ]

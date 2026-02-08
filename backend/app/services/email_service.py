@@ -1,6 +1,6 @@
 """
 Email Service for sending verification codes
-Uses QQ SMTP server
+Uses QQ SMTP server and Redis for code storage
 """
 import smtplib
 import random
@@ -12,10 +12,17 @@ from email.utils import formataddr
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 import json
+import redis
 
-# In-memory storage for verification codes (use Redis in production)
-# Format: {email: {"code": "123456", "expires_at": datetime, "purpose": "register"}}
-_verification_codes: dict = {}
+# Redis connection for verification codes
+_redis_client: Optional[redis.Redis] = None
+
+def get_redis_client() -> redis.Redis:
+    """Get or create Redis client"""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
+    return _redis_client
 
 # QQ SMTP Configuration
 SMTP_SERVER = "smtp.qq.com"
@@ -27,6 +34,7 @@ SENDER_NAME = "HERCU 学习平台"
 # Code settings
 CODE_LENGTH = 6
 CODE_EXPIRE_MINUTES = 10
+REDIS_KEY_PREFIX = "hercu:verification_code:"
 
 
 def generate_verification_code() -> str:
@@ -35,12 +43,15 @@ def generate_verification_code() -> str:
 
 
 def store_verification_code(email: str, code: str, purpose: str = "register") -> None:
-    """Store verification code with expiration"""
-    _verification_codes[email.lower()] = {
+    """Store verification code in Redis with expiration"""
+    redis_client = get_redis_client()
+    key = f"{REDIS_KEY_PREFIX}{email.lower()}"
+    data = json.dumps({
         "code": code,
-        "expires_at": datetime.now() + timedelta(minutes=CODE_EXPIRE_MINUTES),
-        "purpose": purpose
-    }
+        "purpose": purpose,
+        "created_at": datetime.now().isoformat()
+    })
+    redis_client.setex(key, CODE_EXPIRE_MINUTES * 60, data)
 
 
 def verify_code(email: str, code: str, purpose: str = "register") -> Tuple[bool, str]:
@@ -48,28 +59,29 @@ def verify_code(email: str, code: str, purpose: str = "register") -> Tuple[bool,
     Verify the code for an email
     Returns: (is_valid, error_message)
     """
-    email_lower = email.lower()
+    redis_client = get_redis_client()
+    key = f"{REDIS_KEY_PREFIX}{email.lower()}"
 
-    if email_lower not in _verification_codes:
+    data = redis_client.get(key)
+    if not data:
         return False, "验证码不存在或已过期，请重新获取"
 
-    stored = _verification_codes[email_lower]
-
-    # Check expiration
-    if datetime.now() > stored["expires_at"]:
-        del _verification_codes[email_lower]
-        return False, "验证码已过期，请重新获取"
+    try:
+        stored = json.loads(data)
+    except json.JSONDecodeError:
+        redis_client.delete(key)
+        return False, "验证码数据损坏，请重新获取"
 
     # Check purpose
-    if stored["purpose"] != purpose:
+    if stored.get("purpose") != purpose:
         return False, "验证码用途不匹配"
 
     # Check code
-    if stored["code"] != code:
+    if stored.get("code") != code:
         return False, "验证码错误"
 
     # Valid - remove the code after successful verification
-    del _verification_codes[email_lower]
+    redis_client.delete(key)
     return True, ""
 
 
@@ -78,19 +90,24 @@ def can_send_code(email: str) -> Tuple[bool, int]:
     Check if we can send a new code (rate limiting)
     Returns: (can_send, seconds_to_wait)
     """
-    email_lower = email.lower()
+    redis_client = get_redis_client()
+    key = f"{REDIS_KEY_PREFIX}{email.lower()}"
 
-    if email_lower not in _verification_codes:
+    data = redis_client.get(key)
+    if not data:
         return True, 0
 
-    stored = _verification_codes[email_lower]
-    # Allow resend after 60 seconds
-    created_at = stored["expires_at"] - timedelta(minutes=CODE_EXPIRE_MINUTES)
-    wait_until = created_at + timedelta(seconds=60)
+    try:
+        stored = json.loads(data)
+        created_at = datetime.fromisoformat(stored.get("created_at", ""))
+        # Allow resend after 60 seconds
+        wait_until = created_at + timedelta(seconds=60)
 
-    if datetime.now() < wait_until:
-        seconds_left = int((wait_until - datetime.now()).total_seconds())
-        return False, seconds_left
+        if datetime.now() < wait_until:
+            seconds_left = int((wait_until - datetime.now()).total_seconds())
+            return False, max(0, seconds_left)
+    except (json.JSONDecodeError, ValueError):
+        pass
 
     return True, 0
 

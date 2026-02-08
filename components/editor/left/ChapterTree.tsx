@@ -43,7 +43,7 @@ export function ChapterTree() {
           onSelect={() => selectChapter(chapter.id)}
           onToggleExpand={() => toggleChapterExpanded(chapter.id)}
           onSelectSection={(sectionId) => selectSection(sectionId)}
-          onAddSection={() => addSection(chapter.id)}
+          onAddSection={(type) => addSection(chapter.id, undefined, type)}
           onDeleteChapter={() => deleteChapter(chapter.id)}
           onRenameChapter={(title) => updateChapter(chapter.id, { title })}
           onDeleteSection={(sectionId) => deleteSection(sectionId)}

@@ -4,17 +4,37 @@ AI 导师对话 API - 重构版本
 """
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Dict, Optional
 import sqlite3
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 from app.services.claude_service import get_claude_service, Message
 from app.db.sync_manager import get_sync_db_manager
 
 router = APIRouter(tags=["AI Tutor"])
+
+# 输入限制
+MAX_MESSAGE_LENGTH = 2000
+
+
+def sanitize_text(text: str) -> str:
+    """过滤特殊字符，防止 API 报错"""
+    if not text:
+        return text
+    return (
+        text
+        # 移除控制字符 (ASCII 0-31, 127)，保留换行(\n)和制表符(\t)
+        .replace('\r', '\n')
+        .translate(str.maketrans('', '', ''.join(chr(i) for i in range(32) if i not in (9, 10)) + chr(127)))
+        # 移除零宽字符
+        .replace('\u200b', '').replace('\u200c', '').replace('\u200d', '')
+        .replace('\ufeff', '').replace('\u2060', '').replace('\u00ad', '')
+        # 规范化 Unicode
+    )
 
 
 def get_sync_db():
@@ -46,6 +66,30 @@ class ChatRequest(BaseModel):
     conversation_history: List[Dict[str, str]] = []
     current_layer: str = "L1"
     ai_tone: str = "friendly"  # professional, friendly, concise
+    # 前端可能发送的额外字段
+    current_step_index: Optional[int] = None
+    total_steps: Optional[int] = None
+    current_step_content: Optional[Dict] = None
+
+    model_config = {"extra": "ignore"}  # 忽略其他未定义的字段
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v: str) -> str:
+        """验证并清理消息"""
+        v = sanitize_text(v)
+        if len(v) > MAX_MESSAGE_LENGTH:
+            raise ValueError(f'消息过长，最多 {MAX_MESSAGE_LENGTH} 字符，请精简后重新输入')
+        return v
+
+    @field_validator('conversation_history')
+    @classmethod
+    def validate_history(cls, v: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """清理对话历史中的特殊字符"""
+        for msg in v:
+            if 'content' in msg:
+                msg['content'] = sanitize_text(msg['content'])
+        return v
 
 
 class ChatResponse(BaseModel):
@@ -74,25 +118,51 @@ async def chat_with_tutor(request: ChatRequest):
         AI 导师回复
     """
     try:
-        # 使用同步数据库管理器获取节点信息
-        db_manager = get_sync_db_manager()
-        node_info = db_manager.get_node_info(request.node_id)
+        # 尝试从数据库获取节点信息
+        node_info = None
+        if request.node_id and request.node_id > 0:
+            try:
+                db_manager = get_sync_db_manager()
+                node_info = db_manager.get_node_info(request.node_id)
+            except Exception:
+                pass  # 数据库查询失败时继续使用前端提供的上下文
 
-        if not node_info:
-            raise HTTPException(status_code=404, detail="Node not found")
-
-        # 构建上下文
-        context = {
-            "node": {
-                "id": node_info["id"],
-                "title": node_info["title"],
-                "learning_objectives": node_info["learning_objectives"]
-            },
-            "ai_tutor_config": node_info["ai_tutor_config"],
-            "current_layer": request.current_layer,
-            "progress": {},
-            "ai_tone": request.ai_tone  # 传递 AI 语气设置
-        }
+        # 构建上下文 - 优先使用数据库信息，否则使用前端提供的上下文
+        if node_info:
+            context = {
+                "node": {
+                    "id": node_info["id"],
+                    "title": node_info["title"],
+                    "learning_objectives": node_info["learning_objectives"]
+                },
+                "ai_tutor_config": node_info["ai_tutor_config"],
+                "current_layer": request.current_layer,
+                "progress": {},
+                "ai_tone": request.ai_tone
+            }
+        else:
+            # 使用前端提供的上下文
+            step_content = request.current_step_content or {}
+            context = {
+                "node": {
+                    "id": request.node_id,
+                    "title": step_content.get("title", "学习内容"),
+                    "learning_objectives": []
+                },
+                "ai_tutor_config": {
+                    "diagnostic_focus": step_content.get("diagnostic_focus", []),
+                    "probing_questions": [{
+                        "question": step_content.get("question", ""),
+                        "expected_elements": step_content.get("expected_elements", []),
+                        "intent": step_content.get("intent", "")
+                    }] if step_content.get("question") else []
+                },
+                "current_layer": request.current_layer,
+                "progress": {},
+                "ai_tone": request.ai_tone,
+                "current_step_index": request.current_step_index,
+                "total_steps": request.total_steps
+            }
 
         # 转换对话历史
         conversation_history = [

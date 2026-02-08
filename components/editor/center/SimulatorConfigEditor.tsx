@@ -7,6 +7,7 @@
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/Input';
 import { Plus, Trash2 } from 'lucide-react';
+import { SimulatorAIGenerator } from './SimulatorAIGenerator';
 import type {
   SimulatorConfig,
   SimulatorInputConfig,
@@ -179,12 +180,12 @@ function CustomSimulatorEditor({
   config: SimulatorConfig;
   onChange: (updates: Partial<SimulatorConfig>) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<'basic' | 'inputs' | 'outputs'>('basic');
+  const [activeTab, setActiveTab] = useState<'ai' | 'basic' | 'inputs' | 'outputs'>('ai');
 
   return (
     <div className="space-y-4">
       <div className="flex border-b border-dark-200">
-        {(['basic', 'inputs', 'outputs'] as const).map((tab) => (
+        {(['ai', 'basic', 'inputs', 'outputs'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -194,12 +195,17 @@ function CustomSimulatorEditor({
                 : 'border-transparent text-dark-500'
             }`}
           >
+            {tab === 'ai' && 'AI 生成'}
             {tab === 'basic' && '基本'}
             {tab === 'inputs' && '输入'}
             {tab === 'outputs' && '输出'}
           </button>
         ))}
       </div>
+
+      {activeTab === 'ai' && (
+        <SimulatorAIGenerator onGenerated={onChange} />
+      )}
 
       {activeTab === 'basic' && (
         <div className="space-y-4">

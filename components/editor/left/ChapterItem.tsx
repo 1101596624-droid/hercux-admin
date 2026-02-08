@@ -9,6 +9,18 @@ import React from 'react';
 import { cn } from '@/lib/cn';
 import type { EditorChapter, EditorSection } from '@/types/editor';
 import { COMPONENT_TYPE_LABELS } from '@/types/editor';
+import type { ComponentType } from '@/types/editor';
+
+// 可用的小节类型（与 ComponentTypeSelector 保持一致，排除未实装类型）
+const AVAILABLE_SECTION_TYPES: { type: ComponentType; label: string }[] = [
+  { type: 'text_content', label: '文本内容' },
+  { type: 'illustrated_content', label: '图文内容' },
+  { type: 'video', label: '视频' },
+  { type: 'simulator', label: '交互模拟器' },
+  { type: 'ai_tutor', label: 'AI 导师' },
+  { type: 'assessment', label: '测验' },
+  { type: 'quick_check', label: '快速检测' },
+];
 
 interface ChapterItemProps {
   chapter: EditorChapter;
@@ -18,7 +30,7 @@ interface ChapterItemProps {
   onSelect: () => void;
   onToggleExpand: () => void;
   onSelectSection: (sectionId: string) => void;
-  onAddSection: () => void;
+  onAddSection: (type?: ComponentType) => void;
   onDeleteChapter: () => void;
   onRenameChapter: (title: string) => void;
   onDeleteSection: (sectionId: string) => void;
@@ -89,6 +101,7 @@ export function ChapterItem({
   const [isEditing, setIsEditing] = React.useState(false);
   const [editTitle, setEditTitle] = React.useState(chapter.title);
   const [showMenu, setShowMenu] = React.useState(false);
+  const [showTypeSelector, setShowTypeSelector] = React.useState(false);
   const displayIndex = index + 1; // 显示序号从1开始
 
   const handleRename = () => {
@@ -96,6 +109,11 @@ export function ChapterItem({
       onRenameChapter(editTitle.trim());
     }
     setIsEditing(false);
+  };
+
+  const handleAddSectionWithType = (type: ComponentType) => {
+    onAddSection(type);
+    setShowTypeSelector(false);
   };
 
   return (
@@ -182,19 +200,40 @@ export function ChapterItem({
             <>
               <div
                 className="fixed inset-0 z-10"
-                onClick={() => setShowMenu(false)}
+                onClick={() => { setShowMenu(false); setShowTypeSelector(false); }}
               />
               <div className="absolute right-0 top-full mt-1 w-36 bg-white rounded-lg shadow-lg border border-dark-200 py-1 z-20">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAddSection();
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50"
-                >
-                  添加小节
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTypeSelector(!showTypeSelector);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50 flex items-center justify-between"
+                  >
+                    添加小节
+                    <svg className="w-3 h-3 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                  {showTypeSelector && (
+                    <div className="absolute left-full top-0 ml-1 w-40 bg-white rounded-lg shadow-lg border border-dark-200 py-1 z-30">
+                      {AVAILABLE_SECTION_TYPES.map((item) => (
+                        <button
+                          key={item.type}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddSectionWithType(item.type);
+                            setShowMenu(false);
+                          }}
+                          className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -238,13 +277,35 @@ export function ChapterItem({
 
       {/* Empty State */}
       {chapter.expanded && chapter.sections.length === 0 && (
-        <div className="ml-6 pl-4 py-2">
+        <div className="ml-6 pl-4 py-2 relative">
           <button
-            onClick={onAddSection}
+            onClick={() => setShowTypeSelector(!showTypeSelector)}
             className="text-sm text-dark-400 hover:text-primary-600"
           >
             + 添加小节
           </button>
+          {showTypeSelector && !showMenu && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setShowTypeSelector(false)}
+              />
+              <div className="absolute left-4 top-full mt-1 w-40 bg-white rounded-lg shadow-lg border border-dark-200 py-1 z-20">
+                {AVAILABLE_SECTION_TYPES.map((item) => (
+                  <button
+                    key={item.type}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAddSectionWithType(item.type);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

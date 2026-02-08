@@ -844,6 +844,14 @@ class CourseGenerationService:
 图片类型：{context.get('diagram_type', '')}
 包含元素：{', '.join(context.get('elements', []))}
 
+【生成步骤 - 必须按顺序执行】
+第一步：场景分析
+- 列出图中所有元素（人物、物体、箭头、标注等）
+- 明确每个元素的位置（上/下/左/右/中心）和朝向（面向左/右/前方）
+- 明确元素之间的空间关系（A在B的左上方、C包含D等）
+- 如果有运动/过程，明确方向（从左到右、顺时针、向上等）
+
+第二步：基于分析写详细描述
 要求：
 - {min_length}-{max_length}字
 - 详细描述图片应该展示的内容
@@ -936,7 +944,7 @@ class CourseGenerationService:
         for step_idx, step in enumerate(chapter.script):
             if step.type == 'simulator' and step.simulator_spec:
                 # 方案C：如果变量为空或太少，添加默认变量
-                if not step.simulator_spec.variables or len(step.simulator_spec.variables) < 3:
+                if not step.simulator_spec.variables or len(step.simulator_spec.variables) < 2:
                     logger.warning(f"Simulator '{step.simulator_spec.name}' has insufficient variables, adding defaults...")
                     step.simulator_spec.variables = self._get_default_variables(
                         step.simulator_spec.name,
@@ -1159,15 +1167,12 @@ class CourseGenerationService:
         """
         方案C：根据模拟器名称和描述生成默认变量
 
-        当骨架生成的变量为空或不足时，提供合理的默认变量
+        当骨架生成的变量为空或不足时，提供合理的默认变量（2个）
         """
-        # 通用默认变量模板
+        # 通用默认变量模板（2个）
         default_vars = [
             {"name": "param1", "label": "参数1", "min": 0, "max": 100, "default": 50, "step": 1, "unit": ""},
             {"name": "param2", "label": "参数2", "min": 0, "max": 100, "default": 50, "step": 1, "unit": ""},
-            {"name": "param3", "label": "参数3", "min": 0, "max": 100, "default": 50, "step": 1, "unit": ""},
-            {"name": "param4", "label": "参数4", "min": 0, "max": 100, "default": 50, "step": 1, "unit": ""},
-            {"name": "speed", "label": "速度", "min": 1, "max": 100, "default": 50, "step": 1, "unit": ""},
         ]
 
         # 根据关键词匹配更合适的变量
@@ -1177,22 +1182,20 @@ class CourseGenerationService:
             default_vars[0] = {"name": "speed", "label": "速度", "min": 1, "max": 100, "default": 50, "step": 1, "unit": "m/s"}
         if any(k in keywords for k in ["质量", "mass", "重量"]):
             default_vars[1] = {"name": "mass", "label": "质量", "min": 1, "max": 100, "default": 10, "step": 1, "unit": "kg"}
-        if any(k in keywords for k in ["力", "force", "推力"]):
-            default_vars[2] = {"name": "force", "label": "力", "min": 0, "max": 100, "default": 20, "step": 1, "unit": "N"}
-        if any(k in keywords for k in ["时间", "time", "周期"]):
-            default_vars[3] = {"name": "time", "label": "时间", "min": 1, "max": 60, "default": 10, "step": 1, "unit": "s"}
-        if any(k in keywords for k in ["数量", "count", "个数"]):
-            default_vars[4] = {"name": "count", "label": "数量", "min": 1, "max": 20, "default": 5, "step": 1, "unit": "个"}
+        if any(k in keywords for k in ["力", "force", "推力"]) and len(default_vars) < 3:
+            default_vars.append({"name": "force", "label": "力", "min": 0, "max": 100, "default": 20, "step": 1, "unit": "N"})
         if any(k in keywords for k in ["比例", "ratio", "百分比"]):
             default_vars[0] = {"name": "ratio", "label": "比例", "min": 0, "max": 100, "default": 50, "step": 5, "unit": "%"}
         if any(k in keywords for k in ["温度", "temperature", "热"]):
             default_vars[1] = {"name": "temperature", "label": "温度", "min": 0, "max": 100, "default": 25, "step": 1, "unit": "°C"}
-        if any(k in keywords for k in ["距离", "distance", "长度"]):
-            default_vars[2] = {"name": "distance", "label": "距离", "min": 1, "max": 100, "default": 50, "step": 1, "unit": "m"}
+        if any(k in keywords for k in ["距离", "distance", "长度"]) and len(default_vars) < 3:
+            default_vars.append({"name": "distance", "label": "距离", "min": 1, "max": 100, "default": 50, "step": 1, "unit": "m"})
         if any(k in keywords for k in ["角度", "angle", "旋转"]):
-            default_vars[3] = {"name": "angle", "label": "角度", "min": 0, "max": 360, "default": 45, "step": 5, "unit": "°"}
+            default_vars[0] = {"name": "angle", "label": "角度", "min": 0, "max": 360, "default": 45, "step": 5, "unit": "°"}
         if any(k in keywords for k in ["频率", "frequency", "hz"]):
-            default_vars[4] = {"name": "frequency", "label": "频率", "min": 1, "max": 100, "default": 10, "step": 1, "unit": "Hz"}
+            default_vars[1] = {"name": "frequency", "label": "频率", "min": 1, "max": 100, "default": 10, "step": 1, "unit": "Hz"}
+        if any(k in keywords for k in ["时间", "time", "周期"]) and len(default_vars) < 3:
+            default_vars.append({"name": "time_param", "label": "时间", "min": 1, "max": 60, "default": 10, "step": 1, "unit": "s"})
 
         return default_vars
 
@@ -1235,8 +1238,7 @@ class CourseGenerationService:
                     description='',
                     variables=[
                         {'name': 'param1', 'label': '参数1', 'min': 0, 'max': 100, 'default': 50, 'step': 1, 'unit': ''},
-                        {'name': 'param2', 'label': '参数2', 'min': 0, 'max': 100, 'default': 50, 'step': 1, 'unit': ''},
-                        {'name': 'param3', 'label': '参数3', 'min': 0, 'max': 100, 'default': 50, 'step': 1, 'unit': ''}
+                        {'name': 'param2', 'label': '参数2', 'min': 0, 'max': 100, 'default': 50, 'step': 1, 'unit': ''}
                     ],
                     custom_code=''
                 )

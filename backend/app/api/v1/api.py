@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     notes,
     settings,
     ai,
+    tts,
     # 学生端功能
     training,
     grinder,
@@ -90,3 +91,6 @@ api_router.include_router(admin_achievement_center.router, prefix="/admin", tags
 api_router.include_router(admin_api_config.router, prefix="/admin", tags=["Admin - API Config"])
 api_router.include_router(admin_settings.router, prefix="/admin", tags=["Admin - Settings"])
 api_router.include_router(admin_admins.router, prefix="/admin", tags=["Admin - Admin Management"])
+
+# TTS 语音合成
+api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])

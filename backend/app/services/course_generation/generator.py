@@ -23,7 +23,8 @@ VALID_CREATE_APIS = [
 ]
 VALID_OPERATION_APIS = [
     'setPosition', 'setScale', 'setRotation', 'setAlpha',
-    'setColor', 'setText', 'setVisible', 'remove', 'clear'
+    'setColor', 'setText', 'setVisible', 'remove', 'clear',
+    'setGlow', 'setCurvePoints', 'setRadius', 'setSize'
 ]
 VALID_VAR_APIS = ['getVar', 'setVar']
 VALID_CTX_PROPERTIES = ['width', 'height', 'time', 'deltaTime', 'math']
@@ -380,16 +381,16 @@ function update(ctx) {{
 - 标题、图例、数值显示缺一不可
 
 【画布尺寸与边界约束 - 非常重要】
-- 画布尺寸：1000 x 650 像素
+- 画布尺寸通过 ctx.width / ctx.height 获取（不同端尺寸不同，必须用比例计算）
 - 所有元素必须完全在画布内，不能超出边界
 - 动画轨迹必须限制在画布范围内，使用 ctx.math.clamp 约束坐标
-- 文字元素必须留足边距，确保完整显示：
-  * 左侧文字 x >= 100（留出滑块控制区域）
-  * 右侧文字 x <= 950
-  * 顶部文字 y >= 50
-  * 底部文字 y <= 620
-- 主要内容区域建议：x: 100-950, y: 60-600
-- 左上角区域(0-80, 0-50)预留给系统UI，不要放置元素
+- 安全绘制区域：
+  * 左边界：x >= width * 0.1（左侧预留给滑块控制区）
+  * 右边界：x <= width * 0.95
+  * 顶部：y >= 60（标题区域）
+  * 底部：y <= height - 40（底部留给变量标签）
+- 数据面板放在主体区域内部，不要贴边
+- 所有动画坐标必须用 math.clamp 限制在安全区域内
 
 【颜色规范 - 严格遵守，只能使用以下颜色】
 画布背景是深色(#0f172a)，必须使用以下亮色：
@@ -433,7 +434,7 @@ function update(ctx) {{
 【变量和工具】
 - ctx.getVar('name') → number  // 读取滑块变量
 - ctx.setVar('name', value)    // 设置变量
-- ctx.width = 1000, ctx.height = 650
+- ctx.width, ctx.height  // 画布宽高（不同端尺寸不同，用比例计算）
 - ctx.time  // 累计时间(秒)
 - ctx.deltaTime  // 帧间隔(秒)
 - ctx.math.sin/cos/tan/abs/sqrt/pow/min/max/random/PI
@@ -634,28 +635,62 @@ function update(ctx) {{
 
 【模拟器】{simulator_name}
 【描述】{simulator_description}
-【画布尺寸】1000 x 650 像素（通过 ctx.width / ctx.height 获取，所有坐标用比例计算）
+【画布尺寸】通过 ctx.width / ctx.height 获取（不同端尺寸不同，必须用比例计算）
+【安全绘制区域 - 严格遵守】
+- 左边界：x >= width * 0.12
+- 右边界：x <= width * 0.95
+- 顶部：y >= 55（标题区域）
+- 底部：y <= height - 35
+- 所有动态坐标必须用 math.clamp 限制在安全区域内
 【变量】
 {variables_desc}
 {history_hint}
+
+【核心设计原则 - 交互式因果关系函数图】
+模拟器用坐标系和函数曲线展示"自变量对因变量的影响"。
+滑块拖动时曲线形态实时变化，直观展示因果关系。
+核心元素：坐标系（X轴=自变量范围，Y轴=因变量范围）、函数曲线（用createCurve+setCurvePoints画f(x)曲线）、
+当前值标注（竖线+亮点标注当前滑块值对应的点）、多曲线对比（不同因变量用不同颜色）、右侧数值面板（实时显示计算结果）。
+【重要】坐标轴和刻度必须固定不变！X轴和Y轴的范围、刻度线、刻度标签全部在setup中确定，update中绝对不能修改。
+拖动滑块只改变曲线的形态和标注点的位置，坐标系本身不动。
+禁止做具象机械动画（如人物跑步、球体碰撞、复杂运动轨迹、人体动作），也禁止画任何示意图、图示、小人、图标。
+正确做法：整个画面只有坐标系、函数曲线、标注点、数值面板，不画其他任何东西。
+
+【第一步：场景规划（在代码注释中完成）】
+写代码前，先用注释规划整个场景：
+// === 场景规划 ===
+// 元素清单：[坐标轴、刻度线、函数曲线、当前值竖线、标注点、数值面板、标签等]
+// 安全区域：x=[width*0.12, width*0.95], y=[55, height-35]
+// 布局：标题(居中,y=35) → 坐标系+曲线(左侧/中央) → 数值面板(右侧)
+// 函数逻辑：[X轴范围、Y轴范围、曲线方程f(x)]
+// 变量响应：[变量A变化→曲线形态如何变、标注点如何移动]
+// 边界保护：所有动态坐标用 math.clamp 限制
+
+然后严格按规划写 setup() 和 update()。
+
 【代码结构 - 必须严格遵守】
-// {simulator_name}
+// {{simulator_name}}
 let elements = {{}};
 
 function setup(ctx) {{
   const {{ width, height }} = ctx;
   // 1. 创建标题
-  elements.title = ctx.createText('{simulator_name}', width/2, 40, {{fontSize: 24, fontWeight: 'bold', color: '#ffffff', align: 'center'}});
-  // 2. 创建变量显示标签（每个变量一个）
-  // 3. 创建主要图形元素（至少5个 ctx.create 调用）
+  elements.title = ctx.createText('{simulator_name}', width/2, 30, {{fontSize: 20, fontWeight: 'bold', color: '#ffffff', align: 'center'}});
+  // 2. 画坐标轴（X轴和Y轴，用createLine）— 固定不变
+  // 3. 画刻度线和刻度标签（X轴和Y轴各5-8个刻度）— 固定不变，用固定的最大范围
+  // 4. 创建函数曲线（用 createCurve，不同因变量用不同颜色）
+  // 5. 创建当前值竖线（createLine）和标注点（createCircle）
+  // 6. 创建右侧数值面板（矩形背景+数值标签）
 }}
 
 function update(ctx) {{
   const {{ width, height, math, time }} = ctx;
   // 1. 读取所有变量
 {chr(10).join([f"  const {name} = ctx.getVar('{name}');" for name in variable_names])}
-  // 2. 用 ctx.setText 更新每个变量的显示值
-  // 3. 用变量值计算新位置/大小，用 ctx.setPosition/setScale/setColor 更新图形
+  // 2. 根据变量值重新计算曲线上所有点的坐标（坐标轴范围不变，只变曲线形态）
+  // 3. 用 setCurvePoints 更新函数曲线
+  // 4. 移动当前值竖线和标注点到对应位置
+  // 5. 用 setText 更新数值面板显示（不要更新刻度标签）
 }}
 
 【API白名单 - 只能用这些，注意参数格式】
@@ -674,54 +709,145 @@ function update(ctx) {{
   ctx.setRotation(id, angleDeg)
   ctx.setAlpha(id, alpha)
   ctx.setVisible(id, true/false)
+  ctx.setGlow(id, blur, color?) ← 发光效果，blur=0关闭，blur=10-20发光，color可选
+  ctx.setCurvePoints(id, pointsArray, smooth?) ← 动态更新曲线的点，smooth默认true
+  ctx.setRadius(id, radius) ← 动态改变圆的半径
+  ctx.setSize(id, w, h) ← 动态改变矩形尺寸
   ctx.remove(id)
   ctx.clear()
 读取: ctx.getVar('name'), ctx.time, ctx.deltaTime
-数学: ctx.math.sin/cos/tan/abs/floor/ceil/round/sqrt/pow/min/max/random/PI
+数学: ctx.math.sin/cos/tan/atan2/abs/floor/ceil/round/sqrt/pow/min/max/random/PI
       ctx.math.lerp(a, b, t), ctx.math.clamp(val, min, max)
       ctx.math.smoothstep(edge0, edge1, x), ctx.math.wave(t, freq?, amp?)
+      ctx.math.degToRad(deg), ctx.math.radToDeg(rad)
 
 【颜色白名单 - 只能用这些】
 '#ffffff', '#e2e8f0', '#60a5fa', '#6366f1', '#8b5cf6', '#a855f7', '#94a3b8', '#22c55e', '#f59e0b', '#ef4444'
 
-【完整示例 - 弹簧振子模拟器】
-// 弹簧振子
+【完整示例 - 弹簧弹力与形变关系（2个变量：弹性系数k、形变量x）】
+// 弹簧弹力与形变关系
 let elements = {{}};
 
 function setup(ctx) {{
   const {{ width, height }} = ctx;
-  elements.title = ctx.createText('弹簧振子', width/2, 30, {{fontSize: 22, fontWeight: 'bold', color: '#ffffff', align: 'center'}});
-  elements.massLabel = ctx.createText('质量: 1.0 kg', width/2, height - 40, {{fontSize: 14, color: '#94a3b8', align: 'center'}});
-  elements.kLabel = ctx.createText('弹性系数: 50', width/2, height - 20, {{fontSize: 14, color: '#94a3b8', align: 'center'}});
-  elements.wall = ctx.createRect(100, height/2, 10, 120, '#94a3b8');
-  elements.spring = ctx.createLine(105, height/2, 400, height/2, {{color: '#60a5fa', width: 3}});
-  elements.ball = ctx.createCircle(400, height/2, 30, '#6366f1');
-  elements.trail = ctx.createCircle(400, height/2, 5, '#8b5cf6');
+  elements.title = ctx.createText('弹簧弹力与形变关系', width/2, 25, {{fontSize: 20, fontWeight: 'bold', color: '#ffffff', align: 'center'}});
+  // 坐标系区域
+  const ox = width * 0.15, oy = height * 0.78;
+  const axisW = width * 0.48, axisH = height * 0.55;
+  // X轴
+  elements.xAxis = ctx.createLine(ox, oy, ox + axisW, oy, {{color: '#e2e8f0', width: 2}});
+  elements.xLabel = ctx.createText('形变量 x (m)', ox + axisW / 2, oy + 30, {{fontSize: 12, color: '#e2e8f0', align: 'center'}});
+  // Y轴
+  elements.yAxis = ctx.createLine(ox, oy, ox, oy - axisH, {{color: '#e2e8f0', width: 2}});
+  elements.yLabel = ctx.createText('F / Ep', ox - 10, oy - axisH - 10, {{fontSize: 12, color: '#e2e8f0', align: 'center'}});
+  // X轴刻度（固定范围 0~10）
+  elements.xTicks = [];
+  const maxX = 10;
+  for (let i = 0; i <= 5; i++) {{
+    const tx = ox + axisW * i / 5;
+    elements.xTicks.push(ctx.createLine(tx, oy, tx, oy + 5, {{color: '#94a3b8', width: 1}}));
+    ctx.createText((maxX * i / 5).toFixed(0), tx, oy + 16, {{fontSize: 10, color: '#94a3b8', align: 'center'}});
+  }}
+  // Y轴刻度（固定范围 0~500）
+  elements.yTicks = [];
+  const maxY = 500;
+  for (let i = 0; i <= 5; i++) {{
+    const ty = oy - axisH * i / 5;
+    elements.yTicks.push(ctx.createLine(ox, ty, ox - 5, ty, {{color: '#94a3b8', width: 1}}));
+    ctx.createText((maxY * i / 5).toFixed(0), ox - 20, ty + 4, {{fontSize: 10, color: '#94a3b8', align: 'right'}});
+  }}
+  // 函数曲线：F = k*x（蓝色）
+  const initPts = [];
+  for (let i = 0; i <= 30; i++) initPts.push({{x: ox, y: oy}});
+  elements.curveF = ctx.createCurve(initPts, '#60a5fa', 2);
+  // 函数曲线：Ep = 0.5*k*x²（绿色）
+  elements.curveEp = ctx.createCurve(initPts, '#22c55e', 2);
+  // 当前值竖线
+  elements.vLine = ctx.createLine(ox, oy, ox, oy - axisH, {{color: '#f59e0b', width: 1}});
+  // 标注点
+  elements.dotF = ctx.createCircle(ox, oy, 5, '#60a5fa');
+  elements.dotEp = ctx.createCircle(ox, oy, 5, '#22c55e');
+  // 右侧数值面板
+  const px = width * 0.72, pw = width * 0.22;
+  elements.panelBg = ctx.createRect(px + pw/2, height * 0.38, pw, height * 0.4, '#6366f1', 8);
+  ctx.setAlpha(elements.panelBg, 0.15);
+  elements.panelTitle = ctx.createText('实时数据', px + pw/2, height * 0.22, {{fontSize: 14, fontWeight: 'bold', color: '#e2e8f0', align: 'center'}});
+  elements.kLabel = ctx.createText('k = 0', px + pw/2, height * 0.32, {{fontSize: 13, color: '#a855f7', align: 'center'}});
+  elements.xValLabel = ctx.createText('x = 0', px + pw/2, height * 0.40, {{fontSize: 13, color: '#f59e0b', align: 'center'}});
+  elements.fLabel = ctx.createText('F = 0 N', px + pw/2, height * 0.50, {{fontSize: 14, fontWeight: 'bold', color: '#60a5fa', align: 'center'}});
+  elements.epLabel = ctx.createText('Ep = 0 J', px + pw/2, height * 0.58, {{fontSize: 14, fontWeight: 'bold', color: '#22c55e', align: 'center'}});
+  // 图例
+  elements.legendF = ctx.createText('— F = kx', px + pw/2, height * 0.68, {{fontSize: 11, color: '#60a5fa', align: 'center'}});
+  elements.legendEp = ctx.createText('— Ep = ½kx²', px + pw/2, height * 0.74, {{fontSize: 11, color: '#22c55e', align: 'center'}});
 }}
 
 function update(ctx) {{
-  const {{ width, height, math, time }} = ctx;
-  const mass = ctx.getVar('mass');
+  const {{ width, height, math }} = ctx;
   const k = ctx.getVar('k');
-  const omega = math.sqrt(k / math.max(mass, 0.1));
-  const x = 150 * math.sin(time * omega);
-  const ballX = width/2 + x;
-  ctx.setPosition(elements.ball, ballX, height/2);
-  ctx.setPosition(elements.spring, 105, height/2, ballX - 30, height/2);
-  ctx.setPosition(elements.trail, ballX, height/2);
-  ctx.setAlpha(elements.trail, 0.3);
-  ctx.setScale(elements.ball, 0.8 + mass/5, 0.8 + mass/5);
-  ctx.setText(elements.massLabel, `质量: ${{mass.toFixed(1)}} kg`);
-  ctx.setText(elements.kLabel, `弹性系数: ${{math.round(k)}}`);
+  const x = ctx.getVar('x');
+  const ox = width * 0.15, oy = height * 0.78;
+  const axisW = width * 0.48, axisH = height * 0.55;
+  const maxX = 10, maxY = 500;
+  // 更新F曲线
+  const ptsF = [];
+  const ptsEp = [];
+  const N = 30;
+  for (let i = 0; i <= N; i++) {{
+    const xi = maxX * i / N;
+    const px = ox + axisW * i / N;
+    const fVal = k * xi;
+    const epVal = 0.5 * k * xi * xi;
+    ptsF.push({{x: px, y: math.clamp(oy - (fVal / maxY) * axisH, 55, height - 35)}});
+    ptsEp.push({{x: px, y: math.clamp(oy - (epVal / maxY) * axisH, 55, height - 35)}});
+  }}
+  ctx.setCurvePoints(elements.curveF, ptsF);
+  ctx.setCurvePoints(elements.curveEp, ptsEp);
+  // 当前值竖线和标注点
+  const cx = ox + axisW * (x / maxX);
+  const curF = k * x;
+  const curEp = 0.5 * k * x * x;
+  const cyF = math.clamp(oy - (curF / maxY) * axisH, 55, height - 35);
+  const cyEp = math.clamp(oy - (curEp / maxY) * axisH, 55, height - 35);
+  ctx.setPosition(elements.vLine, cx, oy, cx, oy - axisH);
+  ctx.setPosition(elements.dotF, cx, cyF);
+  ctx.setPosition(elements.dotEp, cx, cyEp);
+  ctx.setGlow(elements.dotF, 0);
+  ctx.setGlow(elements.dotEp, 0);
+  // 数值面板
+  const px2 = width * 0.72, pw2 = width * 0.22;
+  ctx.setText(elements.kLabel, 'k = ' + k.toFixed(1) + ' N/m');
+  ctx.setText(elements.xValLabel, 'x = ' + x.toFixed(1) + ' m');
+  ctx.setText(elements.fLabel, 'F = ' + curF.toFixed(1) + ' N');
+  ctx.setText(elements.epLabel, 'Ep = ' + curEp.toFixed(2) + ' J');
 }}
 
 【要求】
-- 代码 60-100 行
+- 代码 80-180 行，视觉丰富精致
 - 必须有 function setup(ctx) 和 function update(ctx)
-- 必须读取所有变量并有视觉反馈
-- 所有坐标使用 width/height 比例计算，不要硬编码绝对坐标
+- 只用 2-3 个变量，每个变量必须有明确的视觉反馈
+- 所有坐标必须用 width/height 比例计算，禁止硬编码绝对坐标
 - 必须以 // 或 let 开头
-- 不要 ``` 标记"""
+- 不要 ``` 标记
+
+【动态可视化要求 - 核心】
+1. 必须画坐标轴（X轴和Y轴，用createLine画轴线，带刻度线和刻度标签）
+2. 必须用 createCurve + setCurvePoints 创建函数曲线（至少1条，建议2条不同颜色）
+3. 必须有当前值标注（竖线标注当前滑块值位置，曲线上对应点用亮色圆点标注）
+4. 必须有数值面板（右侧区域，矩形背景+数值标签，实时显示计算结果）
+5. 用 setText 实时更新刻度标签和数值显示
+6. 用不同颜色区分不同曲线（曲线1=#60a5fa，曲线2=#22c55e，当前值=#f59e0b，辅助=#94a3b8）
+7. 禁止做具象图形（人物、小人、球体、弹簧、建筑、动物等），只画坐标系、曲线、标注点、数值面板
+8. 禁止用emoji或Unicode特殊字符，必须用ctx.create系列API绘制
+9. 禁止在坐标系外画任何示意图、图示、图标，整个画面只有坐标系+曲线+数值面板
+
+【视觉技巧】
+- 坐标轴画法：用createLine画X轴和Y轴，用for循环创建刻度线（短createLine）和刻度标签（createText），刻度值在setup中写死
+- 坐标轴固定：X轴和Y轴的范围、刻度线、刻度标签全部在setup中确定，update中绝对不能修改坐标轴和刻度
+- 曲线平滑：用30+个点计算函数值，createCurve自动平滑
+- 当前值标注：竖线(createLine) + 亮色圆点(createCircle) 标注当前滑块值，可自由选择合适的视觉强调方式（如更大半径、不同颜色、setAlpha变化等）
+- 多曲线对比：不同因变量用不同颜色的createCurve，图例用对应颜色的createText
+- 数值面板：右侧用createRect做半透明背景，createText显示实时计算结果
+- 禁止动态刻度：update中不要用setText更新刻度标签，坐标轴是固定参照系"""
 
         try:
             response = await self.claude_service.generate_raw_response(
@@ -729,7 +855,13 @@ function update(ctx) {{
                 system_prompt=system_prompt,
                 max_tokens=6000
             )
-            return self._clean_simulator_code(response)
+            logger.info(f"[Producer] Raw response length: {len(response)}, first 200 chars: {response[:200]}")
+            cleaned = self._clean_simulator_code(response)
+            if cleaned:
+                logger.info(f"[Producer] Cleaned code: {len(cleaned.splitlines())} lines")
+            else:
+                logger.warning(f"[Producer] Cleaned code is empty! Raw response last 200 chars: {response[-200:]}")
+            return cleaned
         except Exception as e:
             logger.error(f"[Producer] Generate error: {e}")
             return None
@@ -751,6 +883,9 @@ function update(ctx) {{
             '代码严重不足', '代码太短',              # 代码量不够
             '元素太少',                             # 视觉元素不足
             '缺少动画',                             # 无动画逻辑
+            '致命语法错误',                          # 重复声明、中文标点等
+            '括号错误',                              # 括号不匹配
+            '无条件的元素创建',                        # update中无保护的create
         ]
         for issue in last['issues']:
             if any(kw in issue for kw in structural_keywords):
@@ -796,12 +931,24 @@ function update(ctx) {{
 1. 保持 function setup(ctx) 和 function update(ctx) 结构
 2. 只用白名单API:
    创建: ctx.createText(text,x,y,opts), ctx.createRect(x,y,w,h,color), ctx.createCircle(x,y,r,color), ctx.createLine(x1,y1,x2,y2,{{color,width}}), ctx.createCurve(pts,color,w), ctx.createPolygon(pts,fill,stroke?)
-   操作: ctx.setText(id,text), ctx.setPosition(id,x,y) 或 ctx.setPosition(lineId,x1,y1,x2,y2), ctx.setColor(id,color), ctx.setScale(id,sx,sy), ctx.setRotation(id,deg), ctx.setAlpha(id,alpha), ctx.setVisible(id,bool), ctx.remove(id)
+   操作: ctx.setText(id,text), ctx.setPosition(id,x,y) 或 ctx.setPosition(lineId,x1,y1,x2,y2), ctx.setColor(id,color), ctx.setScale(id,sx,sy), ctx.setRotation(id,deg), ctx.setAlpha(id,alpha), ctx.setVisible(id,bool), ctx.setGlow(id,blur,color?), ctx.setCurvePoints(id,pts,smooth?), ctx.setRadius(id,r), ctx.setSize(id,w,h), ctx.remove(id)
    读取: ctx.getVar('name'), ctx.time, ctx.deltaTime
-   数学: ctx.math.sin/cos/abs/floor/ceil/round/sqrt/pow/min/max/PI/lerp/clamp/smoothstep/wave
+   数学: ctx.math.sin/cos/tan/atan2/abs/floor/ceil/round/sqrt/pow/min/max/PI/lerp/clamp/smoothstep/wave/degToRad/radToDeg
 3. 只用亮色: '#ffffff', '#e2e8f0', '#60a5fa', '#6366f1', '#8b5cf6', '#a855f7', '#94a3b8', '#22c55e', '#f59e0b', '#ef4444'
 4. 读取所有变量: {', '.join([f"ctx.getVar('{n}')" for n in variable_names])}
 5. 变量读取后必须用于视觉更新（setText/setPosition/setScale等）
+
+【修复原则】
+- 保持原有元素的相对位置关系不变
+- 保持坐标系和函数曲线的布局
+- 修复问题时不要打乱已有的空间布局
+- 所有坐标必须用 width/height 比例计算，不要硬编码绝对坐标
+- 数据面板和文字不要贴画布边缘，保持安全边距
+- 动态坐标用 math.clamp 限制在安全区域内
+- 保持函数图风格，不要画具体路径
+- 如果有"重复声明变量"错误，删除重复的 let/const 声明，改为赋值语句
+- 如果有"中文标点"错误，将代码中的中文标点替换为英文标点（字符串和注释中的中文可以保留）
+- 绝对不要在同一个函数中用 let/const 声明同名变量两次
 
 【严格要求】
 - 直接输出完整代码
@@ -850,6 +997,16 @@ function update(ctx) {{
         if not api_valid:
             score -= 15
             issues.append(f"无效API: {', '.join(invalid_apis[:3])}")
+
+        # 语法验证（重复声明、中文标点等致命问题）
+        syntax_valid, syntax_error = self._validate_js_syntax_detailed(code)
+        if not syntax_valid and syntax_error:
+            if syntax_error.error_type in (SyntaxErrorType.DUPLICATE_DECLARATION, SyntaxErrorType.CHINESE_PUNCTUATION):
+                score -= 25
+                issues.append(f"致命语法错误: {syntax_error.message}")
+            elif syntax_error.error_type in (SyntaxErrorType.UNCLOSED_BRACKET, SyntaxErrorType.MISMATCHED_BRACKET):
+                score -= 20
+                issues.append(f"括号错误: {syntax_error.message}")
 
         # 检查 API 参数格式是否正确
         import re
@@ -905,6 +1062,14 @@ function update(ctx) {{
             score -= penalty
             issues.append(f"未读取变量: {', '.join(missing_vars)}")
 
+        # 反向检查：代码中 getVar 引用的变量名是否都在 variable_names 中
+        code_getvar_names = set(re.findall(r"ctx\.getVar\(['\"](\w+)['\"]\)", code))
+        var_name_set = set(variable_names)
+        phantom_vars = code_getvar_names - var_name_set
+        if phantom_vars:
+            score -= 10
+            issues.append(f"代码引用了不存在的变量: {', '.join(phantom_vars)}（滑块中没有这些变量）")
+
         # 检查是否有 setText 更新显示
         if 'ctx.setText' not in code:
             score -= 10
@@ -922,16 +1087,29 @@ function update(ctx) {{
             score -= 10
             issues.append(f"代码偏短: {code_lines}行(建议50+)")
 
+        # 代码过长扣分
+        if code_lines > 200:
+            score -= 10
+            issues.append(f"代码过长: {code_lines}行(建议200行以内)")
+
         # 检查元素丰富度
         create_count = code.count('ctx.create')
         if create_count < 5:
             score -= 10
             issues.append(f"元素太少: {create_count}个(建议5+)")
 
+        # === 提取 setup/update 代码段（后续多处使用）===
+        setup_section = ''
+        update_section = code.split('function update')[1] if 'function update' in code else ''
+        if 'function setup' in code and 'function update' in code:
+            setup_start = code.index('function setup')
+            update_start = code.index('function update')
+            setup_section = code[setup_start:update_start]
+
         # === 渲染质量 (20分) ===
         color_valid, _, dark_colors = self._validate_color_contrast(code)
         if not color_valid:
-            score -= 10
+            score -= 5
             issues.append(f"深色: {', '.join(dark_colors[:3])}")
 
         # 检查动画逻辑
@@ -940,14 +1118,60 @@ function update(ctx) {{
         has_math = ('math.sin' in code or 'math.cos' in code or
                    'math.lerp' in code)
         if not has_animation:
-            score -= 10
+            score -= 5
             issues.append("缺少动画(setPosition/setScale)")
         if not has_math:
-            score -= 5
+            score -= 3
             issues.append("缺少数学运算(sin/cos/lerp)")
 
+        # 检查图形元素丰富度（坐标轴+曲线+面板等应有足够元素）
+        create_calls_in_setup = re.findall(r'ctx\.create\w+', setup_section)
+        if len(create_calls_in_setup) < 8:
+            score -= 5
+            issues.append(f"setup中图形元素不足: {len(create_calls_in_setup)}个(建议8+，坐标轴+曲线+面板)")
+
+        # 检查坐标轴（用createLine画轴线）
+        has_axis_line = bool(re.search(r'(axis|Axis|xAxis|yAxis|axisLine)\w*\s*=\s*ctx\.createLine', code))
+        if not has_axis_line:
+            score -= 3
+            issues.append("缺少坐标轴(用createLine画X轴和Y轴)")
+
+        # 检查函数曲线（createCurve）
+        has_curve_create = 'createCurve' in code
+        has_curve_update = 'setCurvePoints' in code
+        if not has_curve_create:
+            score -= 3
+            issues.append("缺少函数曲线(用createCurve创建函数曲线)")
+        elif not has_curve_update:
+            score -= 1
+            issues.append("缺少曲线动态更新(用setCurvePoints更新曲线)")
+
+        # 检查当前值标注（竖线或标注点）
+        has_current_marker = bool(re.search(r'(vLine|currentLine|markerLine|dot[A-Z]|marker)\w*\s*=\s*ctx\.(createLine|createCircle)', code))
+        if not has_current_marker:
+            score -= 2
+            issues.append("缺少当前值标注(竖线+亮点标注当前滑块值)")
+
+        # 检查数据面板（背景框+标签）
+        has_panel_bg = bool(re.search(r'(panel|bg|background|Bar|Bg|keBg|peBg)\w*\s*=\s*ctx\.createRect', code, re.IGNORECASE))
+        if not has_panel_bg:
+            score -= 2
+            issues.append("缺少数据面板背景(用createRect创建面板背景框)")
+
+        # 检查硬编码绝对坐标（大数字直接作为坐标而非用 width/height 比例）
+        hardcoded_coords = re.findall(r'(?:createCircle|createRect|createText|createLine|setPosition)\([^)]*\b([89]\d{2}|1[0-9]{3})\b', code)
+        if hardcoded_coords:
+            unique_coords = list(set(hardcoded_coords))[:3]
+            score -= 8
+            issues.append(f"疑似硬编码绝对坐标: {', '.join(unique_coords)}（应使用width/height比例）")
+
+        # 检查是否使用了 emoji 或 Unicode 特殊字符代替图形
+        emoji_pattern = re.findall(r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0001FA00-\U0001FA6F]', code)
+        if emoji_pattern:
+            score -= 10
+            issues.append("使用了emoji/Unicode特殊字符，应使用ctx.create系列API组合绘制")
+
         # === 变量-视觉映射检查 ===
-        update_section = code.split('function update')[1] if 'function update' in code else ''
         visual_apis = ['setPosition', 'setScale', 'setRotation', 'setAlpha', 'setColor', 'setText']
         vars_used_in_visuals = 0
         for var_name in variable_names:
@@ -971,16 +1195,32 @@ function update(ctx) {{
             issues.append(f"仅{vars_used_in_visuals}/{len(variable_names)}个变量用于视觉更新")
 
         # === setup/update 职责检查 ===
-        setup_section = ''
-        if 'function setup' in code and 'function update' in code:
-            setup_start = code.index('function setup')
-            update_start = code.index('function update')
-            setup_section = code[setup_start:update_start]
         setup_creates = len(re.findall(r'ctx\.create\w+', setup_section))
         update_creates = len(re.findall(r'ctx\.create\w+', update_section))
         if update_creates > setup_creates and update_creates > 2:
             score -= 10
             issues.append(f"update中创建了{update_creates}个元素(应在setup中创建)")
+
+        # 检查 update 中无 if 保护的 ctx.create（每帧都会创建，导致内存泄漏）
+        if update_section:
+            update_lines = update_section.split('\n')
+            unguarded_creates = []
+            in_if_block = False
+            if_depth = 0
+            for uline in update_lines:
+                ustripped = uline.strip()
+                if ustripped.startswith('if') or ustripped.startswith('} else'):
+                    in_if_block = True
+                    if_depth = 0
+                if in_if_block:
+                    if_depth += ustripped.count('{') - ustripped.count('}')
+                    if if_depth <= 0:
+                        in_if_block = False
+                if not in_if_block and 'ctx.create' in ustripped and not ustripped.startswith('//'):
+                    unguarded_creates.append(ustripped[:60])
+            if unguarded_creates:
+                score -= 15
+                issues.append(f"update中有无条件的元素创建(每帧执行会内存泄漏): {unguarded_creates[0]}")
 
         return max(0, score), issues
 
@@ -1135,6 +1375,29 @@ function update(ctx) {{
         移除AI可能添加的解释文字、注释等非代码内容
         """
         code = response.strip()
+        original_response = response  # 保留原始响应用于fallback
+
+        # 0. 检测JSON包裹格式：AI可能返回 ```json\n{"code": "..."}\n```
+        import json as _json
+        try:
+            # 先尝试去掉markdown代码块标记
+            json_str = code
+            if json_str.startswith('```'):
+                # 移除开头的 ```json 或 ``` 行
+                first_newline = json_str.index('\n')
+                json_str = json_str[first_newline + 1:]
+            if json_str.rstrip().endswith('```'):
+                json_str = json_str.rstrip()[:-3].rstrip()
+            # 尝试解析JSON
+            parsed = _json.loads(json_str)
+            if isinstance(parsed, dict) and 'code' in parsed:
+                extracted = parsed['code']
+                if isinstance(extracted, str) and 'function setup' in extracted and len(extracted) > 50:
+                    logger.info(f"[_clean_simulator_code] Extracted code from JSON 'code' field: {len(extracted.splitlines())} lines")
+                    code = extracted
+                    original_response = extracted
+        except (ValueError, _json.JSONDecodeError, IndexError):
+            pass  # 不是JSON格式，继续正常流程
 
         # 1. 提取代码块 - 优先找包含 function setup 的代码块
         import re
@@ -1195,8 +1458,8 @@ function update(ctx) {{
 
         # 4. 最终检查：如果清理后没有代码，尝试直接从原始响应中提取
         if not code or len([l for l in code.split('\n') if l.strip()]) < 10:
-            # 尝试从原始响应中找 function setup 到最后一个 } 的范围
-            raw_lines = response.split('\n')
+            # 用原始响应而不是已截断的code
+            raw_lines = original_response.split('\n')
             setup_start = -1
             last_brace = -1
             for i, line in enumerate(raw_lines):
@@ -1217,7 +1480,27 @@ function update(ctx) {{
                 code = code.strip()
                 logger.info(f"[_clean_simulator_code] Extracted code from raw response: {len(code.splitlines())} lines")
             else:
-                logger.warning(f"[_clean_simulator_code] Failed to extract code (setup_start={setup_start}, last_brace={last_brace})")
+                # 最后尝试：移除所有 ``` 行后重新提取
+                stripped_lines = [l for l in raw_lines if not l.strip().startswith('```')]
+                setup_start2 = -1
+                last_brace2 = -1
+                for i, line in enumerate(stripped_lines):
+                    if 'function setup' in line and setup_start2 == -1:
+                        setup_start2 = i
+                        for j in range(i - 1, max(i - 10, -1), -1):
+                            s = stripped_lines[j].strip()
+                            if s.startswith('let ') or s.startswith('const ') or s.startswith('//') or s.startswith('/*'):
+                                setup_start2 = j
+                                break
+                    if line.strip().endswith('}'):
+                        last_brace2 = i
+
+                if setup_start2 >= 0 and last_brace2 > setup_start2 and (last_brace2 - setup_start2) >= 10:
+                    code = '\n'.join(stripped_lines[setup_start2:last_brace2 + 1])
+                    code = code.strip()
+                    logger.info(f"[_clean_simulator_code] Extracted after stripping markdown: {len(code.splitlines())} lines")
+                else:
+                    logger.warning(f"[_clean_simulator_code] Failed to extract code (setup_start={setup_start}, last_brace={last_brace}, stripped: setup={setup_start2}, brace={last_brace2})")
 
         return code
 
@@ -1405,7 +1688,94 @@ function update(ctx) {{
                     suggestion="将 return 语句移到函数内部，或删除多余的 return"
                 )
 
+        # 4. 检查重复的 let/const 声明（同一作用域）
+        dup_error = self._check_duplicate_declarations(code, lines)
+        if dup_error:
+            return False, dup_error
+
+        # 5. 检查代码区域（非字符串、非注释）中的中文标点
+        punct_error = self._check_chinese_punctuation_in_code(code, lines)
+        if punct_error:
+            return False, punct_error
+
         return True, None
+
+    def _check_duplicate_declarations(self, code: str, lines: list) -> Optional[CodeSyntaxError]:
+        """检查同一作用域内的重复 let/const 声明"""
+        # 按函数分段追踪声明
+        current_func = None
+        brace_depth = 0
+        declarations = {}  # {func_name: {var_name: first_line_num}}
+
+        for line_num, line in enumerate(lines):
+            stripped = line.strip()
+
+            # 跳过注释
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            # 检测函数边界
+            if 'function setup' in stripped:
+                current_func = 'setup'
+                brace_depth = 0
+                declarations.setdefault('setup', {})
+            elif 'function update' in stripped:
+                current_func = 'update'
+                brace_depth = 0
+                declarations.setdefault('update', {})
+
+            # 追踪大括号深度
+            brace_depth += stripped.count('{') - stripped.count('}')
+
+            # 只检查函数体顶层作用域（brace_depth == 1）的声明
+            if current_func and brace_depth == 1:
+                # 跳过 for/if/while 等块级语句内的声明
+                if stripped.startswith(('for', 'if', 'while', 'switch', '//')):
+                    continue
+                m = re.match(r'(let|const)\s+(\w+)', stripped)
+                if m:
+                    var_name = m.group(2)
+                    func_decls = declarations.get(current_func, {})
+                    if var_name in func_decls:
+                        first_line = func_decls[var_name]
+                        before, current, after = self._get_line_context(lines, line_num)
+                        return CodeSyntaxError(
+                            error_type=SyntaxErrorType.DUPLICATE_DECLARATION,
+                            message=f"在 {current_func}() 中重复声明变量 '{var_name}'（首次在第 {first_line + 1} 行）",
+                            line_number=line_num + 1,
+                            context_before=before,
+                            error_line=current,
+                            context_after=after,
+                            suggestion=f"删除重复的 '{m.group(1)} {var_name}'，或将第二次改为赋值: {var_name} = ..."
+                        )
+                    func_decls[var_name] = line_num
+                    declarations[current_func] = func_decls
+
+        return None
+
+    def _check_chinese_punctuation_in_code(self, code: str, lines: list) -> Optional[CodeSyntaxError]:
+        """检查代码区域（非字符串、非注释）中的中文标点"""
+        chinese_punct = re.compile(r'[，。；：（）【】！？]')
+
+        for line_num, line in enumerate(lines):
+            # 去除单行注释
+            clean = re.sub(r'//[^\n]*', '', line)
+            # 去除字符串内容（单引号、双引号、反引号）
+            clean = re.sub(r"'[^']*'|\"[^\"]*\"|`[^`]*`", '', clean)
+            found = chinese_punct.findall(clean)
+            if found:
+                before, current, after = self._get_line_context(lines, line_num)
+                return CodeSyntaxError(
+                    error_type=SyntaxErrorType.CHINESE_PUNCTUATION,
+                    message=f"代码中包含中文标点: {''.join(found)}",
+                    line_number=line_num + 1,
+                    context_before=before,
+                    error_line=current,
+                    context_after=after,
+                    suggestion=f"将中文标点替换为英文标点: ，→, ；→; ：→: （→( ）→) 。→."
+                )
+
+        return None
 
     def _validate_js_syntax(self, code: str) -> tuple:
         """

@@ -26,22 +26,39 @@ class ChapterType(Enum):
 
 @dataclass
 class SimulatorQualityStandards:
-    """模拟器质量标准 - 高标准"""
+    """模拟器质量标准 - 函数图版 (2026-02-08 因果关系函数图)
 
-    # === 代码质量标准 ===
-    min_code_lines: int = 60                    # 最少代码行数（提高到60行）
+    设计原则：
+    1. 画布使用比例坐标，适配不同端尺寸
+    2. 代码长度适中，减少截断风险
+    3. 确保核心功能：变量联动、函数曲线、清晰标签
+    4. 视觉精细度：坐标系、函数曲线、当前值标注、数值面板
+    """
+
+    # === 代码质量标准（平衡级）===
+    min_code_lines: int = 80                    # 最少代码行数
+    max_code_lines: int = 200                   # 最多代码行数
     must_have_setup: bool = True                # 必须有 setup 函数
     must_have_update: bool = True               # 必须有 update 函数
     must_use_variables: bool = True             # 必须使用变量（与滑块联动）
     min_variables: int = 2                      # 最少变量数量
-    max_variables: int = 5                      # 最多变量数量
+    max_variables: int = 3                      # 最多变量数量
+    min_functions: int = 2                      # 最少自定义函数数量
+    min_comments: int = 6                       # 最少注释行数
 
-    # === 视觉质量标准 ===
-    min_visual_elements: int = 5                # 最少视觉元素（提高到5种）
+    # === 视觉质量标准（精细级）===
+    min_visual_elements: int = 5                # 最少视觉元素类型
+    min_total_shapes: int = 15                  # 最少图形总数（函数图风格）
     must_have_animation: bool = True            # 必须有动画效果
     must_have_labels: bool = True               # 必须有文字标签说明
     must_have_legend: bool = True               # 必须有图例
-    must_have_data_display: bool = True         # 必须有数据显示面板
+    must_have_data_display: bool = True         # 必须有数据显示
+    must_have_background: bool = False          # 背景装饰可选
+    must_have_title: bool = True                # 必须有标题
+    must_have_axis: bool = True                 # 函数图必须有坐标轴
+    must_have_tooltip: bool = False             # 提示信息可选
+    min_colors_used: int = 5                    # 最少使用颜色数量
+    min_text_elements: int = 6                  # 最少文字元素数量
     recommended_colors: List[str] = field(default_factory=lambda: [
         '#3B82F6',  # 蓝色
         '#10B981',  # 绿色
@@ -51,17 +68,25 @@ class SimulatorQualityStandards:
         '#EC4899',  # 粉色
         '#06B6D4',  # 青色
         '#FBBF24',  # 黄色
+        '#14B8A6',  # 青绿色
+        '#F97316',  # 深橙色
     ])
 
-    # === 交互质量标准 ===
+    # === 交互质量标准（核心）===
     variable_must_affect_visual: bool = True    # 变量必须影响视觉效果
     must_show_real_time_values: bool = True     # 必须实时显示数值
     smooth_animation: bool = True               # 动画必须流畅
+    must_have_state_panel: bool = True          # 必须有状态面板
+    must_have_progress_indicator: bool = False  # 进度指示器可选
+    min_animation_types: int = 1                # 最少动画类型数量
 
-    # === 教学质量标准 ===
+    # === 教学质量标准（核心）===
     must_demonstrate_concept: bool = True       # 必须演示核心概念
     must_have_clear_cause_effect: bool = True   # 必须有清晰的因果关系
     variables_must_be_meaningful: bool = True   # 变量必须有实际意义
+    must_have_visual_feedback: bool = True      # 变量变化必须有视觉反馈
+    must_have_educational_value: bool = True    # 必须有教学价值
+    must_show_formula: bool = False             # 公式可选
 
     # === 禁止项 ===
     forbidden_patterns: List[str] = field(default_factory=lambda: [
@@ -72,30 +97,61 @@ class SimulatorQualityStandards:
         'eval(',            # 不要eval
         'setTimeout',       # 不要用setTimeout（用ctx.time）
         'setInterval',      # 不要用setInterval
+        'fetch(',           # 不要网络请求
+        'XMLHttpRequest',   # 不要网络请求
+        'localStorage',     # 不要本地存储
+        'sessionStorage',   # 不要会话存储
+        'debugger',         # 不要调试语句
+        'throw ',           # 不要抛出异常
+        'createArc',        # 不存在此API
+    ])
+
+    # === 简陋图形禁止项 ===
+    forbidden_simple_representations: List[str] = field(default_factory=lambda: [
+        '单个圆形代表人物',
+        '单个矩形代表建筑',
+        '单个圆形代表动物',
+        '单个矩形代表车辆',
+        '纯色背景无装饰',
+        '无标签的图形',
+        '无动画的静态图',
     ])
 
 
 @dataclass
 class ChapterQualityStandards:
-    """章节质量标准"""
+    """章节质量标准 - 专业级高标准 (2026-02-06 全面升级版)"""
 
-    # === 内容标准 ===
-    min_steps: int = 5                          # 最少步骤数
-    max_steps: int = 8                          # 最多步骤数
-    min_text_length: int = 100                  # 每步最少字数
-    min_key_points: int = 2                     # 每步最少要点数
+    # === 内容标准（严格）===
+    # 步骤数量不设硬编码限制，由AI监督者根据章节内容和课程风格决定
+    min_text_length: int = 200                  # 每步最少字数（提高到200）
+    min_key_points: int = 4                     # 每步最少要点数（提高到4）
+    min_total_words: int = 1500                 # 整章最少字数（提高到1500）
+    min_step_title_length: int = 5              # 步骤标题最少字数（新增）
+    max_step_title_length: int = 25             # 步骤标题最多字数（新增）
 
-    # === 结构标准 ===
+    # === 结构标准（强化）===
     must_have_text_content: bool = True         # 必须有文本内容
-    must_have_simulator: bool = True            # 必须有模拟器（核心章节）
-    must_have_assessment: bool = True           # 必须有测评
+    # 模拟器和图文数量不设硬限制，由AI监督者根据内容需要决定
+    # 但同一课程内的图片和模拟器必须有明显区别
+
+    # === 教学质量标准（新增）===
+    must_have_learning_objectives: bool = True  # 必须有学习目标
+    min_learning_objectives: int = 3            # 最少学习目标数
+    must_have_rationale: bool = True            # 必须有设计理念
+    min_rationale_length: int = 50              # 设计理念最少字数
+
+    # === 图文内容标准（新增）===
+    min_diagram_description: int = 80           # 图片描述最少字数
+    must_have_diagram_elements: bool = True     # 必须有图片元素列表
+    min_diagram_elements: int = 3               # 最少图片元素数
 
     # === 模拟器标准 ===
     simulator_standards: SimulatorQualityStandards = field(
         default_factory=SimulatorQualityStandards
     )
 
-    # === 禁止项 ===
+    # === 禁止项（扩展）===
     forbidden_content: List[str] = field(default_factory=lambda: [
         '待补充',
         '此处省略',
@@ -103,6 +159,18 @@ class ChapterQualityStandards:
         '等等',
         'TODO',
         'FIXME',
+        '暂无',
+        '略',
+        '以此类推',
+        '详见',
+        '参考资料',
+        '请参考',
+        '如上所述',
+        '不再赘述',
+        '见上文',
+        '同上',
+        '此处略过',
+        '篇幅有限',
     ])
 
 
@@ -149,12 +217,20 @@ class SimulatorSpec:
         code_lines = len([l for l in self.custom_code.split('\n') if l.strip()])
         if code_lines < standards.min_code_lines:
             issues.append(f"代码太短，只有{code_lines}行，至少需要{standards.min_code_lines}行")
+        if hasattr(standards, 'max_code_lines') and code_lines > standards.max_code_lines:
+            issues.append(f"代码过长，有{code_lines}行，最多{standards.max_code_lines}行")
 
         # 检查必要函数
         if standards.must_have_setup and 'function setup' not in self.custom_code:
             issues.append("缺少 setup 函数")
         if standards.must_have_update and 'function update' not in self.custom_code:
             issues.append("缺少 update 函数")
+
+        # 检查自定义函数数量（新增）
+        if hasattr(standards, 'min_functions'):
+            function_count = self.custom_code.count('function ') - 2  # 减去 setup 和 update
+            if function_count < standards.min_functions:
+                issues.append(f"自定义函数太少，只有{max(0, function_count)}个，建议至少{standards.min_functions}个辅助函数")
 
         # 检查变量使用
         if standards.must_use_variables:
@@ -167,23 +243,112 @@ class SimulatorSpec:
         if len(self.variables) > standards.max_variables:
             issues.append(f"变量太多，有{len(self.variables)}个，最多{standards.max_variables}个")
 
-        # 检查视觉元素
-        visual_methods = ['createCircle', 'createRect', 'createText', 'createLine', 'createCurve', 'createPolygon']
+        # 检查视觉元素类型
+        visual_methods = ['createCircle', 'createRect', 'createText', 'createLine', 'createCurve', 'createPolygon', 'createArc', 'createPath']
         visual_count = sum(1 for m in visual_methods if m in self.custom_code)
         if visual_count < standards.min_visual_elements:
-            issues.append(f"视觉元素太少，只用了{visual_count}种，至少需要{standards.min_visual_elements}种")
+            issues.append(f"视觉元素类型太少，只用了{visual_count}种，至少需要{standards.min_visual_elements}种")
+
+        # 检查图形总数（新增）
+        if hasattr(standards, 'min_total_shapes'):
+            total_shapes = sum(self.custom_code.count(m) for m in visual_methods)
+            if total_shapes < standards.min_total_shapes:
+                issues.append(f"图形总数太少，只有{total_shapes}个，至少需要{standards.min_total_shapes}个图形元素")
+
+        # 检查颜色使用（新增）
+        if hasattr(standards, 'min_colors_used'):
+            import re
+            color_pattern = r"#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgb\([^)]+\)|rgba\([^)]+\)"
+            colors_found = set(re.findall(color_pattern, self.custom_code))
+            if len(colors_found) < standards.min_colors_used:
+                issues.append(f"颜色使用太少，只用了{len(colors_found)}种颜色，至少需要{standards.min_colors_used}种")
 
         # 检查动画
         if standards.must_have_animation:
-            animation_indicators = ['ctx.time', 'ctx.math.sin', 'ctx.math.cos', 'setPosition', 'setRotation', 'setScale']
+            animation_indicators = ['ctx.time', 'ctx.math.sin', 'ctx.math.cos', 'setPosition', 'setRotation', 'setScale', 'math.lerp']
             has_animation = any(ind in self.custom_code for ind in animation_indicators)
             if not has_animation:
-                issues.append("没有动画效果，模拟器应该有动态变化")
+                issues.append("没有动画效果，模拟器应该有动态变化（使用 ctx.time 或 math 函数）")
 
         # 检查标签
         if standards.must_have_labels:
             if 'createText' not in self.custom_code:
                 issues.append("没有文字标签，用户无法理解模拟器展示的内容")
+
+        # 检查标题（新增）
+        if hasattr(standards, 'must_have_title') and standards.must_have_title:
+            # 检查是否有大字号的标题文本
+            if self.custom_code.count('createText') < 2:
+                issues.append("缺少标题，模拟器应该有明显的标题说明")
+
+        # 检查背景装饰（新增）
+        if hasattr(standards, 'must_have_background') and standards.must_have_background:
+            background_indicators = ['for (let', 'for(let', 'grid', 'background', '网格']
+            has_background = any(ind in self.custom_code.lower() for ind in background_indicators)
+            if not has_background and self.custom_code.count('createLine') < 5:
+                issues.append("缺少背景装饰（如网格线、刻度线等），视觉效果单调")
+
+        # 检查状态面板（新增）
+        if hasattr(standards, 'must_have_state_panel') and standards.must_have_state_panel:
+            panel_indicators = ['Label', 'status', 'panel', '状态', '数据', 'setText']
+            has_panel = any(ind in self.custom_code for ind in panel_indicators)
+            if not has_panel:
+                issues.append("缺少状态/数据显示面板，用户无法看到实时数值变化")
+
+        # 检查注释数量（新增）
+        if hasattr(standards, 'min_comments') and standards.min_comments > 0:
+            comment_count = self.custom_code.count('//') + self.custom_code.count('/*')
+            if comment_count < standards.min_comments:
+                issues.append(f"注释太少，只有{comment_count}处，至少需要{standards.min_comments}处注释说明")
+
+        # 检查文字元素数量（新增）
+        if hasattr(standards, 'min_text_elements') and standards.min_text_elements > 0:
+            text_count = self.custom_code.count('createText')
+            if text_count < standards.min_text_elements:
+                issues.append(f"文字元素太少，只有{text_count}个，至少需要{standards.min_text_elements}个文字标签")
+
+        # 检查坐标轴/刻度（新增）
+        if hasattr(standards, 'must_have_axis') and standards.must_have_axis:
+            axis_indicators = ['axis', '坐标', '刻度', 'scale', 'tick', 'grid', 'for (let', 'for(let']
+            has_axis = any(ind in self.custom_code.lower() for ind in axis_indicators)
+            if not has_axis and self.custom_code.count('createLine') < 8:
+                issues.append("缺少坐标轴或刻度线，建议添加网格或刻度增强可读性")
+
+        # 检查提示信息（新增）
+        if hasattr(standards, 'must_have_tooltip') and standards.must_have_tooltip:
+            tooltip_indicators = ['tooltip', 'hint', '提示', 'info', 'setText', 'Label']
+            has_tooltip = any(ind in self.custom_code for ind in tooltip_indicators)
+            if not has_tooltip:
+                issues.append("缺少提示信息或动态文字更新，建议添加实时数据显示")
+
+        # 检查动画类型数量（新增）
+        if hasattr(standards, 'min_animation_types') and standards.min_animation_types > 0:
+            animation_types = {
+                'position': any(x in self.custom_code for x in ['setPosition', 'wolf.x', 'prey.x', '.x =', '.y =']),
+                'rotation': 'setRotation' in self.custom_code or 'rotate' in self.custom_code.lower(),
+                'scale': 'setScale' in self.custom_code or 'scale' in self.custom_code.lower(),
+                'color': any(x in self.custom_code for x in ['setColor', 'barColor', 'color =']),
+                'opacity': 'setOpacity' in self.custom_code or 'opacity' in self.custom_code.lower(),
+                'time_based': 'ctx.time' in self.custom_code or 'math.sin' in self.custom_code.lower(),
+            }
+            animation_count = sum(1 for v in animation_types.values() if v)
+            if animation_count < standards.min_animation_types:
+                issues.append(f"动画类型太少，只有{animation_count}种，至少需要{standards.min_animation_types}种动画效果")
+
+        # 检查层次感对象（新增）
+        if hasattr(standards, 'must_have_layered_objects') and standards.must_have_layered_objects:
+            # 检查是否有组合对象（多个图形组成一个对象）
+            object_indicators = ['body', 'head', 'legs', 'tail', 'ears', 'eyes', 'arms', 'wheels']
+            layered_count = sum(1 for ind in object_indicators if ind in self.custom_code.lower())
+            if layered_count < 3:
+                issues.append("缺少层次感的组合对象，主要元素应由多个图形组合而成（如身体、头部、四肢等）")
+
+        # 检查进度/状态指示器（新增）
+        if hasattr(standards, 'must_have_progress_indicator') and standards.must_have_progress_indicator:
+            progress_indicators = ['bar', 'progress', 'energy', 'health', 'status', '进度', '状态', '能量']
+            has_progress = any(ind in self.custom_code.lower() for ind in progress_indicators)
+            if not has_progress:
+                issues.append("缺少进度或状态指示器（如能量条、进度条等）")
 
         # 检查禁止项
         for pattern in standards.forbidden_patterns:
@@ -191,6 +356,329 @@ class SimulatorSpec:
                 issues.append(f"代码中包含禁止使用的模式：{pattern}")
 
         return issues
+
+    def calculate_quality_score(self, standards: SimulatorQualityStandards = None) -> 'CodeQualityScore':
+        """
+        计算模拟器代码质量评分 (0-100)
+
+        评分维度:
+        - 结构分 (0-25): setup/update函数、代码组织、函数数量
+        - 视觉分 (0-25): 元素丰富度、颜色、动画效果
+        - 交互分 (0-25): 变量联动、实时反馈、状态显示
+        - 教学分 (0-25): 概念演示、注释、可读性
+        """
+        import re
+
+        if standards is None:
+            standards = SimulatorQualityStandards()
+
+        score = CodeQualityScore()
+        code = self.custom_code
+        lines = code.split('\n')
+        non_empty_lines = [l for l in lines if l.strip()]
+
+        # ========== 结构分 (0-25) ==========
+        structure = 0
+        structure_details = {}
+
+        # 1. setup 函数 (5分)
+        has_setup = 'function setup' in code
+        structure += 5 if has_setup else 0
+        structure_details['has_setup'] = has_setup
+
+        # 2. update 函数 (5分)
+        has_update = 'function update' in code
+        structure += 5 if has_update else 0
+        structure_details['has_update'] = has_update
+
+        # 3. 代码行数 (5分): 80-200行得满分
+        line_count = len(non_empty_lines)
+        if line_count >= standards.min_code_lines:
+            if line_count <= standards.max_code_lines:
+                structure += 5
+            else:
+                structure += 3  # 超长扣2分
+        else:
+            structure += max(0, int(5 * line_count / standards.min_code_lines))
+        structure_details['line_count'] = line_count
+
+        # 4. 辅助函数数量 (5分): 2个以上得满分
+        function_count = code.count('function ') - 2  # 减去 setup 和 update
+        function_count = max(0, function_count)
+        structure += min(5, function_count * 2)
+        structure_details['function_count'] = function_count
+
+        # 5. 代码组织 (5分): 有清晰的代码块分隔
+        has_sections = code.count('\n\n') >= 3 or code.count('// ===') >= 2
+        structure += 5 if has_sections else 2
+        structure_details['has_sections'] = has_sections
+
+        score.structure_score = min(25, structure)
+
+        # ========== 视觉分 (0-25) ==========
+        visual = 0
+        visual_details = {}
+
+        # 1. 视觉元素类型 (5分)
+        visual_methods = ['createCircle', 'createRect', 'createText', 'createLine', 'createCurve', 'createPolygon']
+        visual_types_used = sum(1 for m in visual_methods if m in code)
+        visual += min(5, visual_types_used)
+        visual_details['visual_types'] = visual_types_used
+
+        # 2. 图形总数 (5分) - 函数图风格标准
+        total_shapes = sum(code.count(m) for m in visual_methods)
+        if total_shapes >= 20:
+            visual += 5
+        elif total_shapes >= 15:
+            visual += 4
+        elif total_shapes >= 10:
+            visual += 3
+        elif total_shapes >= 5:
+            visual += 1
+        visual_details['total_shapes'] = total_shapes
+
+        # 3. 颜色丰富度 (3分)
+        color_pattern = r"#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgb\([^)]+\)|rgba\([^)]+\)"
+        colors_found = set(re.findall(color_pattern, code))
+        visual += min(3, len(colors_found) // 2)
+        visual_details['colors_count'] = len(colors_found)
+
+        # 4. 动画效果 (4分)
+        animation_indicators = {
+            'time_based': 'ctx.time' in code,
+            'sin_cos': 'math.sin' in code.lower() or 'math.cos' in code.lower(),
+            'position': 'setPosition' in code,
+            'rotation': 'setRotation' in code,
+            'scale': 'setScale' in code,
+        }
+        animation_count = sum(1 for v in animation_indicators.values() if v)
+        visual += min(4, animation_count)
+        visual_details['animation_types'] = animation_count
+
+        # 5. 图形元素丰富度 (3分) - 坐标轴+曲线+面板等
+        create_calls = re.findall(r'elements\.(\w+)\s*=\s*ctx\.create\w+', code)
+        # 也统计循环内批量创建的元素
+        loop_create_count = len(re.findall(r'ctx\.create(Circle|Rect|Curve|Text)', code))
+        total_elements = max(len(create_calls), loop_create_count)
+        richness_score = 0
+        if total_elements >= 12:
+            richness_score = 3
+        elif total_elements >= 8:
+            richness_score = 2
+        elif total_elements >= 4:
+            richness_score = 1
+        visual += richness_score
+        visual_details['named_elements'] = total_elements
+
+        # 6. 坐标轴+函数曲线检查 (3分) - 是否有坐标轴线和函数曲线
+        has_axis_line = bool(re.search(r'(axis|Axis|坐标|xAxis|yAxis|axisLine)\w*\s*=\s*ctx\.createLine', code))
+        has_function_curve = bool(re.search(r'(createCurve|setCurvePoints)', code))
+        axis_curve_score = 0
+        if has_axis_line and has_function_curve:
+            axis_curve_score = 3
+        elif has_axis_line or has_function_curve:
+            axis_curve_score = 1
+        visual += axis_curve_score
+        visual_details['has_axis_and_curve'] = axis_curve_score > 0
+
+        # 7. 数据面板完整性 (2分) - 背景框+标签+数值
+        has_panel_bg = bool(re.search(r'(panel|bg|background|Bar|Bg)\w*\s*=\s*ctx\.createRect', code, re.IGNORECASE))
+        has_panel_label = bool(re.search(r'(Label|label|Info|info)\w*\s*=\s*ctx\.createText', code, re.IGNORECASE))
+        panel_score = 0
+        if has_panel_bg and has_panel_label:
+            panel_score = 2
+        elif has_panel_bg or has_panel_label:
+            panel_score = 1
+        visual += panel_score
+        visual_details['has_data_panel'] = panel_score > 0
+
+        score.visual_score = min(25, visual)
+
+        # ========== 交互分 (0-25) ==========
+        interaction = 0
+        interaction_details = {}
+
+        # 1. 变量联动 (10分)
+        uses_getvar = 'ctx.getVar' in code
+        interaction += 10 if uses_getvar else 0
+        interaction_details['uses_getvar'] = uses_getvar
+
+        # 2. 变量数量合理 (5分)
+        var_count = len(self.variables)
+        if standards.min_variables <= var_count <= standards.max_variables:
+            interaction += 5
+        elif var_count > 0:
+            interaction += 3
+        interaction_details['var_count'] = var_count
+
+        # 3. 实时数值显示 (5分)
+        has_text_update = 'setText' in code
+        interaction += 5 if has_text_update else 0
+        interaction_details['has_text_update'] = has_text_update
+
+        # 4. 状态面板 (5分)
+        panel_indicators = ['Label', 'status', 'panel', 'Status', 'Panel', 'Info']
+        has_panel = any(ind in code for ind in panel_indicators)
+        interaction += 5 if has_panel else 0
+        interaction_details['has_panel'] = has_panel
+
+        score.interaction_score = min(25, interaction)
+
+        # ========== 教学分 (0-25) ==========
+        education = 0
+        education_details = {}
+
+        # 1. 注释数量 (8分)
+        comment_count = code.count('//') + code.count('/*')
+        education += min(8, comment_count)
+        education_details['comment_count'] = comment_count
+
+        # 2. 有标题 (5分)
+        text_count = code.count('createText')
+        has_title = text_count >= 2  # 至少2个文本元素（标题+其他）
+        education += 5 if has_title else (2 if text_count >= 1 else 0)
+        education_details['text_count'] = text_count
+
+        # 3. 有图例/说明 (5分)
+        legend_indicators = ['legend', 'Legend', '图例', '说明', 'label', 'Label']
+        has_legend = any(ind in code for ind in legend_indicators)
+        education += 5 if has_legend else 0
+        education_details['has_legend'] = has_legend
+
+        # 4. 变量命名可读性 (7分)
+        # 检查是否使用有意义的变量名（非单字母）
+        var_pattern = r'\b(let|const|var)\s+(\w+)'
+        var_names = re.findall(var_pattern, code)
+        meaningful_vars = sum(1 for _, name in var_names if len(name) > 2 and not name.startswith('_'))
+        education += min(7, meaningful_vars)
+        education_details['meaningful_vars'] = meaningful_vars
+
+        score.education_score = min(25, education)
+
+        # ========== 汇总 ==========
+        score.details = {
+            'structure': structure_details,
+            'visual': visual_details,
+            'interaction': interaction_details,
+            'education': education_details,
+        }
+
+        # 收集问题
+        if not has_setup:
+            score.issues.append("缺少 setup 函数")
+        if not has_update:
+            score.issues.append("缺少 update 函数")
+        if line_count < standards.min_code_lines:
+            score.issues.append(f"代码行数不足 ({line_count}/{standards.min_code_lines})")
+        if visual_types_used < 3:
+            score.issues.append(f"视觉元素类型太少 ({visual_types_used}种)")
+        if not uses_getvar:
+            score.issues.append("未使用变量联动 (ctx.getVar)")
+        if comment_count < 3:
+            score.issues.append(f"注释太少 ({comment_count}处)")
+
+        score.calculate_total()
+        return score
+
+
+class SyntaxErrorType(Enum):
+    """语法错误类型"""
+    MISSING_FUNCTION = "missing_function"       # 缺少必要函数
+    UNCLOSED_BRACKET = "unclosed_bracket"       # 未闭合括号
+    MISMATCHED_BRACKET = "mismatched_bracket"   # 括号不匹配
+    INVALID_API = "invalid_api"                 # 无效API调用
+    RETURN_OUTSIDE_FUNCTION = "return_outside"  # return在函数外
+    UNCLOSED_STRING = "unclosed_string"         # 未闭合字符串
+    FORBIDDEN_PATTERN = "forbidden_pattern"     # 禁止的模式
+    OUT_OF_BOUNDS = "out_of_bounds"             # 超出画布边界
+    LOW_CONTRAST = "low_contrast"               # 颜色对比度不足
+    DUPLICATE_DECLARATION = "duplicate_declaration"  # 重复变量声明
+    CHINESE_PUNCTUATION = "chinese_punctuation"      # 代码中的中文标点
+
+
+@dataclass
+class CodeSyntaxError:
+    """代码语法错误详情"""
+    error_type: SyntaxErrorType
+    message: str
+    line_number: Optional[int] = None           # 错误行号（从1开始）
+    column: Optional[int] = None                # 错误列号（从1开始）
+    context_before: str = ""                    # 错误行前的上下文（2行）
+    error_line: str = ""                        # 错误所在行
+    context_after: str = ""                     # 错误行后的上下文（2行）
+    suggestion: str = ""                        # 修复建议
+
+    def format_report(self) -> str:
+        """生成可读的错误报告"""
+        report = [f"[{self.error_type.value}] {self.message}"]
+
+        if self.line_number:
+            report.append(f"位置: 第 {self.line_number} 行" + (f", 第 {self.column} 列" if self.column else ""))
+
+        if self.context_before or self.error_line or self.context_after:
+            report.append("\n代码上下文:")
+            if self.context_before:
+                for i, line in enumerate(self.context_before.split('\n')):
+                    line_num = self.line_number - len(self.context_before.split('\n')) + i if self.line_number else '?'
+                    report.append(f"  {line_num} | {line}")
+            if self.error_line:
+                report.append(f"→ {self.line_number or '?'} | {self.error_line}")
+                if self.column:
+                    # 添加指示箭头
+                    pointer = " " * (len(str(self.line_number or '?')) + 3 + self.column - 1) + "^"
+                    report.append(pointer)
+            if self.context_after:
+                for i, line in enumerate(self.context_after.split('\n')):
+                    line_num = (self.line_number or 0) + i + 1
+                    report.append(f"  {line_num} | {line}")
+
+        if self.suggestion:
+            report.append(f"\n建议: {self.suggestion}")
+
+        return "\n".join(report)
+
+
+@dataclass
+class CodeQualityScore:
+    """代码质量评分"""
+    total_score: int = 0                        # 总分 (0-100)
+    structure_score: int = 0                    # 结构分 (0-25): setup/update函数、代码组织
+    visual_score: int = 0                       # 视觉分 (0-25): 元素丰富度、颜色、动画
+    interaction_score: int = 0                  # 交互分 (0-25): 变量联动、实时反馈
+    education_score: int = 0                    # 教学分 (0-25): 概念演示、注释、可读性
+
+    # 详细评分项
+    details: Dict[str, Any] = field(default_factory=dict)
+
+    # 问题列表
+    issues: List[str] = field(default_factory=list)
+
+    # 是否通过质量阈值
+    passed: bool = False
+    threshold: int = 70                         # 质量阈值
+
+    def calculate_total(self):
+        """计算总分"""
+        self.total_score = self.structure_score + self.visual_score + self.interaction_score + self.education_score
+        self.passed = self.total_score >= self.threshold
+
+    def format_report(self) -> str:
+        """生成评分报告"""
+        status = "✓ 通过" if self.passed else "✗ 未通过"
+        report = [
+            f"代码质量评分: {self.total_score}/100 ({status})",
+            f"  结构分: {self.structure_score}/25",
+            f"  视觉分: {self.visual_score}/25",
+            f"  交互分: {self.interaction_score}/25",
+            f"  教学分: {self.education_score}/25",
+        ]
+
+        if self.issues:
+            report.append("\n问题:")
+            for issue in self.issues:
+                report.append(f"  - {issue}")
+
+        return "\n".join(report)
 
 
 @dataclass
@@ -224,6 +712,20 @@ class ChapterResult:
 
 
 @dataclass
+class StepReviewResult:
+    """单步审核结果"""
+    step_index: int
+    step_type: str
+    status: ReviewStatus
+    issues: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+    score: int = 0
+
+    def is_approved(self) -> bool:
+        return self.status == ReviewStatus.APPROVED
+
+
+@dataclass
 class ReviewResult:
     """审核结果"""
     status: ReviewStatus
@@ -234,6 +736,9 @@ class ReviewResult:
 
     # 具体问题定位
     problematic_steps: List[int] = field(default_factory=list)
+
+    # 每个步骤的详细审核结果（用于单步重做）
+    step_reviews: List[StepReviewResult] = field(default_factory=list)
 
     # 审核评分 (0-100)
     content_score: int = 0
@@ -253,6 +758,13 @@ class ReviewResult:
         if self.simulator_issues:
             reasons.append("模拟器问题：" + "；".join(self.simulator_issues))
         return "\n".join(reasons)
+
+    def get_step_issues(self, step_index: int) -> List[str]:
+        """获取指定步骤的问题列表"""
+        for sr in self.step_reviews:
+            if sr.step_index == step_index:
+                return sr.issues
+        return []
 
 
 @dataclass
@@ -285,6 +797,10 @@ class GenerationState:
     current_attempt: int = 0
     max_attempts: int = 3  # 每章最多重试次数
 
+    # 单步重做状态（新增）
+    step_retry_counts: Dict[int, int] = field(default_factory=dict)  # {step_index: retry_count}
+    max_step_retries: int = 2  # 单步最大重试次数
+
     # JSON 解析错误信息（用于监督者指导修复）
     last_json_error: Optional[str] = None
     json_fix_guidance: Optional[str] = None
@@ -296,6 +812,19 @@ class GenerationState:
     # 时间戳
     started_at: datetime = field(default_factory=datetime.utcnow)
     last_updated_at: datetime = field(default_factory=datetime.utcnow)
+
+    def reset_step_retries(self):
+        """重置单步重试计数（新章节时调用）"""
+        self.step_retry_counts = {}
+
+    def can_retry_step(self, step_index: int) -> bool:
+        """检查指定步骤是否还能重试"""
+        return self.step_retry_counts.get(step_index, 0) < self.max_step_retries
+
+    def increment_step_retry(self, step_index: int):
+        """增加指定步骤的重试次数"""
+        self.step_retry_counts[step_index] = self.step_retry_counts.get(step_index, 0) + 1
+        self.last_updated_at = datetime.utcnow()
 
     def get_context_summary(self) -> str:
         """获取上下文摘要，用于监督者上下文被压缩时重新发送"""

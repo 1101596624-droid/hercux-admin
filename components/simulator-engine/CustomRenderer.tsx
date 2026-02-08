@@ -99,6 +99,10 @@ interface SimulatorContext {
   setColor: (id: string, color: string) => void;
   setText: (id: string, text: string) => void;
   setVisible: (id: string, visible: boolean) => void;
+  setGlow: (id: string, blur: number, color?: string) => void;
+  setCurvePoints: (id: string, points: Array<{x: number, y: number}>, smooth?: boolean) => void;
+  setRadius: (id: string, radius: number) => void;
+  setSize: (id: string, w: number, h: number) => void;
   remove: (id: string) => void;
   clear: () => void;
 
@@ -151,6 +155,7 @@ interface CompiledSimulator {
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 500;
+const MAX_ELEMENTS = 500;
 
 // ==================== 组件 ====================
 
@@ -173,13 +178,16 @@ function CustomRendererInner({
   const errorCountRef = useRef<number>(0);
   const MAX_UPDATE_ERRORS = 3;
   const elementIdCounter = useRef<number>(0);
+  const elementLimitWarned = useRef<boolean>(false);
 
   const [error, setError] = useState<Error | null>(null);
 
-  // 更新变量引用
-  useEffect(() => {
+  // 更新变量引用 — 同步更新，避免异步延迟导致滑块卡顿
+  const prevVariablesRef = useRef(variables);
+  if (prevVariablesRef.current !== variables) {
     variablesRef.current = { ...variablesRef.current, ...variables };
-  }, [variables]);
+    prevVariablesRef.current = variables;
+  }
 
   // 生成唯一ID
   const generateId = useCallback(() => {
@@ -213,11 +221,17 @@ function CustomRendererInner({
 
       // 创建圆形
       createCircle: (x, y, radius, color) => {
+        if (elementsRef.current.size >= MAX_ELEMENTS) {
+          if (!elementLimitWarned.current) { console.warn('元素数量超限:', MAX_ELEMENTS); elementLimitWarned.current = true; }
+          return '__limit__';
+        }
         const id = generateId();
         const graphics = new PIXI.Graphics();
         graphics.circle(0, 0, radius);
         graphics.fill({ color: parseColor(color) });
         graphics.position.set(x, y);
+        (graphics as any)._circleData = { color: parseColor(color), radius };
+        (graphics as any)._circleRadius = radius;
         app.stage.addChild(graphics);
         elementsRef.current.set(id, graphics);
         return id;
@@ -225,6 +239,10 @@ function CustomRendererInner({
 
       // 创建矩形
       createRect: (x, y, w, h, color, cornerRadius = 0) => {
+        if (elementsRef.current.size >= MAX_ELEMENTS) {
+          if (!elementLimitWarned.current) { console.warn('元素数量超限:', MAX_ELEMENTS); elementLimitWarned.current = true; }
+          return '__limit__';
+        }
         const id = generateId();
         const graphics = new PIXI.Graphics();
         if (cornerRadius > 0) {
@@ -234,6 +252,7 @@ function CustomRendererInner({
         }
         graphics.fill({ color: parseColor(color) });
         graphics.position.set(x, y);
+        (graphics as any)._rectData = { color: parseColor(color), w, h, cornerRadius };
         app.stage.addChild(graphics);
         elementsRef.current.set(id, graphics);
         return id;
@@ -241,6 +260,10 @@ function CustomRendererInner({
 
       // 创建线条
       createLine: (...args: any[]) => {
+        if (elementsRef.current.size >= MAX_ELEMENTS) {
+          if (!elementLimitWarned.current) { console.warn('元素数量超限:', MAX_ELEMENTS); elementLimitWarned.current = true; }
+          return '__limit__';
+        }
         const id = generateId();
         const graphics = new PIXI.Graphics();
         let pts: Array<{x: number, y: number}>;
@@ -283,6 +306,10 @@ function CustomRendererInner({
 
       // 创建文本
       createText: (text, x, y, style = {}) => {
+        if (elementsRef.current.size >= MAX_ELEMENTS) {
+          if (!elementLimitWarned.current) { console.warn('元素数量超限:', MAX_ELEMENTS); elementLimitWarned.current = true; }
+          return '__limit__';
+        }
         const id = generateId();
         const pixiText = new PIXI.Text({
           text,
@@ -303,6 +330,10 @@ function CustomRendererInner({
 
       // 创建曲线
       createCurve: (points, color, lineWidth = 2, smooth = true) => {
+        if (elementsRef.current.size >= MAX_ELEMENTS) {
+          if (!elementLimitWarned.current) { console.warn('元素数量超限:', MAX_ELEMENTS); elementLimitWarned.current = true; }
+          return '__limit__';
+        }
         const id = generateId();
         const graphics = new PIXI.Graphics();
         if (points.length > 1) {
@@ -324,6 +355,7 @@ function CustomRendererInner({
           }
           graphics.stroke({ color: parseColor(color), width: lineWidth });
         }
+        (graphics as any)._curveData = { color, lineWidth };
         app.stage.addChild(graphics);
         elementsRef.current.set(id, graphics);
         return id;
@@ -331,10 +363,28 @@ function CustomRendererInner({
 
       // 创建多边形
       createPolygon: (points, fillColor, strokeColor) => {
+        if (elementsRef.current.size >= MAX_ELEMENTS) {
+          if (!elementLimitWarned.current) { console.warn('元素数量超限:', MAX_ELEMENTS); elementLimitWarned.current = true; }
+          return '__limit__';
+        }
         const id = generateId();
         const graphics = new PIXI.Graphics();
-        if (points.length > 2) {
-          graphics.poly(points.flatMap(p => [p.x, p.y]));
+        // 兼容多种点格式: [{x,y}], [[x,y]], [x1,y1,x2,y2,...]
+        let flatPoints: number[] = [];
+        if (points.length > 0) {
+          if (typeof points[0] === 'object' && points[0] !== null && 'x' in points[0]) {
+            // {x, y} 格式
+            flatPoints = points.flatMap((p: any) => [p.x, p.y]);
+          } else if (Array.isArray(points[0])) {
+            // [x, y] 数组格式
+            flatPoints = points.flatMap((p: any) => [p[0], p[1]]);
+          } else if (typeof points[0] === 'number') {
+            // 平铺数字格式 [x1, y1, x2, y2, ...]
+            flatPoints = points as unknown as number[];
+          }
+        }
+        if (flatPoints.length >= 6) {
+          graphics.poly(flatPoints);
           graphics.fill({ color: parseColor(fillColor) });
           if (strokeColor) {
             graphics.stroke({ color: parseColor(strokeColor), width: 2 });
@@ -349,8 +399,11 @@ function CustomRendererInner({
       setPosition: (id: string, x: number, y: number, x2?: number, y2?: number) => {
         const elem = elementsRef.current.get(id);
         if (!elem) return;
+        // NaN 保护
+        if (!isFinite(x) || !isFinite(y)) return;
         // 线段支持4坐标重绘: setPosition(id, x1, y1, x2, y2)
         if (x2 !== undefined && y2 !== undefined && (elem as any)._lineData) {
+          if (!isFinite(x2) || !isFinite(y2)) return;
           const ld = (elem as any)._lineData;
           (elem as any).clear();
           (elem as any).moveTo(x, y);
@@ -366,19 +419,19 @@ function CustomRendererInner({
       // 设置缩放
       setScale: (id, sx, sy) => {
         const elem = elementsRef.current.get(id);
-        if (elem) elem.scale.set(sx, sy);
+        if (elem && isFinite(sx) && isFinite(sy)) elem.scale.set(sx, sy);
       },
 
       // 设置旋转
       setRotation: (id, angle) => {
         const elem = elementsRef.current.get(id);
-        if (elem) elem.rotation = angle * Math.PI / 180;
+        if (elem && isFinite(angle)) elem.rotation = angle * Math.PI / 180;
       },
 
       // 设置透明度
       setAlpha: (id, alpha) => {
         const elem = elementsRef.current.get(id);
-        if (elem) elem.alpha = Math.max(0, Math.min(1, alpha));
+        if (elem && isFinite(alpha)) elem.alpha = Math.max(0, Math.min(1, alpha));
       },
 
       // 设置颜色（仅Graphics）
@@ -403,6 +456,101 @@ function CustomRendererInner({
         if (elem) elem.visible = visible;
       },
 
+      // 设置发光效果（用叠加半透明放大圆模拟）
+      setGlow: (id, blur, glowColor) => {
+        const elem = elementsRef.current.get(id);
+        if (!elem) return;
+        // 查找或创建发光层
+        const glowId = id + '__glow';
+        let glow = elementsRef.current.get(glowId);
+        if (blur <= 0) {
+          // 关闭发光
+          if (glow) { glow.destroy(); elementsRef.current.delete(glowId); }
+          return;
+        }
+        if (!glow) {
+          glow = new PIXI.Graphics();
+          // 插入到元素下方
+          const idx = app.stage.getChildIndex(elem);
+          app.stage.addChildAt(glow, idx);
+          elementsRef.current.set(glowId, glow);
+        }
+        // 重绘发光圆
+        const g = glow as PIXI.Graphics;
+        g.clear();
+        const color = glowColor ? parseColor(glowColor) : 0xfbbf24;
+        const r = ((elem as any)._circleRadius || 10) + blur * 0.6;
+        // 多层渐变模拟发光
+        for (let i = 3; i >= 1; i--) {
+          g.circle(0, 0, r * (1 + i * 0.3));
+          g.fill({ color, alpha: 0.06 * i });
+        }
+        g.circle(0, 0, r);
+        g.fill({ color, alpha: 0.15 });
+        g.position.set(elem.position.x, elem.position.y);
+        g.alpha = elem.alpha;
+      },
+
+      // 动态更新曲线/线条的点
+      setCurvePoints: (id, points, smooth = true) => {
+        const elem = elementsRef.current.get(id);
+        if (!elem || !(elem instanceof PIXI.Graphics)) return;
+        const ld = (elem as any)._lineData || (elem as any)._curveData;
+        const color = ld?.color || '#ffffff';
+        const lineWidth = ld?.lineWidth || 2;
+        elem.clear();
+        if (points.length > 1) {
+          elem.moveTo(points[0].x, points[0].y);
+          if (smooth && points.length > 2) {
+            for (let i = 1; i < points.length; i++) {
+              const prev = points[i - 1];
+              const curr = points[i];
+              const xc = (prev.x + curr.x) / 2;
+              const yc = (prev.y + curr.y) / 2;
+              elem.quadraticCurveTo(prev.x, prev.y, xc, yc);
+            }
+            const last = points[points.length - 1];
+            elem.lineTo(last.x, last.y);
+          } else {
+            for (let i = 1; i < points.length; i++) {
+              elem.lineTo(points[i].x, points[i].y);
+            }
+          }
+          elem.stroke({ color: parseColor(color), width: lineWidth });
+        }
+        elem.position.set(0, 0);
+      },
+
+      // 动态改变圆的半径
+      setRadius: (id, radius) => {
+        const elem = elementsRef.current.get(id);
+        if (!elem || !(elem instanceof PIXI.Graphics)) return;
+        if (!isFinite(radius) || radius < 0) return;
+        const cd = (elem as any)._circleData;
+        const color = cd?.color || 0xffffff;
+        elem.clear();
+        elem.circle(0, 0, radius);
+        elem.fill({ color });
+        (elem as any)._circleRadius = radius;
+      },
+
+      // 动态改变矩形尺寸
+      setSize: (id, w, h) => {
+        const elem = elementsRef.current.get(id);
+        if (!elem || !(elem instanceof PIXI.Graphics)) return;
+        if (!isFinite(w) || !isFinite(h) || w < 0 || h < 0) return;
+        const rd = (elem as any)._rectData;
+        const color = rd?.color || 0xffffff;
+        const cr = rd?.cornerRadius || 0;
+        elem.clear();
+        if (cr > 0) {
+          elem.roundRect(-w/2, -h/2, w, h, cr);
+        } else {
+          elem.rect(-w/2, -h/2, w, h);
+        }
+        elem.fill({ color });
+      },
+
       // 移除元素
       remove: (id) => {
         const elem = elementsRef.current.get(id);
@@ -417,6 +565,7 @@ function CustomRendererInner({
         elementsRef.current.forEach(elem => elem.destroy());
         elementsRef.current.clear();
         elementIdCounter.current = 0;
+        elementLimitWarned.current = false;
       },
 
       // 获取变量
@@ -454,6 +603,7 @@ function CustomRendererInner({
         wave: (t, frequency = 1, amplitude = 1) => Math.sin(t * frequency * Math.PI * 2) * amplitude,
         degToRad: (deg) => deg * Math.PI / 180,
         radToDeg: (rad) => rad * 180 / Math.PI,
+        atan2: Math.atan2,
       },
     };
   }, [generateId, parseColor, onVariableChange]);

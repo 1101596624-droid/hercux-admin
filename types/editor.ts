@@ -13,7 +13,7 @@ import type { StepType, ComplexityLevel } from './coursePackage';
 // 编辑器组件类型（扩展自课程包标准）
 export type ComponentType = StepType | 'exam' | 'model_3d' | 'reading';
 
-export const COMPONENT_TYPE_LABELS: Record<ComponentType, string> = {
+export const COMPONENT_TYPE_LABELS: Record<string, string> = {
   text_content: '文本内容',
   illustrated_content: '图文内容',
   video: '视频',
@@ -21,10 +21,6 @@ export const COMPONENT_TYPE_LABELS: Record<ComponentType, string> = {
   ai_tutor: 'AI 导师',
   assessment: '测验',
   quick_check: '快速检测',
-  practice: '练习',
-  exam: '考试',
-  model_3d: '3D 模型',
-  reading: '阅读材料',
 };
 
 // ============================================

@@ -4,7 +4,7 @@ Grinder API - 做题家模块后端代理
 """
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
 import httpx
 import json
@@ -19,6 +19,24 @@ from app.services.grinder.service import grinder_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# 输入限制 (用户输入在前端限制，后端代理需要支持更长的内部调用如 SVG 监督者检查)
+MAX_MESSAGE_LENGTH = 50000
+
+
+def sanitize_text(text: str) -> str:
+    """过滤特殊字符，防止 API 报错"""
+    if not text:
+        return text
+    return (
+        text
+        # 移除控制字符 (ASCII 0-31, 127)，保留换行(\n)和制表符(\t)
+        .replace('\r', '\n')
+        .translate(str.maketrans('', '', ''.join(chr(i) for i in range(32) if i not in (9, 10)) + chr(127)))
+        # 移除零宽字符
+        .replace('\u200b', '').replace('\u200c', '').replace('\u200d', '')
+        .replace('\ufeff', '').replace('\u2060', '').replace('\u00ad', '')
+    )
 
 
 # 创建使用 certifi 证书的 SSL 上下文
@@ -46,6 +64,15 @@ class Message(BaseModel):
     role: str
     content: str
 
+    @field_validator('content')
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        """验证并清理消息内容"""
+        v = sanitize_text(v)
+        if len(v) > MAX_MESSAGE_LENGTH:
+            raise ValueError(f'消息过长，最多 {MAX_MESSAGE_LENGTH} 字符，请精简后重新输入')
+        return v
+
 
 class ChatRequest(BaseModel):
     model: str
@@ -53,6 +80,14 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     system: Optional[str] = None
     stream: Optional[bool] = False
+
+    @field_validator('system')
+    @classmethod
+    def validate_system(cls, v: Optional[str]) -> Optional[str]:
+        """清理系统提示"""
+        if v:
+            return sanitize_text(v)
+        return v
 
 
 class ContentBlock(BaseModel):
@@ -100,32 +135,45 @@ async def grinder_chat(
     if request.system:
         payload["system"] = request.system
 
-    try:
-        async with httpx.AsyncClient(timeout=120.0, verify=get_ssl_context()) as client:
-            response = await client.post(
-                CLAUDE_API_URL,
-                headers=headers,
-                json=payload
-            )
+    # 重试机制，最多重试 3 次
+    max_retries = 3
+    last_error = None
 
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Claude API error: {response.text}"
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=120.0, verify=get_ssl_context()) as client:
+                response = await client.post(
+                    CLAUDE_API_URL,
+                    headers=headers,
+                    json=payload
                 )
 
-            return response.json()
+                if response.status_code != 200:
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail=f"Claude API error: {response.text}"
+                    )
 
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=504,
-            detail="Claude API request timed out"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to call Claude API: {str(e)}"
-        )
+                return response.json()
+
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status_code=504,
+                detail="Claude API request timed out"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                logger.warning(f"Claude API call failed (attempt {attempt + 1}/{max_retries}): {last_error}")
+                import asyncio
+                await asyncio.sleep(1)  # 等待 1 秒后重试
+                continue
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to call Claude API after {max_retries} attempts: {last_error}"
+            )
 
 
 @router.post("/chat/stream")

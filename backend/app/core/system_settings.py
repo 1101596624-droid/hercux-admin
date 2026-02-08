@@ -45,7 +45,7 @@ class StorageSettings(BaseModel):
     """存储设置"""
     max_upload_size_mb: int = 100
     allowed_image_types: list = ["jpg", "jpeg", "png", "gif", "webp"]
-    allowed_video_types: list = ["mp4", "webm", "mov"]
+    allowed_video_types: list = ["mp4", "webm", "mov", "avi", "mkv", "flv", "wmv", "m4v"]
     allowed_document_types: list = ["pdf", "doc", "docx", "ppt", "pptx"]
     storage_path: str = "/www/wwwroot/hercu-backend/media"
     auto_cleanup_days: int = 30

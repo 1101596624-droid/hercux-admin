@@ -12,8 +12,9 @@ from app.services.claude_service import ClaudeService
 from .models import (
     GenerationState, CourseOutline, ChapterOutline, ChapterResult,
     ReviewResult, ReviewStatus, ChapterType, ChapterQualityStandards,
-    SimulatorQualityStandards, SimulatorSpec, ChapterStep
+    SimulatorQualityStandards, SimulatorSpec, ChapterStep, StepReviewResult
 )
+from .generator import JSONRepairTool
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,25 @@ class CourseSupervisor:
             logger.warning(f"Search failed: {e}")
             return ""
 
+    def _detect_source_chapters(self, source_material: str) -> int:
+        """检测源材料中的章节数量"""
+        import re
+        patterns = [
+            r'第[一二三四五六七八九十百\d]+[章节篇]',
+            r'Chapter\s+\d+',
+            r'CHAPTER\s+\d+',
+            r'(?m)^#{1,2}\s+\d+[\.\s]',
+            r'(?m)^\d+[\.\、]\s*[^\d\s]',
+        ]
+        chapter_titles = set()
+        for pattern in patterns:
+            matches = re.findall(pattern, source_material)
+            for m in matches:
+                chapter_titles.add(m.strip())
+            if len(chapter_titles) >= 3:
+                break
+        return len(chapter_titles)
+
     async def generate_outline(
         self,
         state: GenerationState,
@@ -90,13 +110,63 @@ class CourseSupervisor:
 
 """
 
+        # 课程风格描述
+        style_descriptions = {
+            'academic': '学术型课程：注重理论深度，章节应覆盖完整的学术体系，可以多章深入',
+            'practical': '实践型课程：注重动手操作，章节围绕实际技能展开，精简高效',
+            'sports': '运动科学课程：注重技术动作分析和生物力学原理，按技术环节划分章节',
+            'default': '通用课程：根据知识结构合理组织章节',
+        }
+        style_hint = style_descriptions.get(state.processor_id, style_descriptions['default'])
+
+        # 源材料长度信息
+        material_length = len(state.source_material)
+
+        # 对于大文件（>3万字），检测源材料中的章节数
+        min_chapters_hint = ""
+        detected_chapter_count = 0
+        if material_length > 30000:
+            detected_chapter_count = self._detect_source_chapters(state.source_material)
+            if detected_chapter_count > 0:
+                min_chapters_hint = f"""
+【源材料章节检测】
+检测到源材料本身包含约 {detected_chapter_count} 个章节/部分。
+【强制要求】生成的课程章节数不得少于 {detected_chapter_count} 章。你必须完整、精确地覆盖源材料中的所有内容，不得遗漏或过度合并。
+"""
+
+        prompt += f"""【课程风格】
+{style_hint}
+
+【源材料规模】
+源材料总字数约 {material_length} 字。
+{min_chapters_hint}
+"""
+
         prompt += """【要求】
-1. 根据源材料的内容深度，合理划分章节（4-8章）
-2. 每章要有明确的学习目标和核心概念
-3. 章节之间要有逻辑递进关系
-4. 为每章建议合适的模拟器主题（用于可视化演示核心概念）
-5. 模拟器主题要具体、可实现，且各章不重复
-6. 【重要】确保内容反映最新的研究成果和行业动态
+1. 章节数量由你根据以下因素自主决定，不设固定范围：
+   - 【最优先】课程风格：不同风格对章节粒度的要求不同
+   - 【次优先】源材料内容量：材料越丰富，可划分的章节越多
+   - 【参考】知识结构的自然分界：按内容的逻辑边界划分，不要为凑数而拆分或合并
+   - 【强制】如果上方有"源材料章节检测"，生成的章节数不得少于检测到的数量
+2. 【核心原则】课程必须完整、精确地表达源材料中的所有内容，不得遗漏任何重要知识点
+3. 每章要有明确的学习目标和核心概念
+4. 章节之间要有逻辑递进关系
+5. 为每章建议合适的模拟器主题（用于可视化演示核心概念）
+6. 模拟器主题要具体、可实现，且各章不重复
+7. 【重要】确保内容反映最新的研究成果和行业动态
+
+【章节标题要求 - 非常重要】
+- 章节标题必须具体、专业，体现该章的核心内容
+- 禁止使用泛化模板名称，以下名称绝对禁止使用：
+  × 课程导入、核心概念、深入理解、总结测评
+  × 基础知识、进阶内容、综合应用、知识拓展
+  × 第一章、第二章（纯数字编号）
+- 好的标题示例（以运动技术课程为例）：
+  ✓ 助跑技术与节奏控制
+  ✓ 起跳力学原理分析
+  ✓ 过杆背弓技术详解
+  ✓ 落地缓冲与安全防护
+- 标题应该让学习者一眼就知道这章要学什么具体内容
 
 【输出格式】
 请以JSON格式输出：
@@ -106,24 +176,40 @@ class CourseSupervisor:
     "total_chapters": 章节数量,
     "estimated_hours": 预计学时,
     "difficulty": "beginner/intermediate/advanced",
-    "core_concepts": ["核心概念1", "核心概念2", ...],
+    "core_concepts": ["核心概念1", "核心概念2", "核心概念3"],
     "chapters": [
         {
             "index": 0,
-            "title": "章节标题",
-            "chapter_type": "introduction/core_content/practice/assessment/summary",
+            "title": "具体的章节标题",
+            "chapter_type": "introduction",
             "recommended_forms": ["text_content", "simulator", "assessment"],
-            "complexity_level": "simple/standard/advanced",
+            "complexity_level": "simple",
             "key_concepts": ["概念1", "概念2"],
             "learning_objectives": ["目标1", "目标2"],
             "suggested_simulator": "建议的模拟器主题（具体描述要演示什么）"
+        },
+        {
+            "index": 1,
+            "title": "另一个具体的章节标题",
+            "chapter_type": "core_content",
+            "recommended_forms": ["text_content", "illustrated_content", "simulator"],
+            "complexity_level": "standard",
+            "key_concepts": ["概念3", "概念4"],
+            "learning_objectives": ["目标3", "目标4"],
+            "suggested_simulator": "另一个模拟器主题"
         }
     ]
 }
 
+注意：
+- chapters 数组中列出所有章节，不要用省略号(...)
+- 必须输出完整、可直接解析的JSON
+- 不要在JSON中添加注释
+
 请确保：
 - 每章的 suggested_simulator 都不同，且与该章核心概念紧密相关
 - 模拟器主题要具体到可以用代码实现（如"展示力的合成与分解"而非"物理模拟"）
+- 同一课程内的图片（illustrated_content）和模拟器之间要有明显区别，不能视觉重复
 """
 
         # 记录对话
@@ -144,14 +230,15 @@ class CourseSupervisor:
         })
 
         # 解析大纲
-        outline = self._parse_outline(response, state.course_title)
+        outline = self._parse_outline(response, state)
         state.outline = outline
 
         logger.info(f"Generated outline with {outline.total_chapters} chapters")
         return outline
 
-    def _parse_outline(self, response: str, course_title: str) -> CourseOutline:
-        """解析大纲JSON"""
+    def _parse_outline(self, response: str, state: GenerationState) -> CourseOutline:
+        """解析大纲JSON，带JSON修复"""
+        course_title = state.course_title
         try:
             # 提取JSON
             json_str = response
@@ -164,7 +251,15 @@ class CourseSupervisor:
                 end = response.rindex('}') + 1
                 json_str = response[start:end]
 
-            data = json.loads(json_str.strip())
+            # 先尝试直接解析
+            try:
+                data = json.loads(json_str.strip())
+            except json.JSONDecodeError as e:
+                # 使用 JSONRepairTool 修复
+                logger.warning(f"Outline JSON parse failed, trying repair: {e}")
+                repaired = JSONRepairTool.repair(json_str)
+                data = json.loads(repaired)
+                logger.info("Outline JSON repaired successfully")
 
             chapters = []
             for ch_data in data.get('chapters', []):
@@ -197,35 +292,59 @@ class CourseSupervisor:
 
         except Exception as e:
             logger.error(f"Failed to parse outline: {e}")
-            # 返回默认大纲
+            # 根据源材料检测章节数和长度动态生成默认大纲
+            material_len = len(state.source_material)
+            detected = self._detect_source_chapters(state.source_material) if material_len > 30000 else 0
+
+            if detected > 0:
+                fallback_count = detected
+            elif material_len < 2000:
+                fallback_count = 3
+            elif material_len < 5000:
+                fallback_count = 4
+            elif material_len < 10000:
+                fallback_count = 5
+            elif material_len < 50000:
+                fallback_count = 6
+            elif material_len < 100000:
+                fallback_count = 8
+            elif material_len < 200000:
+                fallback_count = 10
+            else:
+                fallback_count = 12
+
+            fallback_chapters = []
+            # 循环使用的章节类型模板
+            templates = [
+                (ChapterType.INTRODUCTION, "simple", ["text_content"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "assessment"]),
+                (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content", "assessment"]),
+                (ChapterType.PRACTICE, "standard", ["text_content", "simulator", "assessment"]),
+                (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "assessment"]),
+                (ChapterType.PRACTICE, "standard", ["text_content", "simulator"]),
+                (ChapterType.ASSESSMENT, "simple", ["text_content", "assessment"]),
+            ]
+            for i in range(fallback_count):
+                t = templates[i] if i < len(templates) else templates[-1]
+                fallback_chapters.append(ChapterOutline(
+                    index=i, title=f"{course_title}第{i+1}部分",
+                    chapter_type=t[0], complexity_level=t[1],
+                    recommended_forms=t[2],
+                    key_concepts=[], learning_objectives=[]
+                ))
+
             return CourseOutline(
                 title=course_title,
                 description=f"关于{course_title}的课程",
-                total_chapters=4,
-                estimated_hours=2.0,
+                total_chapters=fallback_count,
+                estimated_hours=max(1.0, fallback_count * 0.5),
                 difficulty='intermediate',
-                chapters=[
-                    ChapterOutline(
-                        index=0, title="课程导入", chapter_type=ChapterType.INTRODUCTION,
-                        recommended_forms=["text_content"], complexity_level="simple",
-                        key_concepts=[], learning_objectives=[]
-                    ),
-                    ChapterOutline(
-                        index=1, title="核心概念", chapter_type=ChapterType.CORE_CONTENT,
-                        recommended_forms=["text_content", "simulator"], complexity_level="standard",
-                        key_concepts=[], learning_objectives=[]
-                    ),
-                    ChapterOutline(
-                        index=2, title="深入理解", chapter_type=ChapterType.CORE_CONTENT,
-                        recommended_forms=["text_content", "simulator", "assessment"], complexity_level="standard",
-                        key_concepts=[], learning_objectives=[]
-                    ),
-                    ChapterOutline(
-                        index=3, title="总结测评", chapter_type=ChapterType.ASSESSMENT,
-                        recommended_forms=["text_content", "assessment"], complexity_level="simple",
-                        key_concepts=[], learning_objectives=[]
-                    ),
-                ],
+                chapters=fallback_chapters,
                 core_concepts=[]
             )
 
@@ -323,289 +442,74 @@ class CourseSupervisor:
         return prompt
 
     def _get_quality_requirements(self) -> str:
-        """获取质量要求说明"""
+        """
+        获取质量要求说明 - 骨架生成阶段专用
+
+        注意：此阶段只生成结构骨架，不生成长文本和代码。
+        代码质量要求已移至 generator.py 的代码生成阶段。
+        文本质量要求已移至 service.py 的文本生成阶段。
+        """
         return """
-【质量要求 - 必须严格遵守】
+【质量要求 - 骨架生成阶段】
 
-=== 模拟器质量标准（最重要）===
+=== 章节结构要求 ===
 
-【画布尺寸】1000 x 650 像素
+1. 步骤数量：由你根据该章节的内容深度和课程风格自主决定，不设固定范围
+2. 步骤类型由你自主搭配，可用类型：
+   - text_content（纯文本讲解）
+   - illustrated_content（图文讲解）
+   - simulator（互动模拟器）
+   - assessment（测验）
+3. 【重要】同一课程内的图片和模拟器必须有明显区别，不能重复相似的视觉内容
+4. 学习目标：至少 4 个，使用动词开头
+5. 每个步骤的 key_points：3-5 个要点
 
-1. 代码结构要求：
-   - 必须有 setup(ctx) 函数：初始化所有视觉元素
-   - 必须有 update(ctx) 函数：每帧更新，响应变量变化
-   - 代码至少 60 行，逻辑完整，视觉丰富
+=== 模拟器变量要求（重要）===
 
-2. 变量要求：
-   - 必须定义 2-5 个变量（variables 数组）
-   - 每个变量必须在 update 中通过 ctx.getVar() 读取
-   - 变量变化必须导致视觉效果变化（这是模拟器的核心价值！）
+模拟器的 variables 数组必须完整定义：
+- 必须定义 2-3 个变量（不要超过3个，每个变量必须有明确的视觉反馈）
+- 每个变量必须包含：name, label, min, max, default, step, unit
+- 变量之间应有逻辑关联
+- 示例：
+  {"name": "speed", "label": "速度", "min": 1, "max": 100, "default": 50, "step": 1, "unit": "m/s"}
 
-3. 【重要】视觉质量要求 - 禁止简陋图形：
-   - 禁止只用简单的圆形或矩形代表复杂对象
-   - 必须使用组合图形创建有辨识度的视觉元素
-   - 每个主要对象至少由 3-5 个基础图形组合而成
-   - 必须使用渐变色、多层次颜色增加视觉深度
-   - 必须添加装饰性元素（网格背景、刻度线、图例等）
-   - 必须有清晰的数据可视化（图表、仪表盘、进度条等）
-   - 使用至少 5 种不同颜色区分不同元素
+=== 禁止事项 ===
 
-4. 动画要求：
-   - 必须有流畅的动画效果（位置、大小、旋转、透明度变化）
-   - 使用 ctx.time 创建周期性动画
-   - 对象移动要有轨迹或残影效果
-   - 数值变化要有平滑过渡
+- 不要有"待补充"、"..."、"暂无"、"略"等占位内容
+- 不要在 key_points 中写空字符串
+- 不要遗漏 variables 定义
 
-5. 教学要求：
-   - 模拟器必须直观展示核心概念
-   - 变量与视觉效果之间要有清晰的因果关系
-   - 用户拖动滑块时，应该能立即看到效果变化
-   - 必须有图例说明各元素含义
+=== 重要提醒 ===
 
-6. 禁止事项：
-   - 不要使用 console.log、alert、document、window
-   - 不要使用 setTimeout、setInterval（用 ctx.time 实现动画）
-   - 不要写空的或占位的代码
-   - 【严禁】用单个圆形代表动物、人物等复杂对象
-   - 【严禁】用单个矩形代表建筑、车辆等复杂对象
-
-=== 模拟器代码示例（狼群捕猎策略模拟）===
-
-```javascript
-let elements = {};
-let wolves = [];
-let prey = null;
-
-function setup(ctx) {
-  const { width, height } = ctx;
-
-  // 背景网格
-  for (let x = 0; x < width; x += 50) {
-    ctx.createLine([{x: x, y: 0}, {x: x, y: height}], '#2a3a4a', 1);
-  }
-  for (let y = 0; y < height; y += 50) {
-    ctx.createLine([{x: 0, y: y}, {x: width, y: y}], '#2a3a4a', 1);
-  }
-
-  // 标题和图例
-  elements.title = ctx.createText('狼群协作捕猎模拟', width/2, 30, {
-    fontSize: 24, fontWeight: 'bold', color: '#ffffff'
-  });
-
-  // 图例背景
-  ctx.createRect(120, 580, 200, 80, '#1a2a3a', 8);
-  ctx.createCircle(50, 560, 8, '#6366f1');
-  ctx.createText('狼群', 80, 560, { fontSize: 14, color: '#a5b4fc' });
-  ctx.createCircle(50, 590, 10, '#f59e0b');
-  ctx.createText('猎物', 80, 590, { fontSize: 14, color: '#fcd34d' });
-
-  // 创建猎物（鹿）- 组合图形
-  prey = {
-    x: width * 0.7,
-    y: height * 0.4,
-    body: null,
-    head: null,
-    legs: [],
-    antlers: []
-  };
-
-  // 创建狼群
-  const wolfCount = 5;
-  for (let i = 0; i < wolfCount; i++) {
-    const angle = (i / wolfCount) * Math.PI * 2;
-    wolves.push({
-      x: width * 0.3 + Math.cos(angle) * 80,
-      y: height * 0.5 + Math.sin(angle) * 80,
-      body: null,
-      head: null,
-      tail: null,
-      legs: []
-    });
-  }
-
-  // 状态面板
-  ctx.createRect(width - 150, 100, 260, 160, '#1e293b', 12);
-  elements.statusTitle = ctx.createText('狩猎状态', width - 150, 50, {
-    fontSize: 16, fontWeight: 'bold', color: '#94a3b8'
-  });
-  elements.distanceLabel = ctx.createText('距离: 0m', width - 150, 80, {
-    fontSize: 14, color: '#60a5fa'
-  });
-  elements.energyLabel = ctx.createText('狼群体力: 100%', width - 150, 110, {
-    fontSize: 14, color: '#34d399'
-  });
-  elements.successLabel = ctx.createText('成功率: 0%', width - 150, 140, {
-    fontSize: 14, color: '#fbbf24'
-  });
-
-  // 能量条背景
-  ctx.createRect(width - 150, 170, 200, 16, '#374151', 8);
-  elements.energyBar = ctx.createRect(width - 200, 170, 150, 12, '#10b981', 6);
-}
-
-function update(ctx) {
-  const { width, height, math, time } = ctx;
-  const packSize = ctx.getVar('packSize');
-  const aggressiveness = ctx.getVar('aggressiveness');
-  const preySpeed = ctx.getVar('preySpeed');
-
-  // 清除旧的狼和猎物图形
-  wolves.forEach(wolf => {
-    if (wolf.body) ctx.remove(wolf.body);
-    if (wolf.head) ctx.remove(wolf.head);
-    if (wolf.tail) ctx.remove(wolf.tail);
-    wolf.legs.forEach(leg => ctx.remove(leg));
-    wolf.legs = [];
-  });
-
-  if (prey.body) ctx.remove(prey.body);
-  if (prey.head) ctx.remove(prey.head);
-  prey.legs.forEach(leg => ctx.remove(leg));
-  prey.antlers.forEach(a => ctx.remove(a));
-  prey.legs = [];
-  prey.antlers = [];
-
-  // 猎物逃跑动画
-  const escapeAngle = time * 0.5;
-  prey.x = width * 0.6 + math.sin(escapeAngle) * 100 * (preySpeed / 50);
-  prey.y = height * 0.4 + math.cos(escapeAngle * 0.7) * 60;
-
-  // 绘制猎物（鹿）- 详细图形
-  // 身体
-  prey.body = ctx.createRect(prey.x, prey.y, 60, 35, '#d97706', 15);
-  // 头部
-  prey.head = ctx.createCircle(prey.x + 35, prey.y - 10, 12, '#f59e0b');
-  // 腿
-  for (let i = 0; i < 4; i++) {
-    const legX = prey.x - 20 + (i % 2) * 40;
-    const legY = prey.y + 25 + math.sin(time * 8 + i) * 5;
-    prey.legs.push(ctx.createRect(legX, legY, 6, 25, '#b45309', 2));
-  }
-  // 鹿角
-  prey.antlers.push(ctx.createLine([
-    {x: prey.x + 40, y: prey.y - 20},
-    {x: prey.x + 50, y: prey.y - 40},
-    {x: prey.x + 55, y: prey.y - 35}
-  ], '#92400e', 3));
-  prey.antlers.push(ctx.createLine([
-    {x: prey.x + 45, y: prey.y - 22},
-    {x: prey.x + 60, y: prey.y - 38}
-  ], '#92400e', 3));
-
-  // 狼群追击
-  const activeWolves = math.min(packSize, wolves.length);
-  for (let i = 0; i < activeWolves; i++) {
-    const wolf = wolves[i];
-
-    // 计算追击方向
-    const dx = prey.x - wolf.x;
-    const dy = prey.y - wolf.y;
-    const dist = math.sqrt(dx * dx + dy * dy);
-
-    // 包围策略
-    const surroundAngle = (i / activeWolves) * math.PI * 2 + time * 0.3;
-    const targetX = prey.x - math.cos(surroundAngle) * (150 - aggressiveness);
-    const targetY = prey.y - math.sin(surroundAngle) * (150 - aggressiveness);
-
-    // 平滑移动
-    wolf.x = math.lerp(wolf.x, targetX, 0.02 * aggressiveness / 50);
-    wolf.y = math.lerp(wolf.y, targetY, 0.02 * aggressiveness / 50);
-
-    // 绘制狼 - 详细图形
-    const runPhase = time * 6 + i;
-
-    // 身体（椭圆形）
-    wolf.body = ctx.createRect(wolf.x, wolf.y, 45, 22, '#4b5563', 10);
-
-    // 头部
-    wolf.head = ctx.createCircle(wolf.x + 25, wolf.y - 5, 10, '#6b7280');
-
-    // 耳朵
-    ctx.createPolygon([
-      {x: wolf.x + 20, y: wolf.y - 12},
-      {x: wolf.x + 25, y: wolf.y - 25},
-      {x: wolf.x + 30, y: wolf.y - 12}
-    ], '#4b5563', '#374151');
-
-    // 尾巴
-    wolf.tail = ctx.createLine([
-      {x: wolf.x - 20, y: wolf.y},
-      {x: wolf.x - 35, y: wolf.y - 10 + math.sin(runPhase) * 8}
-    ], '#4b5563', 6);
-
-    // 腿（跑动动画）
-    for (let j = 0; j < 4; j++) {
-      const legX = wolf.x - 15 + (j % 2) * 30;
-      const legOffset = math.sin(runPhase + j * math.PI / 2) * 8;
-      wolf.legs.push(ctx.createRect(legX, wolf.y + 15 + legOffset, 5, 18, '#374151', 2));
-    }
-
-    // 眼睛（发光效果）
-    ctx.createCircle(wolf.x + 28, wolf.y - 7, 3, '#fef08a');
-  }
-
-  // 计算统计数据
-  let totalDist = 0;
-  for (let i = 0; i < activeWolves; i++) {
-    const dx = prey.x - wolves[i].x;
-    const dy = prey.y - wolves[i].y;
-    totalDist += math.sqrt(dx * dx + dy * dy);
-  }
-  const avgDist = activeWolves > 0 ? totalDist / activeWolves : 0;
-  const energy = math.max(0, 100 - aggressiveness * 0.5 - time * 2);
-  const successRate = math.min(95, packSize * 10 + aggressiveness * 0.5 - preySpeed * 0.3);
-
-  // 更新状态显示
-  ctx.setText(elements.distanceLabel, `平均距离: ${avgDist.toFixed(0)}m`);
-  ctx.setText(elements.energyLabel, `狼群体力: ${energy.toFixed(0)}%`);
-  ctx.setText(elements.successLabel, `预测成功率: ${math.max(0, successRate).toFixed(0)}%`);
-
-  // 更新能量条
-  ctx.remove(elements.energyBar);
-  const barWidth = math.max(0, energy * 1.5);
-  const barColor = energy > 60 ? '#10b981' : energy > 30 ? '#f59e0b' : '#ef4444';
-  elements.energyBar = ctx.createRect(width - 200 + barWidth/2 - 75, 170, barWidth, 12, barColor, 6);
-}
-```
-
-=== 内容质量标准 ===
-
-1. 每章 5-8 个步骤
-2. 每步正文至少 100 字，内容充实
-3. 每步至少 2 个要点
-4. 必须有测验题目（至少2题）
-5. 不要有"待补充"、"..."等占位内容
-
-=== 图文内容标准（illustrated_content）===
-
-1. 每章至少包含 1-2 个 illustrated_content 类型步骤
-2. diagram_spec.description 必须详细描述图片内容（至少50字）
-3. 描述应包含：主题、场景、关键元素、视觉风格
-4. 图片类型可以是：概念图、流程图、动作分解图、对比图、数据图等
-5. 图片内容必须与该步骤的教学内容紧密相关
+本阶段只需输出结构骨架：
+- body 字段留空（后续自动生成）
+- description 字段简短（30字以内）
+- explanation 字段留空（后续自动生成）
+- rationale 字段留空（后续自动生成）
+- custom_code 字段留空（后续自动生成）
 
 """
 
     def _get_output_format(self, chapter_index: int, chapter_outline: ChapterOutline) -> str:
-        """获取输出格式说明"""
+        """获取输出格式说明 - 简化版, 所有长文本由后续步骤生成"""
         return f"""
-【输出格式】
-请以JSON格式输出完整的章节内容：
+【输出格式 - 简化骨架版】
+为确保 JSON 解析成功，请输出简化的章节骨架。所有长文本内容将由系统后续自动生成。
 
 {{
     "lesson_id": "lesson_{chapter_index + 1}",
     "title": "{chapter_outline.title}",
     "order": {chapter_index},
     "total_steps": 步骤数量,
-    "rationale": "本章设计理念（50-100字）",
+    "rationale": "",
     "script": [
         {{
             "step_id": "step_1",
             "type": "text_content",
-            "title": "步骤标题",
+            "title": "步骤标题（简短）",
             "content": {{
-                "body": "正文内容（至少100字）",
-                "key_points": ["要点1", "要点2"]
+                "body": "",
+                "key_points": ["要点1", "要点2", "要点3"]
             }}
         }},
         {{
@@ -613,15 +517,15 @@ function update(ctx) {
             "type": "illustrated_content",
             "title": "图文讲解：xxx",
             "content": {{
-                "body": "配合图片的讲解内容（至少100字）",
+                "body": "",
                 "key_points": ["要点1", "要点2"]
             }},
             "diagram_spec": {{
                 "diagram_id": "diagram_1",
                 "type": "static_diagram",
-                "description": "详细描述需要生成的图片内容，包括：主题、场景、元素、风格等。描述越详细，生成的图片越准确。例如：一张展示篮球运动员投篮姿势的示意图，包含正确的手臂角度、膝盖弯曲度和眼睛注视方向",
+                "description": "图片描述（30字以内的关键词）",
                 "style": "educational",
-                "elements": ["元素1", "元素2", "元素3"]
+                "elements": ["元素1", "元素2"]
             }}
         }},
         {{
@@ -630,13 +534,13 @@ function update(ctx) {
             "title": "互动模拟：xxx",
             "simulator_spec": {{
                 "mode": "custom",
-                "name": "模拟器名称（具体描述功能）",
-                "description": "模拟器描述",
+                "name": "模拟器名称",
+                "description": "简短描述（30字以内）",
                 "variables": [
                     {{"name": "var1", "label": "变量1", "min": 0, "max": 100, "default": 50, "step": 1, "unit": "单位"}},
                     {{"name": "var2", "label": "变量2", "min": 0, "max": 100, "default": 50, "step": 1, "unit": "单位"}}
                 ],
-                "custom_code": "完整的模拟器代码（参考上面的示例）"
+                "custom_code": ""
             }}
         }},
         {{
@@ -647,10 +551,10 @@ function update(ctx) {
                 "type": "quick_check",
                 "questions": [
                     {{
-                        "question": "问题内容",
-                        "options": ["选项A", "选项B", "选项C", "选项D"],
+                        "question": "问题内容（简短）",
+                        "options": ["A", "B", "C", "D"],
                         "correct": "A",
-                        "explanation": "答案解释"
+                        "explanation": ""
                     }}
                 ],
                 "pass_required": true
@@ -658,19 +562,27 @@ function update(ctx) {
         }}
     ],
     "estimated_minutes": 预估时长,
-    "learning_objectives": ["学习目标1", "学习目标2"],
+    "learning_objectives": ["目标1", "目标2", "目标3"],
     "complexity_level": "{chapter_outline.complexity_level}"
 }}
 
-【重要 - 图文内容要求】
-每章至少包含 1-2 个 illustrated_content 类型的步骤，用于展示：
-- 概念示意图
-- 动作分解图
-- 流程图
-- 对比图
-- 数据可视化图
+【极其重要 - 必须遵守】
+1. 所有 body 字段必须为空字符串 ""
+2. 所有 description 字段必须简短（30字以内）
+3. 所有 explanation 字段必须为空字符串 ""
+4. rationale 字段必须为空字符串 ""
+5. custom_code 字段必须为空字符串 ""
+6. 只填写结构信息：step_id、type、title、key_points、variables
 
-diagram_spec.description 必须详细描述图片内容，这将用于 AI 图片生成。
+【JSON 格式规范】
+1. 使用英文双引号 " "，不要用中文引号
+2. 不要在字符串中直接换行
+3. 数组最后一个元素后不要加逗号
+
+【章节结构要求】
+- 步骤数量由你根据章节内容深度自主决定
+- 步骤类型自主搭配（text_content、illustrated_content、simulator、assessment）
+- 同一课程内的图片和模拟器必须有明显区别
 
 请直接输出JSON，不要有其他内容。
 """
@@ -693,22 +605,13 @@ diagram_spec.description 必须详细描述图片内容，这将用于 AI 图片
 
         chapter_outline = state.outline.chapters[chapter_index]
 
-        # === 1. 检查步骤数量 ===
-        if chapter.total_steps < self.quality_standards.min_steps:
-            issues.append(f"步骤太少，只有{chapter.total_steps}步，至少需要{self.quality_standards.min_steps}步")
-            content_score -= 20
-        elif chapter.total_steps > self.quality_standards.max_steps:
-            issues.append(f"步骤太多，有{chapter.total_steps}步，最多{self.quality_standards.max_steps}步")
-            content_score -= 10
+        # === 1. 步骤数量（不设硬限制，仅记录极端情况） ===
+        if chapter.total_steps < 3:
+            issues.append(f"步骤过少，只有{chapter.total_steps}步，内容可能不完整")
+            content_score -= 15
 
-        # === 2. 检查是否有模拟器 ===
+        # === 2. 检查模拟器质量（不限数量，但检查区别性） ===
         simulators = [s for s in chapter.script if s.type == 'simulator']
-        if self.quality_standards.must_have_simulator and not simulators:
-            if chapter_outline.chapter_type in [ChapterType.CORE_CONTENT, ChapterType.PRACTICE]:
-                issues.append("核心内容章节必须包含模拟器")
-                content_score -= 30
-
-        # === 3. 检查模拟器质量 ===
         for i, step in enumerate(chapter.script):
             if step.type == 'simulator' and step.simulator_spec:
                 sim_issues = step.simulator_spec.validate(self.quality_standards.simulator_standards)
@@ -743,15 +646,40 @@ diagram_spec.description 必须详细描述图片内容，这将用于 AI 图片
                             issues.append(f"步骤{i+1}包含占位内容：{forbidden}")
                             content_score -= 15
 
-        # === 5. 检查测验 ===
+        # === 4. 检查测验质量（不强制必须有，但有的话检查基本质量） ===
         assessments = [s for s in chapter.script if s.type == 'assessment']
-        if self.quality_standards.must_have_assessment and not assessments:
-            issues.append("章节缺少测验题目")
-            content_score -= 15
+        if assessments:
+            # 检查测验是否有题目
+            total_questions = sum(
+                len(a.assessment_spec.get('questions', []))
+                for a in assessments if a.assessment_spec
+            )
+            if total_questions == 0:
+                issues.append("测验步骤没有题目内容")
+                content_score -= 10
 
-        # === 6. 检查与大纲的一致性 ===
+        # === 5. 检查图文区别性（不限数量，但要有区别） ===
+        illustrated = [s for s in chapter.script if s.type == 'illustrated_content']
+        if len(illustrated) > 1:
+            # 检查图文步骤之间是否有明显区别
+            diagram_descs = []
+            for ill_step in illustrated:
+                if ill_step.content and ill_step.content.get('diagram_description'):
+                    diagram_descs.append(ill_step.content.get('diagram_description', ''))
+            # 简单检查：如果描述完全相同则扣分
+            if len(diagram_descs) > 1 and len(set(diagram_descs)) < len(diagram_descs):
+                issues.append("多个图文步骤的图片描述相同，需要有明显区别")
+                content_score -= 15
+
+        # === 7. 检查与大纲的一致性 ===
         if chapter.title != chapter_outline.title:
             suggestions.append(f"章节标题与大纲不一致，大纲为'{chapter_outline.title}'")
+
+        # === 8. 生成每个步骤的详细审核结果（用于单步重做）===
+        step_reviews = []
+        for i, step in enumerate(chapter.script):
+            step_review = await self.review_single_step(state, chapter, i)
+            step_reviews.append(step_review)
 
         # === 计算总分 ===
         content_score = max(0, content_score)
@@ -760,17 +688,24 @@ diagram_spec.description 必须详细描述图片内容，这将用于 AI 图片
 
         # === 生成建议 ===
         if simulator_issues:
-            suggestions.append("请参考质量要求中的模拟器代码示例，确保代码完整且功能正确")
+            suggestions.append("请参考质量要求中的模拟器代码示例，确保代码至少200行且功能完整，包含标题、图例、状态面板")
         if content_score < 80:
-            suggestions.append("请增加内容深度，每步至少100字，并确保要点完整")
+            suggestions.append("请增加内容深度，每步至少200字，每步至少4个要点，整章至少1500字")
 
-        # === 决定审核状态 ===
-        if overall_score >= 70 and not simulator_issues:
+        # === 决定审核状态（专业级标准）===
+        # 检查是否有步骤需要修改
+        steps_needing_revision = [sr for sr in step_reviews if not sr.is_approved()]
+
+        if overall_score >= 80 and not simulator_issues and not steps_needing_revision:
             status = ReviewStatus.APPROVED
-            review_comment = "章节质量合格，可以继续下一章"
-        elif overall_score >= 50:
+            review_comment = "章节质量优秀，符合专业级标准，可以继续下一章"
+        elif overall_score >= 60 and steps_needing_revision:
+            # 有部分步骤需要修改，使用 NEEDS_REVISION 状态触发单步重做
             status = ReviewStatus.NEEDS_REVISION
-            review_comment = "章节需要修改部分内容"
+            review_comment = f"章节有 {len(steps_needing_revision)} 个步骤需要修改"
+        elif overall_score >= 60:
+            status = ReviewStatus.NEEDS_REVISION
+            review_comment = "章节需要修改部分内容以达到专业级标准"
         else:
             status = ReviewStatus.REJECTED
             review_comment = "章节质量不达标，需要重新生成"
@@ -782,6 +717,7 @@ diagram_spec.description 必须详细描述图片内容，这将用于 AI 图片
             suggestions=suggestions,
             simulator_issues=simulator_issues,
             problematic_steps=problematic_steps,
+            step_reviews=step_reviews,
             content_score=content_score,
             simulator_score=simulator_score,
             overall_score=overall_score,
@@ -963,3 +899,777 @@ diagram_spec.description 必须详细描述图片内容，这将用于 AI 图片
         except Exception as e:
             logger.warning(f"Failed to analyze JSON error: {e}")
             return "请确保输出纯净的 JSON 格式，不要有任何额外文字。代码字符串中的引号和换行符必须正确转义。"
+
+    def get_step_regeneration_context(
+        self,
+        state: GenerationState,
+        chapter: ChapterResult,
+        step_index: int,
+        step_review: 'StepReviewResult'
+    ) -> Dict[str, Any]:
+        """
+        获取单步重做的上下文信息
+
+        Args:
+            state: 生成状态
+            chapter: 当前章节
+            step_index: 步骤索引
+            step_review: 步骤审核结果
+
+        Returns:
+            包含重做所需上下文的字典
+        """
+        step = chapter.script[step_index]
+
+        # 构建上下文
+        context = {
+            'course_title': state.course_title,
+            'chapter_title': chapter.title,
+            'learning_objectives': ', '.join(chapter.learning_objectives),
+            'title': step.title,
+            'content_summary': ''
+        }
+
+        # 提取内容摘要
+        if step.content:
+            body = step.content.get('body', '')
+            context['content_summary'] = body[:200] + '...' if len(body) > 200 else body
+
+        # 如果是模拟器，添加模拟器信息
+        if step.type == 'simulator' and step.simulator_spec:
+            context['simulator_name'] = step.simulator_spec.name
+            context['simulator_description'] = step.simulator_spec.description
+            context['variables'] = step.simulator_spec.variables
+
+        return context
+
+    async def review_single_step(
+        self,
+        state: GenerationState,
+        chapter: ChapterResult,
+        step_index: int
+    ) -> 'StepReviewResult':
+        """
+        审核单个步骤
+
+        Args:
+            state: 生成状态
+            chapter: 当前章节
+            step_index: 步骤索引
+
+        Returns:
+            步骤审核结果
+        """
+        from .models import StepReviewResult
+
+        step = chapter.script[step_index]
+        issues = []
+        suggestions = []
+        score = 100
+
+        # 根据步骤类型进行审核
+        if step.type == 'text_content' or step.type == 'illustrated_content':
+            # 检查内容长度
+            if step.content:
+                body = step.content.get('body', '')
+                if len(body) < self.quality_standards.min_text_length:
+                    issues.append(f"内容太短，只有{len(body)}字，至少需要{self.quality_standards.min_text_length}字")
+                    score -= 20
+
+                key_points = step.content.get('key_points', [])
+                if len(key_points) < self.quality_standards.min_key_points:
+                    issues.append(f"要点太少，只有{len(key_points)}个，至少需要{self.quality_standards.min_key_points}个")
+                    score -= 10
+
+                # 检查禁止内容
+                for forbidden in self.quality_standards.forbidden_content:
+                    if forbidden in body:
+                        issues.append(f"包含占位内容：{forbidden}")
+                        score -= 15
+            else:
+                issues.append("步骤缺少内容")
+                score -= 30
+
+            # 图文内容额外检查
+            if step.type == 'illustrated_content':
+                if not step.diagram_spec:
+                    issues.append("图文内容缺少 diagram_spec")
+                    score -= 20
+                elif not step.diagram_spec.get('description'):
+                    issues.append("图片描述为空")
+                    score -= 15
+                elif len(step.diagram_spec.get('description', '')) < 50:
+                    issues.append("图片描述太短，至少需要50字")
+                    suggestions.append("请详细描述图片内容，包括主题、场景、关键元素、视觉风格")
+                    score -= 10
+
+        elif step.type == 'simulator':
+            if step.simulator_spec:
+                sim_issues = step.simulator_spec.validate(self.quality_standards.simulator_standards)
+                if sim_issues:
+                    issues.extend(sim_issues)
+                    score -= len(sim_issues) * 10
+
+                # 检查是否重复
+                if step.simulator_spec.name in state.used_simulators:
+                    issues.append(f"模拟器'{step.simulator_spec.name}'与前面章节重复")
+                    score -= 30
+            else:
+                issues.append("模拟器步骤缺少 simulator_spec")
+                score -= 40
+
+        elif step.type == 'assessment':
+            if step.assessment_spec:
+                questions = step.assessment_spec.get('questions', [])
+                if len(questions) < 2:
+                    issues.append(f"测验题目太少，只有{len(questions)}道")
+                    suggestions.append("至少需要2道测验题目")
+                    score -= 15
+
+                # 检查每道题的完整性
+                for i, q in enumerate(questions):
+                    if not q.get('question'):
+                        issues.append(f"第{i+1}题缺少问题内容")
+                        score -= 10
+                    if not q.get('options') or len(q.get('options', [])) < 3:
+                        issues.append(f"第{i+1}题选项不足")
+                        score -= 5
+                    if not q.get('explanation'):
+                        issues.append(f"第{i+1}题缺少解析")
+                        score -= 5
+            else:
+                issues.append("测评步骤缺少 assessment_spec")
+                score -= 30
+
+        # 确定状态
+        score = max(0, score)
+        if score >= 80:
+            status = ReviewStatus.APPROVED
+        elif score >= 50:
+            status = ReviewStatus.NEEDS_REVISION
+        else:
+            status = ReviewStatus.REJECTED
+
+        return StepReviewResult(
+            step_index=step_index,
+            step_type=step.type,
+            status=status,
+            issues=issues,
+            suggestions=suggestions,
+            score=score
+        )
+
+    # ==================== 碎片化检查系统 ====================
+
+    async def check_chapter_skeleton(
+        self,
+        state: GenerationState,
+        chapter: ChapterResult,
+        chapter_index: int
+    ) -> Dict[str, Any]:
+        """
+        检查章节骨架结构（碎片化检查第一步）
+
+        在生成步骤内容之前，先检查章节的整体结构是否合理。
+
+        Returns:
+            {
+                'approved': bool,
+                'action': 'proceed' | 'revise' | 'regenerate',
+                'issues': List[str],
+                'suggestions': List[str],
+                'revision_guidance': str  # 如果需要修改，提供具体指导
+            }
+        """
+        issues = []
+        suggestions = []
+        chapter_outline = state.outline.chapters[chapter_index]
+
+        # 1. 检查步骤数量（仅极端情况报警）
+        if chapter.total_steps < 3:
+            issues.append(f"步骤过少：{chapter.total_steps}步，内容可能不完整")
+
+        # 2. 检查步骤类型分布
+        type_counts = {}
+        for step in chapter.script:
+            type_counts[step.type] = type_counts.get(step.type, 0) + 1
+
+        # 2. 检查步骤类型（不限数量，仅检查区别性）
+        # 检查模拟器之间是否有区别
+        sim_names = [s.simulator_spec.name for s in chapter.script
+                     if s.type == 'simulator' and s.simulator_spec]
+        if len(sim_names) > 1 and len(set(sim_names)) < len(sim_names):
+            issues.append("同一章节内有重复的模拟器主题，需要有明显区别")
+
+        # 检查图文之间是否有区别
+        ill_titles = [s.title for s in chapter.script if s.type == 'illustrated_content']
+        if len(ill_titles) > 1 and len(set(ill_titles)) < len(ill_titles):
+            issues.append("同一章节内有重复的图文标题，需要有明显区别")
+
+        # 3. 检查模拟器变量定义
+        for step in chapter.script:
+            if step.type == 'simulator' and step.simulator_spec:
+                vars_count = len(step.simulator_spec.variables)
+                if vars_count < 2:
+                    issues.append(f"模拟器'{step.simulator_spec.name}'变量不足：{vars_count}个，至少需要2个")
+
+                # 检查变量完整性
+                for var in step.simulator_spec.variables:
+                    required_fields = ['name', 'label', 'min', 'max', 'default']
+                    missing = [f for f in required_fields if f not in var or var[f] is None]
+                    if missing:
+                        issues.append(f"变量'{var.get('name', '未命名')}'缺少字段：{', '.join(missing)}")
+
+        # 4. 检查学习目标
+        if len(chapter.learning_objectives) < 3:
+            issues.append(f"学习目标不足：{len(chapter.learning_objectives)}个，至少需要3个")
+
+        # 5. 检查与大纲一致性
+        if chapter.title != chapter_outline.title:
+            suggestions.append(f"章节标题与大纲不一致，建议使用：{chapter_outline.title}")
+
+        # 决定行动
+        if not issues:
+            return {
+                'approved': True,
+                'action': 'proceed',
+                'issues': [],
+                'suggestions': suggestions,
+                'revision_guidance': ''
+            }
+        elif len(issues) <= 3:
+            # 小问题，可以修改
+            return {
+                'approved': False,
+                'action': 'revise',
+                'issues': issues,
+                'suggestions': suggestions,
+                'revision_guidance': self._generate_skeleton_revision_guidance(issues, suggestions)
+            }
+        else:
+            # 问题太多，需要重新生成
+            return {
+                'approved': False,
+                'action': 'regenerate',
+                'issues': issues,
+                'suggestions': suggestions,
+                'revision_guidance': ''
+            }
+
+    def _generate_skeleton_revision_guidance(self, issues: List[str], suggestions: List[str]) -> str:
+        """生成骨架修改指导"""
+        guidance = "请修改章节骨架，解决以下问题：\n"
+        for i, issue in enumerate(issues, 1):
+            guidance += f"{i}. {issue}\n"
+        if suggestions:
+            guidance += "\n建议：\n"
+            for s in suggestions:
+                guidance += f"- {s}\n"
+        return guidance
+
+    async def check_step_immediately(
+        self,
+        state: GenerationState,
+        chapter: ChapterResult,
+        step_index: int,
+        previous_errors: List[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        立即检查刚生成的步骤（碎片化检查核心方法）
+
+        Args:
+            state: 生成状态
+            chapter: 当前章节
+            step_index: 步骤索引
+            previous_errors: 之前的错误记录（用于动态调整提示词）
+
+        Returns:
+            {
+                'approved': bool,
+                'action': 'proceed' | 'revise' | 'regenerate',
+                'issues': List[str],
+                'adjusted_prompt': str,  # 如果需要重试，提供调整后的提示词
+                'error_type': str  # 错误类型分类
+            }
+        """
+        step = chapter.script[step_index]
+        issues = []
+        error_type = None
+
+        # 根据步骤类型进行检查
+        if step.type == 'simulator':
+            result = await self._check_simulator_step(state, step, previous_errors)
+        elif step.type in ['text_content', 'illustrated_content']:
+            result = await self._check_content_step(step, previous_errors)
+        elif step.type == 'assessment':
+            result = await self._check_assessment_step(step, previous_errors)
+        else:
+            result = {'approved': True, 'issues': [], 'error_type': None}
+
+        # 如果检查不通过，生成调整后的提示词
+        if not result['approved']:
+            adjusted_prompt = self._generate_adjusted_prompt(
+                step_type=step.type,
+                issues=result['issues'],
+                error_type=result.get('error_type'),
+                previous_errors=previous_errors or []
+            )
+            result['adjusted_prompt'] = adjusted_prompt
+            result['action'] = 'revise' if len(result['issues']) <= 2 else 'regenerate'
+        else:
+            result['action'] = 'proceed'
+            result['adjusted_prompt'] = ''
+
+        return result
+
+    async def _check_simulator_step(
+        self,
+        state: GenerationState,
+        step: 'ChapterStep',
+        previous_errors: List[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """检查模拟器步骤"""
+        issues = []
+        error_type = None
+
+        if not step.simulator_spec:
+            return {
+                'approved': False,
+                'issues': ['模拟器步骤缺少 simulator_spec'],
+                'error_type': 'missing_spec'
+            }
+
+        spec = step.simulator_spec
+
+        # 1. 检查代码是否存在
+        code = spec.custom_code or ''
+        if not code.strip():
+            issues.append("模拟器代码为空")
+            error_type = 'empty_code'
+        else:
+            # 2. 检查代码行数
+            lines = [l for l in code.split('\n') if l.strip()]
+            if len(lines) < 60:
+                issues.append(f"代码太短：{len(lines)}行，至少需要60行")
+                error_type = 'short_code'
+
+            # 3. 检查必要函数
+            if 'function setup' not in code and 'setup(' not in code:
+                issues.append("缺少 setup 函数")
+                error_type = 'missing_function'
+            if 'function update' not in code and 'update(' not in code:
+                issues.append("缺少 update 函数")
+                error_type = 'missing_function'
+
+            # 4. 检查禁止的API
+            forbidden_apis = ['createArc', 'ctx.arc', 'drawArc']
+            for api in forbidden_apis:
+                if api in code:
+                    issues.append(f"使用了不存在的API：{api}")
+                    error_type = 'invalid_api'
+
+            # 5. 检查括号闭合
+            open_brackets = code.count('{') + code.count('(') + code.count('[')
+            close_brackets = code.count('}') + code.count(')') + code.count(']')
+            if open_brackets != close_brackets:
+                issues.append(f"括号不匹配：开{open_brackets}个，闭{close_brackets}个")
+                error_type = 'unclosed_brackets'
+
+        # 6. 检查变量
+        if len(spec.variables) < 2:
+            issues.append(f"变量不足：{len(spec.variables)}个，至少需要2个")
+            if not error_type:
+                error_type = 'insufficient_variables'
+
+        # 7. 检查重复
+        if spec.name in state.used_simulators:
+            issues.append(f"模拟器'{spec.name}'与前面章节重复")
+            if not error_type:
+                error_type = 'duplicate_simulator'
+
+        return {
+            'approved': len(issues) == 0,
+            'issues': issues,
+            'error_type': error_type
+        }
+
+    async def _check_content_step(
+        self,
+        step: 'ChapterStep',
+        previous_errors: List[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """检查文本/图文内容步骤"""
+        issues = []
+        error_type = None
+
+        if not step.content:
+            return {
+                'approved': False,
+                'issues': ['步骤缺少内容'],
+                'error_type': 'missing_content'
+            }
+
+        body = step.content.get('body', '')
+        key_points = step.content.get('key_points', [])
+
+        # 检查内容长度
+        if len(body) < self.quality_standards.min_text_length:
+            issues.append(f"内容太短：{len(body)}字，至少需要{self.quality_standards.min_text_length}字")
+            error_type = 'short_content'
+
+        # 检查要点
+        if len(key_points) < self.quality_standards.min_key_points:
+            issues.append(f"要点不足：{len(key_points)}个，至少需要{self.quality_standards.min_key_points}个")
+            if not error_type:
+                error_type = 'insufficient_keypoints'
+
+        # 检查禁止内容
+        for forbidden in self.quality_standards.forbidden_content:
+            if forbidden in body:
+                issues.append(f"包含占位内容：{forbidden}")
+                error_type = 'placeholder_content'
+
+        # 图文内容额外检查
+        if step.type == 'illustrated_content':
+            if not step.diagram_spec:
+                issues.append("图文内容缺少 diagram_spec")
+                error_type = 'missing_diagram'
+            elif not step.diagram_spec.get('description'):
+                issues.append("图片描述为空")
+                error_type = 'empty_description'
+
+        return {
+            'approved': len(issues) == 0,
+            'issues': issues,
+            'error_type': error_type
+        }
+
+    async def _check_assessment_step(
+        self,
+        step: 'ChapterStep',
+        previous_errors: List[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """检查测验步骤"""
+        issues = []
+        error_type = None
+
+        if not step.assessment_spec:
+            return {
+                'approved': False,
+                'issues': ['测验步骤缺少 assessment_spec'],
+                'error_type': 'missing_spec'
+            }
+
+        questions = step.assessment_spec.get('questions', [])
+
+        if len(questions) < 2:
+            issues.append(f"题目不足：{len(questions)}道，至少需要2道")
+            error_type = 'insufficient_questions'
+
+        for i, q in enumerate(questions):
+            if not q.get('question'):
+                issues.append(f"第{i+1}题缺少问题内容")
+                error_type = 'incomplete_question'
+            if not q.get('options') or len(q.get('options', [])) < 3:
+                issues.append(f"第{i+1}题选项不足")
+                if not error_type:
+                    error_type = 'insufficient_options'
+            if not q.get('explanation'):
+                issues.append(f"第{i+1}题缺少解析")
+                if not error_type:
+                    error_type = 'missing_explanation'
+
+        return {
+            'approved': len(issues) == 0,
+            'issues': issues,
+            'error_type': error_type
+        }
+
+    def _generate_adjusted_prompt(
+        self,
+        step_type: str,
+        issues: List[str],
+        error_type: str,
+        previous_errors: List[Dict[str, Any]]
+    ) -> str:
+        """
+        根据错误类型生成调整后的提示词（动态提示词调整核心方法）
+
+        这是碎片化检查的关键：根据具体错误类型，生成针对性的修复指导。
+        """
+        prompt_additions = []
+
+        # 基础问题描述
+        prompt_additions.append("【重要 - 上次生成存在问题，请修正】")
+        prompt_additions.append("问题列表：")
+        for issue in issues:
+            prompt_additions.append(f"  - {issue}")
+
+        # 根据错误类型添加针对性指导
+        if error_type == 'invalid_api':
+            prompt_additions.append("""
+【API使用警告 - 严重错误】
+你使用了不存在的API！只能使用以下白名单内的API：
+
+【创建元素】
+- ctx.createCircle(x, y, radius, color) → 创建圆形
+- ctx.createRect(x, y, width, height, color, cornerRadius?) → 创建矩形
+- ctx.createLine(points, color, lineWidth?) → 创建线条
+- ctx.createText(text, x, y, style?) → 创建文本
+- ctx.createCurve(points, color, lineWidth?, smooth?) → 创建曲线
+- ctx.createPolygon(points, fillColor, strokeColor?) → 创建多边形
+
+【操作元素】
+- ctx.setPosition(id, x, y), ctx.setScale(id, sx, sy), ctx.setRotation(id, angle)
+- ctx.setAlpha(id, alpha), ctx.setColor(id, color), ctx.setText(id, text)
+- ctx.setVisible(id, visible), ctx.remove(id), ctx.clear()
+
+【变量和属性】
+- ctx.getVar('name'), ctx.setVar('name', value)
+- ctx.width, ctx.height, ctx.time, ctx.deltaTime, ctx.math
+
+【禁止使用】以下API都不存在：
+createArc, drawArc, arc, createJPath, createPath, drawPath, createImage,
+drawLine, drawCircle, drawRect, fillRect, strokeRect 等！
+如需绘制弧形或路径，请使用 createCurve 配合计算好的点坐标。
+""")
+
+        elif error_type == 'unclosed_brackets':
+            prompt_additions.append("""
+【代码结构警告】
+上次生成的代码括号不匹配，可能被截断。请：
+1. 减少代码复杂度，控制在80-150行
+2. 确保所有 { } ( ) [ ] 正确闭合
+3. 在生成代码前先规划好结构
+4. 避免过深的嵌套（最多3层）
+""")
+
+        elif error_type == 'missing_function':
+            prompt_additions.append("""
+【代码结构警告 - 缺少必要函数】
+你生成的代码缺少必要的函数。模拟器代码必须同时包含两个函数：
+
+1. function setup(ctx) { ... }
+   - 初始化所有视觉元素
+   - 只在开始时调用一次
+
+2. function update(ctx) { ... }
+   - 响应变量变化，更新显示
+   - 每帧调用，必须实现！
+
+【完整代码模板】
+// 全局变量
+let elements = {};
+
+function setup(ctx) {
+  // 初始化所有元素
+  elements.title = ctx.createText('标题', 500, 30, {fontSize: 24});
+  elements.circle = ctx.createCircle(500, 300, 50, '#3498db');
+}
+
+function update(ctx) {
+  // 读取变量并更新显示
+  const value = ctx.getVar('变量名');
+  ctx.setPosition(elements.circle, 500, 300 + value);
+  ctx.setText(elements.title, '当前值: ' + value.toFixed(1));
+}
+
+【重要】setup和update两个函数缺一不可！代码必须完整包含这两个函数！
+""")
+
+        elif error_type == 'short_code':
+            prompt_additions.append("""
+【代码长度不足 - 优先补全内容完整性】
+代码行数不足，请按以下优先级补充：
+
+【第一优先：内容完整性】
+1. setup() 函数必须完整初始化所有视觉元素
+2. update() 函数必须响应所有变量变化
+3. 必须包含：标题、图例、变量数值显示
+4. 所有变量都要有对应的视觉反馈
+5. 核心动画逻辑必须完整实现
+
+【第二优先：功能丰富度】
+- 添加参考线、刻度线帮助理解数值
+- 添加状态文字说明当前情况
+- 关键数值实时显示在图形旁边
+
+【第三优先：视觉质量】
+- 使用 ctx.math.lerp 实现平滑过渡
+- 添加辅助视觉元素增强表现力
+
+【代码至少80行，确保功能完整】
+""")
+
+        elif error_type == 'short_content':
+            prompt_additions.append("""
+【内容深度不足】
+文本内容需要更详细的讲解。请：
+1. 每个概念都要有详细解释
+2. 包含具体的例子和应用场景
+3. 使用清晰的逻辑结构
+4. 内容至少200字
+""")
+
+        elif error_type == 'insufficient_variables':
+            prompt_additions.append("""
+【变量定义不足】
+模拟器需要足够的交互变量。请：
+1. 定义2-3个有意义的变量（不要超过3个）
+2. 每个变量必须包含：name, label, min, max, default, step, unit
+3. 变量之间应有逻辑关联
+4. 变量范围要合理
+""")
+
+        elif error_type == 'duplicate_simulator':
+            prompt_additions.append("""
+【模拟器重复】
+此模拟器主题已在前面章节使用。请：
+1. 设计一个全新的模拟器主题
+2. 展示不同的概念或现象
+3. 使用不同的可视化方式
+""")
+
+        elif error_type == 'low_contrast':
+            prompt_additions.append("""
+【颜色对比度警告 - 元素不可见】
+你生成的代码使用了深色，与深色背景(#1e293b)融合导致元素不可见。请严格遵守：
+
+【颜色规范】
+画布背景是深色(#1e293b)，所有元素必须使用亮色：
+- 标题文字：#ffffff（白色）
+- 普通文字/标签：#e2e8f0（浅灰白）
+- 数值显示：#60a5fa（亮蓝色）
+- 主要图形：#3b82f6（蓝）、#22c55e（绿）、#f59e0b（橙）、#ef4444（红）
+- 辅助线条：#64748b（中灰色）
+
+【禁止使用的颜色】
+- #000000, #111111, #1e293b, #0f172a（黑色/深蓝）
+- #222222, #333333, #334155, #374151（深灰）
+- 任何亮度低于50%的颜色
+
+【示例】
+```javascript
+// 正确 - 使用亮色
+ctx.createText('标题', 500, 30, { color: '#ffffff' });
+ctx.createCircle(300, 300, 50, '#3b82f6');
+
+// 错误 - 使用深色（不可见）
+ctx.createText('标题', 500, 30, { color: '#000000' });
+ctx.createCircle(300, 300, 50, '#1e293b');
+```
+""")
+
+        elif error_type == 'out_of_bounds':
+            prompt_additions.append("""
+【画布边界警告 - 元素超出画布】
+你生成的代码中有元素超出了画布边界。请严格遵守：
+
+【边界约束 - 使用比例计算】
+- 画布尺寸通过 ctx.width / ctx.height 获取，不同端尺寸不同
+- 安全区域：x 在 [width*0.12, width*0.95]，y 在 [55, height-35]
+- 所有坐标必须用 width/height 比例计算，禁止硬编码绝对坐标
+- 数据面板不要贴右边界，放在 width*0.85 以内
+
+【坐标限制】
+所有动态坐标必须使用 math.clamp 限制范围：
+```javascript
+// 示例：限制坐标在安全区域内
+const safeX = math.clamp(calculatedX, width*0.12, width*0.95);
+const safeY = math.clamp(calculatedY, 55, height - 35);
+ctx.setPosition(elementId, safeX, safeY);
+```
+
+【文字显示约束】
+- 左对齐文字：x >= width*0.12
+- 居中文字：x = width/2
+- 右对齐文字：x <= width*0.9
+- 长文字要考虑宽度，避免超出右边界
+
+【主要内容区域】
+建议将所有主要元素放置在：x: width*0.12 ~ width*0.95, y: 55 ~ height-35
+""")
+
+        # 添加历史错误分析
+        if previous_errors:
+            error_types = [e.get('error_type') for e in previous_errors if e.get('error_type')]
+            if len(set(error_types)) < len(error_types):
+                # 有重复错误
+                prompt_additions.append("""
+【警告 - 重复错误】
+你多次犯了相同的错误。请仔细阅读上述指导，确保这次不再出现同样的问题。
+""")
+
+        return '\n'.join(prompt_additions)
+
+    async def get_revision_or_regenerate_decision(
+        self,
+        state: GenerationState,
+        chapter: ChapterResult,
+        step_index: int,
+        check_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        让AI决定是修改还是重新生成（用户要求的新功能）
+
+        Returns:
+            {
+                'decision': 'revise' | 'regenerate',
+                'reason': str,
+                'revision_plan': str  # 如果选择修改，提供修改计划
+            }
+        """
+        step = chapter.script[step_index]
+        issues = check_result.get('issues', [])
+
+        prompt = f"""作为课程生成监督者，你需要决定如何处理以下问题。
+
+【当前步骤】
+类型：{step.type}
+标题：{step.title}
+
+【发现的问题】
+{chr(10).join(f'- {issue}' for issue in issues)}
+
+【选项】
+1. 修改（revise）：在现有基础上修改，保留好的部分
+2. 重新生成（regenerate）：完全重新生成这个步骤
+
+请分析问题的严重程度，选择最合适的处理方式。
+
+以JSON格式输出：
+{{
+    "decision": "revise" 或 "regenerate",
+    "reason": "选择这个方案的原因",
+    "revision_plan": "如果选择修改，说明具体要修改什么（选择重新生成则留空）"
+}}
+"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是一位课程质量监督专家，擅长判断内容问题的最佳解决方案。",
+                max_tokens=500
+            )
+
+            # 解析响应
+            json_str = response
+            if '{' in response:
+                start = response.index('{')
+                end = response.rindex('}') + 1
+                json_str = response[start:end]
+
+            result = json.loads(json_str)
+            return {
+                'decision': result.get('decision', 'regenerate'),
+                'reason': result.get('reason', ''),
+                'revision_plan': result.get('revision_plan', '')
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get AI decision: {e}")
+            # 默认根据问题数量决定
+            return {
+                'decision': 'revise' if len(issues) <= 2 else 'regenerate',
+                'reason': '基于问题数量的默认决策',
+                'revision_plan': ''
+            }

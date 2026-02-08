@@ -386,25 +386,27 @@ async def delete_course(
             )
             logger.info("Deleted simulator_results")
 
-            # Delete user notes for all nodes in this course
+            # Delete user notes for all nodes in this course (use savepoint)
             try:
-                await db.execute(
-                    text("DELETE FROM user_notes WHERE node_id IN :node_ids"),
-                    {"node_ids": tuple(node_ids)}
-                )
-                logger.info("Deleted user_notes by node_id")
+                async with db.begin_nested():
+                    await db.execute(
+                        text("DELETE FROM user_notes WHERE node_id = ANY(:node_ids)"),
+                        {"node_ids": node_ids}
+                    )
+                    logger.info("Deleted user_notes by node_id")
             except Exception as e:
-                logger.warning(f"Failed to delete user_notes by node_id: {e}")
+                logger.warning(f"Failed to delete user_notes by node_id (table may not exist): {e}")
 
-        # Delete user notes for this course (including those without node_id)
+        # Delete user notes for this course (use savepoint)
         try:
-            await db.execute(
-                text("DELETE FROM user_notes WHERE course_id = :course_id"),
-                {"course_id": course_id}
-            )
-            logger.info("Deleted user_notes by course_id")
+            async with db.begin_nested():
+                await db.execute(
+                    text("DELETE FROM user_notes WHERE course_id = :course_id"),
+                    {"course_id": course_id}
+                )
+                logger.info("Deleted user_notes by course_id")
         except Exception as e:
-            logger.warning(f"Failed to delete user_notes by course_id: {e}")
+            logger.warning(f"Failed to delete user_notes by course_id (table may not exist): {e}")
 
         # Delete user course enrollments
         await db.execute(
@@ -420,29 +422,30 @@ async def delete_course(
 
         # Delete course_packages record (table may not exist in some deployments)
         try:
-            # First check if table exists
-            table_check = await db.execute(
-                text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'course_packages')")
-            )
-            if table_check.scalar():
-                await db.execute(
-                    text("DELETE FROM course_packages WHERE course_id = :course_id"),
-                    {"course_id": course_id}
+            async with db.begin_nested():
+                # First check if table exists
+                table_check = await db.execute(
+                    text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'course_packages')")
                 )
-                logger.info("Deleted course_packages")
-            else:
-                logger.info("course_packages table does not exist, skipping")
+                if table_check.scalar():
+                    await db.execute(
+                        text("DELETE FROM course_packages WHERE course_id = :course_id"),
+                        {"course_id": course_id}
+                    )
+                    logger.info("Deleted course_packages")
+                else:
+                    logger.info("course_packages table does not exist, skipping")
         except Exception as e:
             logger.warning(f"Failed to delete course_packages: {e}")
-            # Don't let this fail the whole transaction
 
         # Reset studio_packages.course_id to NULL and status to draft
         try:
-            await db.execute(
-                text("UPDATE studio_packages SET course_id = NULL, status = 'draft' WHERE course_id = :course_id"),
-                {"course_id": course_id}
-            )
-            logger.info("Reset studio_packages")
+            async with db.begin_nested():
+                await db.execute(
+                    text("UPDATE studio_packages SET course_id = NULL, status = 'draft' WHERE course_id = :course_id"),
+                    {"course_id": course_id}
+                )
+                logger.info("Reset studio_packages")
         except Exception as e:
             logger.warning(f"Failed to reset studio_packages: {e}")
 

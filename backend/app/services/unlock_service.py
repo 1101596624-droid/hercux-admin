@@ -182,8 +182,9 @@ class UnlockService:
         all_nodes = result.scalars().all()
 
         for node in all_nodes:
-            if node.unlock_condition and node.unlock_condition.get("type") == "prerequisites":
-                prereq_ids = node.unlock_condition.get("node_ids", [])
+            condition = parse_json_field(node.unlock_condition)
+            if condition and condition.get("type") == "prerequisites":
+                prereq_ids = condition.get("node_ids", [])
                 if completed_node_id in prereq_ids:
                     # Check if all prerequisites are now met
                     can_unlock, _ = await self.check_unlock_condition(node, user_id)

@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { PixiRenderer } from './renderers/PixiRenderer';
 import { CustomRenderer } from './CustomRenderer';
 import type { SceneDefinition } from '@/types/simulator-engine';
@@ -72,14 +72,27 @@ export function HybridRenderer({
     return {};
   });
 
-  // 变量变化处理
+  // 追踪用户正在拖动的滑块，拖动期间忽略来自模拟器代码的变量更新
+  const draggingRef = useRef<Set<string>>(new Set());
+
+  // 来自模拟器代码 setVar() 的变量变化 — 拖动中的变量不更新
   const handleVariableChange = useCallback((name: string, value: number) => {
+    if (!draggingRef.current.has(name)) {
+      setVariables(prev => ({ ...prev, [name]: value }));
+    }
+  }, []);
+
+  // 用户拖动滑块
+  const handleSliderChange = useCallback((name: string, value: number) => {
     setVariables(prev => ({ ...prev, [name]: value }));
   }, []);
 
-  // 滑块变化处理
-  const handleSliderChange = useCallback((name: string, value: number) => {
-    setVariables(prev => ({ ...prev, [name]: value }));
+  const handleSliderStart = useCallback((name: string) => {
+    draggingRef.current.add(name);
+  }, []);
+
+  const handleSliderEnd = useCallback((name: string) => {
+    draggingRef.current.delete(name);
   }, []);
 
   return (
@@ -136,6 +149,10 @@ export function HybridRenderer({
                   step={variable.step ?? 0.1}
                   value={variables[variable.name] ?? variable.default}
                   onChange={(e) => handleSliderChange(variable.name, parseFloat(e.target.value))}
+                  onPointerDown={() => handleSliderStart(variable.name)}
+                  onPointerUp={() => handleSliderEnd(variable.name)}
+                  onPointerCancel={() => handleSliderEnd(variable.name)}
+                  onPointerLeave={() => handleSliderEnd(variable.name)}
                   style={{
                     width: '100%',
                     height: '8px',
