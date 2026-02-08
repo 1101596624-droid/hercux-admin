@@ -251,7 +251,7 @@ export const useEditorStore = create<EditorStore>()(
           courseTitle: data.title,
           courseCoverImage: data.coverImage || null,
           courseDifficulty: data.difficulty || 'intermediate',
-          courseTags: (data.tags || []).sort(),
+          courseTags: (Array.isArray(data.tags) ? data.tags : (() => { try { const t = typeof data.tags === 'string' ? JSON.parse(data.tags) : []; return Array.isArray(t) ? t : []; } catch { return []; } })()).sort(),
           chapters: data.chapters,
           aiGuidance: data.aiGuidance,
           selectedChapterId: null,
@@ -295,7 +295,8 @@ export const useEditorStore = create<EditorStore>()(
         // 解析难度等级
         const difficulty = (pkg.meta as { difficulty?: string })?.difficulty as CourseDifficulty || 'intermediate';
         // 解析标签
-        const tags = ((pkg.meta as { tags?: string[] })?.tags || []).sort();
+        const rawTags = (pkg.meta as { tags?: string[] | string })?.tags;
+        const tags = (Array.isArray(rawTags) ? rawTags : (() => { try { const t = typeof rawTags === 'string' ? JSON.parse(rawTags) : []; return Array.isArray(t) ? t : []; } catch { return []; } })()).sort();
 
         set({
           courseId: `new-${Date.now()}`,
