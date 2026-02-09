@@ -244,3 +244,30 @@ async def switch_provider(provider: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"切换提供商失败: {str(e)}")
+
+
+@router.post("/course/analyze")
+async def analyze_course(course_id: int):
+    """
+    分析课程所有内容并检测问题
+
+    返回：
+    - 课程基本信息
+    - 问题列表（运行错误、文字遮挡、质量问题等）
+    - 健康度评分
+    """
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                'http://127.0.0.1:8100/course/analyze',
+                json={'course_id': course_id}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Agent 返回错误: {e.response.text}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"课程分析失败: {str(e)}")
