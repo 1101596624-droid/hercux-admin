@@ -186,27 +186,13 @@ async def generate_simulator_code(
     current_user: User = Depends(require_admin),
 ):
     """
-    使用AI生成模拟器代码（Admin only）
+    使用AI生成模拟器代码（Admin only）- 经验增强版
 
-    接收用户描述，调用AI生成PixiJS模拟器代码
+    调用 HERCU Agent 服务进行经验晶化增强的代码生成
     """
-    from app.services.claude_service import get_claude_service, Message
-    from app.services.studio.custom_code_generator import (
-        CUSTOM_CODE_SYSTEM_PROMPT,
-        get_custom_code_prompt,
-        validate_custom_code,
-        extract_variables_from_code,
-    )
+    import httpx
 
-    try:
-        claude = get_claude_service()
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"AI 服务不可用: {str(e)}"
-        )
-
-    # Build variables list for the prompt
+    # 构建变量列表
     variables_list = None
     if request.variables:
         variables_list = [
@@ -214,84 +200,52 @@ async def generate_simulator_code(
             for v in request.variables
         ]
 
-    user_prompt = get_custom_code_prompt(
-        topic=request.prompt,
-        description=request.prompt,
-        variables=variables_list,
-    )
+    # 调用 HERCU Agent API
+    agent_url = "http://127.0.0.1:8100/enhance/simulator"
+    payload = {
+        "topic": request.prompt,
+        "subject": "通用",
+        "variables": variables_list,
+    }
 
-    max_retries = 2
-    for attempt in range(max_retries + 1):
-        try:
-            response = await claude.chat_completion(
-                messages=[Message(role="user", content=user_prompt)],
-                system_prompt=CUSTOM_CODE_SYSTEM_PROMPT,
-                temperature=0.7,
-                max_tokens=4000,
-            )
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(agent_url, json=payload)
+            response.raise_for_status()
+            result = response.json()
 
-            # Extract text from Claude response
-            content_blocks = response.get("content", [])
-            code = ""
-            for block in content_blocks:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    code = block.get("text", "").strip()
-                    break
+        # 提取生成的代码
+        code = result["code"]
+        quality_score = result["quality_score"]
 
-            if not code:
-                if attempt < max_retries:
-                    continue
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="AI 未返回有效代码"
-                )
-
-            # Remove markdown code block markers if present
-            if code.startswith("```"):
-                lines = code.split("\n")
-                code = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-            # Validate
-            is_valid, error_msg = validate_custom_code(code)
-            if not is_valid:
-                if attempt < max_retries:
-                    user_prompt += f"\n\n上次生成的代码有问题：{error_msg}，请修正。"
-                    continue
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"生成的代码验证失败: {error_msg}"
-                )
-
-            # Extract variables used in code
+        # 从代码中提取变量（如果未提供）
+        if not variables_list:
+            from app.services.studio.custom_code_generator import extract_variables_from_code
             used_vars = extract_variables_from_code(code)
-            variables_output = [
+            variables_list = [
                 {"name": v, "label": v, "min": 0, "max": 100, "default": 50, "step": 1}
                 for v in used_vars
             ]
 
-            # If user provided variable specs, merge them
-            if request.variables:
-                var_map = {v.name: v for v in request.variables}
-                for vo in variables_output:
-                    if vo["name"] in var_map:
-                        spec = var_map[vo["name"]]
-                        vo["min"] = spec.min
-                        vo["max"] = spec.max
-                        vo["default"] = spec.default
+        return GenerateCodeResponse(
+            custom_code=code,
+            variables=variables_list or [],
+            name=request.prompt[:50],
+            description=f"{request.prompt} (质量分: {quality_score:.2f})",
+        )
 
-            return GenerateCodeResponse(
-                custom_code=code,
-                variables=variables_output,
-                name=request.prompt[:50],
-                description=request.prompt,
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            if attempt < max_retries:
-                continue
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"代码生成失败: {str(e)}"
-            )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"HERCU Agent 返回错误: {e.response.text}"
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="代码生成超时，请稍后重试"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"代码生成失败: {str(e)}"
+        )
