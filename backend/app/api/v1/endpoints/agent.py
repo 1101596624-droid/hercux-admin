@@ -202,3 +202,45 @@ async def trigger_sync():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}")
+
+
+@router.get("/llm/provider")
+async def get_current_provider():
+    """
+    获取当前LLM提供商信息
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get('http://127.0.0.1:8100/llm/provider')
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Agent 返回错误: {e.response.text}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取提供商信息失败: {str(e)}")
+
+
+@router.post("/llm/provider")
+async def switch_provider(provider: str):
+    """
+    切换LLM提供商
+    支持: claude, deepseek, qwen
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                'http://127.0.0.1:8100/llm/provider',
+                json={'provider': provider}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Agent 返回错误: {e.response.text}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"切换提供商失败: {str(e)}")

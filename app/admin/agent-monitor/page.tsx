@@ -38,13 +38,25 @@ interface AgentStats {
   }>;
 }
 
+interface LLMProvider {
+  current_provider: string;
+  supported_providers: string[];
+  models: {
+    claude: string;
+    deepseek: string;
+    qwen: string;
+  };
+}
+
 export default function AgentMonitorPage() {
   const [stats, setStats] = useState<AgentStats | null>(null);
+  const [provider, setProvider] = useState<LLMProvider | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDistilling, setIsDistilling] = useState(false);
   const [isDecaying, setIsDecaying] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
 
   const fetchStats = async () => {
     try {
@@ -65,9 +77,29 @@ export default function AgentMonitorPage() {
     }
   };
 
+  const fetchProvider = async () => {
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+      const response = await fetch(`${API_URL}/agent/llm/provider`);
+
+      if (!response.ok) {
+        throw new Error('获取提供商信息失败');
+      }
+
+      const data = await response.json();
+      setProvider(data);
+    } catch (err) {
+      console.error('Failed to fetch provider info:', err);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 30000); // 每30秒刷新
+    fetchProvider();
+    const interval = setInterval(() => {
+      fetchStats();
+      fetchProvider();
+    }, 30000); // 每30秒刷新
     return () => clearInterval(interval);
   }, []);
 
@@ -132,6 +164,28 @@ export default function AgentMonitorPage() {
       alert(err instanceof Error ? err.message : '同步失败');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleSwitchProvider = async (newProvider: string) => {
+    if (newProvider === provider?.current_provider) return;
+
+    setIsSwitching(true);
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+      const response = await fetch(`${API_URL}/agent/llm/provider?provider=${newProvider}`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) throw new Error('切换失败');
+
+      const result = await response.json();
+      alert(`成功切换到 ${newProvider}！模型: ${result.model}`);
+      fetchProvider();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '切换LLM提供商失败');
+    } finally {
+      setIsSwitching(false);
     }
   };
 
@@ -249,6 +303,45 @@ export default function AgentMonitorPage() {
         <p className="text-sm text-gray-500 mt-3">
           提示：经验蒸馏需要 ≥3 条成功和失败轨迹。置信度衰减会降低低表现模式的权重。
         </p>
+      </div>
+
+      {/* LLM 提供商切换 */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">LLM 提供商</h2>
+        {provider ? (
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-sm text-gray-600">当前使用:</span>
+              <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                {provider.current_provider.toUpperCase()}
+              </span>
+              <span className="text-xs text-gray-500">
+                ({provider.models[provider.current_provider as keyof typeof provider.models]})
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {provider.supported_providers.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => handleSwitchProvider(p)}
+                  disabled={isSwitching || p === provider.current_provider}
+                  className={`px-4 py-2 rounded-lg transition-colors ${
+                    p === provider.current_provider
+                      ? 'bg-blue-600 text-white cursor-default'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed'
+                  }`}
+                >
+                  {isSwitching ? '切换中...' : p === 'claude' ? '🤖 Claude' : p === 'deepseek' ? '🚀 DeepSeek' : '🌟 千问'}
+                </button>
+              ))}
+            </div>
+            <p className="text-sm text-gray-500 mt-3">
+              提示：切换后立即生效，无需重启服务。DeepSeek 和千问成本更低，适合大规模代码生成。
+            </p>
+          </div>
+        ) : (
+          <p className="text-gray-500 text-sm">加载中...</p>
+        )}
       </div>
 
       {/* 图表 */}
