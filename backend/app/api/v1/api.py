@@ -32,6 +32,7 @@ from app.api.v1.endpoints.admin import (
     settings as admin_settings,
     admins as admin_admins
 )
+from app.api.v1.endpoints import agent
 
 api_router = APIRouter()
 
@@ -94,3 +95,6 @@ api_router.include_router(admin_admins.router, prefix="/admin", tags=["Admin - A
 
 # TTS 语音合成
 api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])
+
+# HERCU Agent 监控
+api_router.include_router(agent.router, prefix="/agent", tags=["Agent"])
