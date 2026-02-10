@@ -58,14 +58,21 @@ export default function CourseEditorPage() {
 
   // Load course data on mount (only for existing courses)
   useEffect(() => {
-    // For new courses, data is already loaded from Studio via loadFromPackage
+    // For new courses, initialize with empty course or load from store
     if (isNewCourse) {
-      // Check if we have data in the store
       const currentChapters = useEditorStore.getState().chapters;
       const currentCourseId = useEditorStore.getState().courseId;
+
       if (!currentCourseId || currentChapters.length === 0) {
-        // No data in store, redirect back to studio
-        router.push('/admin/studio');
+        // Initialize a new empty course
+        loadCourse('new', {
+          title: '新课程',
+          coverImage: undefined,
+          difficulty: 'intermediate',
+          tags: [],
+          chapters: [],
+          aiGuidance: useEditorStore.getState().aiGuidance,
+        });
       }
       setLocalLoading(false);
       return;

@@ -240,6 +240,15 @@ export default function AdminCoursesPage() {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => router.push('/admin/editor/new')}
+            className="flex items-center gap-2 px-5 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium shadow-sm"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            创建新课程
+          </button>
+          <button
             onClick={handleImportClick}
             disabled={importing}
             className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition-colors font-medium disabled:opacity-50"
