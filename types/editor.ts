@@ -148,98 +148,18 @@ export interface SimulatorOutputConfig {
   color?: string;    // 进度条颜色
 }
 
-// ============================================
-// 文科模拟器数据类型
-// ============================================
-
-/** 时间线事件 */
-export interface TimelineEvent {
-  id: string;
-  year: string;           // 年份或时间点，如 "1949" 或 "公元前221年"
-  title: string;          // 事件标题
-  description: string;    // 事件描述
-  category?: string;      // 分类标签
-  highlight?: boolean;    // 是否高亮
-}
-
-/** 时间线配置 */
-export interface TimelineConfig {
-  title: string;
-  events: TimelineEvent[];
-}
-
-/** 决策选项 */
-export interface DecisionOption {
-  id: string;
-  label: string;          // 选项文本
-  result: string;         // 选择后的结果描述
-  isOptimal?: boolean;    // 是否为最佳选择
-}
-
-/** 决策情景配置 */
-export interface DecisionScenarioConfig {
-  title: string;
-  scenario: string;       // 情景描述
-  question: string;       // 决策问题
-  options: DecisionOption[];
-  analysis?: string;      // 综合分析
-}
-
-/** 对比项 */
-export interface ComparisonItem {
-  id: string;
-  name: string;           // 对比对象名称
-  attributes: Record<string, string>;  // 属性键值对
-}
-
-/** 对比分析配置 */
-export interface ComparisonConfig {
-  title: string;
-  dimensions: string[];   // 对比维度
-  items: ComparisonItem[];
-  conclusion?: string;    // 结论
-}
-
-/** 概念节点 */
-export interface ConceptNode {
-  id: string;
-  label: string;          // 概念名称
-  description?: string;   // 概念描述
-  category?: string;      // 分类
-}
-
-/** 概念关系 */
-export interface ConceptRelation {
-  from: string;           // 起始节点 ID
-  to: string;             // 目标节点 ID
-  label?: string;         // 关系描述
-}
-
-/** 概念关系图配置 */
-export interface ConceptMapConfig {
-  title: string;
-  nodes: ConceptNode[];
-  relations: ConceptRelation[];
-}
-
-/** 模拟器配置 */
+/** 模拟器配置（新版本：仅支持 custom 和 iframe） */
 export interface SimulatorConfig {
-  type: 'preset' | 'custom' | 'iframe' | 'timeline' | 'decision' | 'comparison' | 'concept-map' | 'interactive';
-  presetId?: string;
+  type: 'custom' | 'iframe';
   name: string;
   description: string;
   // 模式：sdl（默认）或 custom（自定义代码）
   mode?: 'sdl' | 'custom';
   // 自定义代码模式
   custom_code?: string;
-  // 理科模拟器
+  // 输入输出（保留向后兼容）
   inputs: SimulatorInputConfig[];
   outputs: SimulatorOutputConfig[];
-  // 文科模拟器
-  timeline?: TimelineConfig;
-  decision?: DecisionScenarioConfig;
-  comparison?: ComparisonConfig;
-  conceptMap?: ConceptMapConfig;
   // 通用
   iframeUrl?: string;
   instructions?: string[];
@@ -254,7 +174,7 @@ export interface SimulatorConfig {
     step?: number;
     unit?: string;
   }>;
-  // SDL 场景配置
+  // SDL 场景配置（保留向后兼容）
   scenario?: {
     description?: string;
     [key: string]: any;
