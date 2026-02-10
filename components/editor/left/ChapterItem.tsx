@@ -17,7 +17,6 @@ const AVAILABLE_SECTION_TYPES: { type: ComponentType; label: string }[] = [
   { type: 'illustrated_content', label: '图文内容' },
   { type: 'video', label: '视频' },
   { type: 'simulator', label: '交互模拟器' },
-  { type: 'ai_tutor', label: 'AI 导师' },
   { type: 'assessment', label: '测验' },
   { type: 'quick_check', label: '快速检测' },
 ];
@@ -202,58 +201,72 @@ export function ChapterItem({
                 className="fixed inset-0 z-10"
                 onClick={() => { setShowMenu(false); setShowTypeSelector(false); }}
               />
-              <div className="absolute right-0 top-full mt-1 w-36 bg-white rounded-lg shadow-lg border border-dark-200 py-1 z-20">
-                <div className="relative">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowTypeSelector(!showTypeSelector);
-                    }}
-                    className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50 flex items-center justify-between"
-                  >
-                    添加小节
-                    <svg className="w-3 h-3 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                  {showTypeSelector && (
-                    <div className="absolute left-full top-0 ml-1 w-40 bg-white rounded-lg shadow-lg border border-dark-200 py-1 z-30">
-                      {AVAILABLE_SECTION_TYPES.map((item) => (
-                        <button
-                          key={item.type}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAddSectionWithType(item.type);
-                            setShowMenu(false);
-                          }}
-                          className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50"
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsEditing(true);
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50"
-                >
-                  重命名
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteChapter();
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
-                >
-                  删除章节
-                </button>
+              <div className="absolute right-0 top-full mt-1 w-40 bg-white rounded-lg shadow-lg border border-dark-200 py-1 z-20">
+                {!showTypeSelector ? (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowTypeSelector(true);
+                      }}
+                      className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50 flex items-center justify-between"
+                    >
+                      添加小节
+                      <svg className="w-3 h-3 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsEditing(true);
+                        setShowMenu(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50"
+                    >
+                      重命名
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteChapter();
+                        setShowMenu(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
+                    >
+                      删除章节
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowTypeSelector(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left text-sm text-dark-400 hover:bg-dark-50 flex items-center gap-1"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                      返回
+                    </button>
+                    <div className="border-t border-dark-100 my-1" />
+                    {AVAILABLE_SECTION_TYPES.map((item) => (
+                      <button
+                        key={item.type}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddSectionWithType(item.type);
+                          setShowMenu(false);
+                        }}
+                        className="w-full px-3 py-1.5 text-left text-sm text-dark-700 hover:bg-dark-50"
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
             </>
           )}

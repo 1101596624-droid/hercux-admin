@@ -11,6 +11,13 @@ import { Input } from '@/components/ui/Input';
 import { SimulatorConfigEditor } from './SimulatorConfigEditor';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const BACKEND_ORIGIN = process.env.NEXT_PUBLIC_STUDIO_API_URL || 'http://localhost:8000';
+
+/** 将后端返回的相对路径解析为完整 URL */
+function resolveMediaUrl(url: string): string {
+  if (!url || url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
+  return `${BACKEND_ORIGIN}${url}`;
+}
 
 /** Helper: upload file via multipart/form-data */
 async function uploadFile(
@@ -88,8 +95,6 @@ export function ConfigEditor({ type, config, onChange }: ConfigEditorProps) {
           onChange={(updates) => onChange(updates)}
         />
       );
-    case 'ai_tutor':
-      return <AITutorConfigEditor />;
     default:
       return (
         <div className="text-dark-500 text-sm">
@@ -153,7 +158,7 @@ function VideoConfigEditor({ config, onChange }: VideoConfigEditorProps) {
         <div className="space-y-2">
           <label className="block text-sm font-medium text-dark-700">视频预览</label>
           <video
-            src={currentConfig.videoUrl}
+            src={resolveMediaUrl(currentConfig.videoUrl)}
             controls
             className="w-full rounded-lg border border-dark-200"
           />
@@ -504,7 +509,7 @@ function IllustratedConfigEditor({ textConfig, illustratedConfig, onChange }: Il
         {currentIllustratedConfig.imageUrl ? (
           <div className="space-y-2">
             <img
-              src={currentIllustratedConfig.imageUrl}
+              src={resolveMediaUrl(currentIllustratedConfig.imageUrl)}
               alt={currentIllustratedConfig.imageAlt || ''}
               className="max-w-full h-auto rounded-lg border border-dark-200 object-contain"
             />
@@ -649,11 +654,3 @@ function IllustratedConfigEditor({ textConfig, illustratedConfig, onChange }: Il
   );
 }
 
-function AITutorConfigEditor() {
-  return (
-    <div className="p-4 bg-dark-50 rounded-lg text-center text-dark-500">
-      <p className="mb-2">AI 导师配置</p>
-      <p className="text-sm">请在右侧面板配置 AI 引导</p>
-    </div>
-  );
-}

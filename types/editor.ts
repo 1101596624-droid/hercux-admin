@@ -18,7 +18,6 @@ export const COMPONENT_TYPE_LABELS: Record<string, string> = {
   illustrated_content: '图文内容',
   video: '视频',
   simulator: '交互模拟器',
-  ai_tutor: 'AI 导师',
   assessment: '测验',
   quick_check: '快速检测',
 };
