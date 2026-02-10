@@ -419,6 +419,19 @@ export const useEditorStore = create<EditorStore>()(
         if (type) {
           newSection.componentType = type;
           newSection.config = { ...DEFAULT_NODE_CONFIG, type };
+
+          // 为模拟器类型提供默认配置（使用自定义代码模式）
+          if (type === 'simulator') {
+            newSection.config.simulatorConfig = {
+              type: 'custom',
+              mode: 'custom',
+              name: '',
+              description: '',
+              inputs: [],
+              outputs: [],
+              instructions: [],
+            };
+          }
         }
 
         set((state) => ({
