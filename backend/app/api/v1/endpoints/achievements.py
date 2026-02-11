@@ -30,7 +30,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "First Step",
         "badge_description": "Complete your first learning node",
         "rarity": "common",
+        "icon": "🎯",
         "icon_url": "/badges/first_step.png",
+        "points": 10,
         "condition": lambda stats: stats["completed_nodes"] >= 1
     },
     "dedicated_learner": {
@@ -38,7 +40,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Dedicated Learner",
         "badge_description": "Complete 10 learning nodes",
         "rarity": "common",
+        "icon": "📚",
         "icon_url": "/badges/dedicated_learner.png",
+        "points": 50,
         "condition": lambda stats: stats["completed_nodes"] >= 10
     },
     "knowledge_seeker": {
@@ -46,7 +50,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Knowledge Seeker",
         "badge_description": "Complete 50 learning nodes",
         "rarity": "rare",
+        "icon": "🔍",
         "icon_url": "/badges/knowledge_seeker.png",
+        "points": 100,
         "condition": lambda stats: stats["completed_nodes"] >= 50
     },
     "master_student": {
@@ -54,7 +60,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Master Student",
         "badge_description": "Complete 100 learning nodes",
         "rarity": "epic",
+        "icon": "👑",
         "icon_url": "/badges/master_student.png",
+        "points": 200,
         "condition": lambda stats: stats["completed_nodes"] >= 100
     },
     "course_completer": {
@@ -62,7 +70,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Course Completer",
         "badge_description": "Complete your first course",
         "rarity": "common",
+        "icon": "✅",
         "icon_url": "/badges/course_completer.png",
+        "points": 100,
         "condition": lambda stats: stats["completed_courses"] >= 1
     },
     "multi_course_master": {
@@ -70,7 +80,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Multi-Course Master",
         "badge_description": "Complete 5 courses",
         "rarity": "rare",
+        "icon": "🎓",
         "icon_url": "/badges/multi_course_master.png",
+        "points": 300,
         "condition": lambda stats: stats["completed_courses"] >= 5
     },
     "streak_3": {
@@ -78,7 +90,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "3-Day Streak",
         "badge_description": "Learn for 3 consecutive days",
         "rarity": "common",
+        "icon": "🔥",
         "icon_url": "/badges/streak_3.png",
+        "points": 30,
         "condition": lambda stats: stats["current_streak"] >= 3
     },
     "streak_7": {
@@ -86,7 +100,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Week Warrior",
         "badge_description": "Learn for 7 consecutive days",
         "rarity": "rare",
+        "icon": "💪",
         "icon_url": "/badges/streak_7.png",
+        "points": 100,
         "condition": lambda stats: stats["current_streak"] >= 7
     },
     "streak_30": {
@@ -94,7 +110,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Monthly Master",
         "badge_description": "Learn for 30 consecutive days",
         "rarity": "epic",
+        "icon": "⚡",
         "icon_url": "/badges/streak_30.png",
+        "points": 500,
         "condition": lambda stats: stats["current_streak"] >= 30
     },
     "streak_100": {
@@ -102,7 +120,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Centurion",
         "badge_description": "Learn for 100 consecutive days",
         "rarity": "legendary",
+        "icon": "💎",
         "icon_url": "/badges/streak_100.png",
+        "points": 2000,
         "condition": lambda stats: stats["current_streak"] >= 100
     },
     "time_10h": {
@@ -110,7 +130,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "10 Hours",
         "badge_description": "Spend 10 hours learning",
         "rarity": "common",
+        "icon": "⏰",
         "icon_url": "/badges/time_10h.png",
+        "points": 50,
         "condition": lambda stats: stats["total_hours"] >= 10
     },
     "time_50h": {
@@ -118,7 +140,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "50 Hours",
         "badge_description": "Spend 50 hours learning",
         "rarity": "rare",
+        "icon": "⏳",
         "icon_url": "/badges/time_50h.png",
+        "points": 200,
         "condition": lambda stats: stats["total_hours"] >= 50
     },
     "time_100h": {
@@ -126,7 +150,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "100 Hours",
         "badge_description": "Spend 100 hours learning",
         "rarity": "epic",
+        "icon": "⌛",
         "icon_url": "/badges/time_100h.png",
+        "points": 500,
         "condition": lambda stats: stats["total_hours"] >= 100
     },
     "perfectionist": {
@@ -134,7 +160,9 @@ ACHIEVEMENT_DEFINITIONS = {
         "badge_name": "Perfectionist",
         "badge_description": "Achieve 100% completion rate on 3 courses",
         "rarity": "epic",
+        "icon": "✨",
         "icon_url": "/badges/perfectionist.png",
+        "points": 300,
         "condition": lambda stats: stats["perfect_courses"] >= 3
     }
 }
@@ -240,11 +268,11 @@ async def get_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
     }
 
 
-async def check_and_unlock_achievements(user_id: int, db: AsyncSession) -> List[str]:
+async def check_and_unlock_achievements(user_id: int, db: AsyncSession) -> List[dict]:
     """
     Check user stats and unlock any new achievements
 
-    Returns list of newly unlocked achievement IDs
+    Returns list of newly unlocked achievement details with full info
     """
     # Get user stats
     stats = await get_user_stats(user_id, db)
@@ -276,7 +304,18 @@ async def check_and_unlock_achievements(user_id: int, db: AsyncSession) -> List[
                 icon_url=achievement_def["icon_url"]
             )
             db.add(achievement)
-            newly_unlocked.append(badge_id)
+
+            # 返回完整的勋章信息
+            newly_unlocked.append({
+                "badge_id": achievement_def["badge_id"],
+                "badge_name": achievement_def["badge_name"],
+                "badge_description": achievement_def.get("badge_description", ""),
+                "icon": achievement_def.get("icon", "🏆"),  # 添加 icon 字段
+                "icon_url": achievement_def.get("icon_url"),
+                "rarity": achievement_def["rarity"],
+                "points": achievement_def.get("points", 10),  # 添加 points 字段，默认10分
+                "unlock_animation": achievement_def.get("unlock_animation")  # 添加动画配置
+            })
 
     if newly_unlocked:
         await db.commit()

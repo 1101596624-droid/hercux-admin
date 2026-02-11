@@ -1,0 +1,307 @@
+## HERCU 可视化元素库
+# 版本: 1.0.0
+# 更新: 2026-02-10
+
+version: "1.0.0"
+
+# 22种基础可视化元素
+visualization_elements:
+  # ==== 几何图形类 ====
+  - id: "circles"
+    name: "圆形"
+    description: "用于表示节点、粒子、数据点、原子等"
+    apis: ["createCircle"]
+    use_cases:
+      - "原子/分子"
+      - "数据点"
+      - "节点网络"
+      - "粒子系统"
+      - "天体"
+    best_practices:
+      - "用大小表示数量/质量"
+      - "用颜色表示类型/状态"
+      - "用发光表示能量/激活状态"
+
+  - id: "rectangles"
+    name: "矩形"
+    description: "用于表示容器、状态块、柱状图"
+    apis: ["createRect"]
+    use_cases:
+      - "柱状图"
+      - "状态面板"
+      - "按钮/标签背景"
+      - "容器/边界"
+    best_practices:
+      - "必须使用圆角 (cornerRadius = 4-8)"
+      - "用颜色表示状态"
+      - "柱状图间距 = 宽度 * 0.3"
+
+  - id: "lines"
+    name: "直线"
+    description: "用于表示坐标轴、连接线、箭头"
+    apis: ["createLine"]
+    use_cases:
+      - "坐标轴"
+      - "连接关系"
+      - "力矢量"
+      - "轨迹"
+    best_practices:
+      - "线宽表示强度/重要性"
+      - "箭头用三角形多边形表示"
+      - "虚线用多段短线模拟"
+
+  - id: "curves"
+    name: "曲线"
+    description: "用于表示函数图、轨迹、流动路径"
+    apis: ["createCurve", "setCurvePoints"]
+    use_cases:
+      - "函数图像"
+      - "运动轨迹"
+      - "波浪/振动"
+      - "血管/神经"
+    best_practices:
+      - "至少30个采样点保证平滑"
+      - "用颜色深浅表示强度"
+      - "可动态更新点坐标"
+
+  - id: "polygons"
+    name: "多边形"
+    description: "用于表示不规则形状、箭头、晶体结构"
+    apis: ["createPolygon"]
+    use_cases:
+      - "箭头头部"
+      - "晶体结构"
+      - "不规则细胞"
+      - "地理形状"
+    best_practices:
+      - "6-12个顶点为宜"
+      - "可用于箭头头部（三角形）"
+      - "描边区分边界"
+
+  # ==== 文本标注类 ====
+  - id: "labels"
+    name: "标签"
+    description: "元素名称、数值标注"
+    apis: ["createText"]
+    use_cases:
+      - "元素名称"
+      - "坐标刻度"
+      - "数值显示"
+    best_practices:
+      - "字体大小 12-20px"
+      - "对比度 >= 4.5:1"
+      - "避免文字重叠"
+
+  - id: "title"
+    name: "标题"
+    description: "场景标题"
+    apis: ["createText"]
+    use_cases:
+      - "模拟器名称"
+      - "当前状态描述"
+    best_practices:
+      - "放置在顶部中央"
+      - "字体略大 (18-24px)"
+      - "简洁明了"
+
+  - id: "legend"
+    name: "图例"
+    description: "颜色/符号说明"
+    apis: ["createText", "createRect", "createCircle"]
+    use_cases:
+      - "颜色含义说明"
+      - "符号标注"
+    best_practices:
+      - "放置在角落或底部"
+      - "图标+文字组合"
+      - "不遮挡主要内容"
+
+  # ==== 动画效果类 ====
+  - id: "position_animation"
+    name: "位置动画"
+    description: "元素移动、位置变化"
+    apis: ["setPosition"]
+    use_cases:
+      - "物体运动"
+      - "粒子流动"
+      - "过渡动画"
+    best_practices:
+      - "使用缓动函数"
+      - "用 clamp 限制边界"
+      - "速度要适中"
+
+  - id: "color_animation"
+    name: "颜色变化"
+    description: "颜色渐变、闪烁"
+    apis: ["setColor", "setAlpha"]
+    use_cases:
+      - "状态变化"
+      - "高亮提示"
+      - "温度变化"
+    best_practices:
+      - "渐变要平滑"
+      - "颜色要有语义"
+      - "避免过度闪烁"
+
+  - id: "size_animation"
+    name: "大小变化"
+    description: "缩放、脉动"
+    apis: ["setScale", "setRadius", "setSize"]
+    use_cases:
+      - "强调效果"
+      - "脉动心跳"
+      - "生长过程"
+    best_practices:
+      - "用 easeOutBack 实现弹跳"
+      - "避免过大幅度变化"
+
+  - id: "glow_effect"
+    name: "发光效果"
+    description: "元素发光、高亮"
+    apis: ["setGlow"]
+    use_cases:
+      - "能量状态"
+      - "激活状态"
+      - "注意力引导"
+    best_practices:
+      - "blur = 5-15"
+      - "重要元素才发光"
+      - "发光颜色与元素颜色协调"
+
+  # ==== 交互变量类 ====
+  - id: "sliders"
+    name: "滑块变量"
+    description: "参数调节滑块"
+    apis: ["getVar", "setVar"]
+    use_cases:
+      - "物理参数调节"
+      - "速度/质量/温度控制"
+    best_practices:
+      - "2-3个变量为宜"
+      - "实时响应"
+      - "显示当前值"
+
+  # ==== 组合结构类 ====
+  - id: "node_network"
+    name: "节点网络"
+    description: "多个节点+连线构成的网络"
+    use_cases:
+      - "神经网络"
+      - "社交网络"
+      - "分子结构"
+      - "电路图"
+    components:
+      - "circles (节点)"
+      - "lines (连接)"
+      - "labels (标注)"
+
+  - id: "tree_structure"
+    name: "树状结构"
+    description: "层级树形结构"
+    use_cases:
+      - "决策树"
+      - "语法树"
+      - "分类层次"
+    components:
+      - "circles/rectangles (节点)"
+      - "lines (分支)"
+
+  - id: "flow_diagram"
+    name: "流程图"
+    description: "步骤流程、因果链"
+    use_cases:
+      - "化学反应步骤"
+      - "生物过程"
+      - "算法流程"
+    components:
+      - "rectangles (步骤)"
+      - "lines with arrows (流向)"
+      - "labels (说明)"
+
+  - id: "timeline"
+    name: "时间线"
+    description: "时间轴+事件节点"
+    use_cases:
+      - "历史事件"
+      - "过程演变"
+      - "生命周期"
+    components:
+      - "line (主轴)"
+      - "circles (事件点)"
+      - "labels (时间/事件)"
+
+  - id: "coordinate_system"
+    name: "坐标系"
+    description: "坐标轴+网格+曲线"
+    use_cases:
+      - "函数图像"
+      - "数据分布"
+      - "物理图表"
+    components:
+      - "lines (坐标轴)"
+      - "labels (刻度)"
+      - "curves (数据曲线)"
+
+  - id: "matrix_grid"
+    name: "矩阵网格"
+    description: "二维网格布局"
+    use_cases:
+      - "热力图"
+      - "细胞阵列"
+      - "棋盘/地图"
+    components:
+      - "rectangles (格子)"
+      - "color_animation (数值变化)"
+
+  - id: "layered_structure"
+    name: "分层结构"
+    description: "多层堆叠结构"
+    use_cases:
+      - "地质层"
+      - "网络协议栈"
+      - "大气层"
+    components:
+      - "rectangles (层)"
+      - "labels (层名称)"
+      - "different colors (区分层次)"
+
+  - id: "comparison_layout"
+    name: "对比布局"
+    description: "左右/上下对比"
+    use_cases:
+      - "前后对比"
+      - "A/B测试"
+      - "不同条件对比"
+    components:
+      - "两组相似元素"
+      - "分隔线"
+      - "labels (标注差异)"
+
+  - id: "annotation_system"
+    name: "标注系统"
+    description: "结构标注+引线"
+    use_cases:
+      - "生物结构标注"
+      - "机械图标注"
+      - "解剖图"
+    components:
+      - "lines (引线)"
+      - "labels (名称)"
+      - "circles (标注点)"
+
+# 元素组合推荐
+recommended_combinations:
+  - name: "物理实验"
+    elements: ["coordinate_system", "circles", "lines", "labels", "position_animation"]
+
+  - name: "化学反应"
+    elements: ["node_network", "circles", "lines", "color_animation", "labels"]
+
+  - name: "生物结构"
+    elements: ["annotation_system", "polygons", "labels", "layered_structure"]
+
+  - name: "历史事件"
+    elements: ["timeline", "circles", "labels", "color_animation"]
+
+  - name: "算法演示"
+    elements: ["flow_diagram", "rectangles", "lines", "position_animation"]

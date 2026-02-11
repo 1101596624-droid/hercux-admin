@@ -207,6 +207,8 @@ class ClaudeService:
         ai_tutor_config = context.get("ai_tutor_config", {})
         current_layer = context.get("current_layer", "L1")
         progress = context.get("progress", {})
+        current_step_index = context.get("current_step_index", 0)
+        total_steps = context.get("total_steps", 0)
 
         # 基础角色设定
         persona = ai_tutor_config.get(
@@ -218,8 +220,37 @@ class ClaudeService:
         node_title = node.get("title", "")
         learning_objectives = node.get("learning_objectives", [])
 
+        # 诊断焦点
+        diagnostic_focus = ai_tutor_config.get("diagnostic_focus", {})
+        key_concepts = diagnostic_focus.get("key_concepts", []) if isinstance(diagnostic_focus, dict) else []
+        common_misconceptions_list = diagnostic_focus.get("common_misconceptions", []) if isinstance(diagnostic_focus, dict) else []
+
+        # 探测性问题
+        probing_questions = ai_tutor_config.get("probing_questions", [])
+
+        # 当前问题信息
+        current_question_info = ""
+        if probing_questions and 0 <= current_step_index < len(probing_questions):
+            current_q = probing_questions[current_step_index]
+            current_question_info = f"""
+当前探测问题（第 {current_step_index + 1}/{len(probing_questions)} 个）：
+- 问题：{current_q.get('question', '')}
+- 意图：{current_q.get('intent', '')}
+- 期望学生提到的要素：{', '.join(current_q.get('expected_elements', []))}
+
+你需要根据学生的回答判断：
+1. 学生是否提到了期望的要素？
+2. 理解是否准确？
+3. 是否需要追问或纠正？
+
+回复策略：
+- 如果学生提到了所有期望要素且理解正确 → 肯定并深化
+- 如果学生提到了部分要素 → 肯定已掌握的，引导补充遗漏的
+- 如果学生回答偏离或有误 → 温和指出，用苏格拉底式追问引导
+"""
+
         # 常见误区
-        misconceptions = ai_tutor_config.get("common_misconceptions", [])
+        misconceptions = ai_tutor_config.get("common_misconceptions", common_misconceptions_list)
 
         # 提示语
         hints = ai_tutor_config.get("hints", [])
@@ -231,11 +262,14 @@ class ClaudeService:
 - 课程节点：{node_title}
 - 学习目标：{', '.join(learning_objectives)}
 - 当前层级：{current_layer} ({'直觉理解' if current_layer == 'L1' else '原理机制' if current_layer == 'L2' else '本质规律'})
+- 核心概念：{', '.join(key_concepts) if key_concepts else '见学习目标'}
+
+{current_question_info}
 
 你的职责：
-1. 根据学生的问题和当前学习进度，提供个性化的引导和解答
-2. 使用生活化的比喻和例子帮助学生理解抽象概念
-3. 鼓励学生主动思考，而不是直接给出答案
+1. 根据学生的回答，判断其对期望要素的掌握程度
+2. 使用苏格拉底式提问引导学生深入思考
+3. 不要直接给出答案，而是通过追问帮助学生自己发现
 4. 识别学生的误区并温和地纠正
 
 常见误区（需要注意）：
@@ -246,14 +280,16 @@ class ClaudeService:
 
 对话风格：
 - 友好、耐心、鼓励性
-- 使用简洁的语言，避免过于学术化
+- 使用简洁的语言（每次回复控制在80字以内）
 - 适当使用表情符号增加亲和力（但不要过度）
 - 根据学生的理解程度调整解释的深度
 
 重要原则：
+- 严格基于期望要素来评估学生的回答
 - 不要直接给出测验答案，而是引导学生思考
 - 如果学生理解有困难，尝试换一个角度或比喻
 - 及时肯定学生的正确理解和进步
+- 每个问题对话2-3轮后，自然过渡到下一个探测问题
 """
 
         return prompt

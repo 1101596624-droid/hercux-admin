@@ -1,0 +1,201 @@
+# HERCU 模拟器质量标准
+# 版本: 1.0.0
+# 更新: 2026-02-10
+
+version: "1.0.0"
+
+# 代码质量标准
+code_quality:
+  min_code_lines: 80
+  max_code_lines: 200
+  recommended_lines: 120
+
+  required_functions:
+    - setup      # 初始化函数
+    - update     # 更新函数
+
+  optional_functions:
+    - cleanup    # 清理函数（可选）
+
+  min_custom_functions: 2       # 最少自定义辅助函数
+  min_comments: 6               # 最少注释行数
+
+  code_style:
+    max_nesting_depth: 3        # 最大嵌套深度
+    max_function_length: 50     # 单函数最大行数
+    naming_convention: "camelCase"
+
+# 变量标准
+variables:
+  min_variables: 2
+  max_variables: 3
+  recommended_variables: 2
+
+  must_use_getVar: true         # 必须使用 ctx.getVar()
+  variable_must_affect_visual: true  # 变量必须影响视觉
+
+  variable_naming:
+    format: "descriptive_camelCase"
+    examples:
+      - "mass"
+      - "velocity"
+      - "temperature"
+      - "concentration"
+
+    bad_examples:
+      - "var1"
+      - "x"
+      - "value"
+
+# 视觉质量标准
+visual_quality:
+  min_visual_element_types: 5   # 最少视觉元素类型
+  min_total_shapes: 15          # 最少图形总数
+  min_colors_used: 5            # 最少颜色数量
+  min_text_elements: 6          # 最少文字元素
+
+  required_components:
+    - title                     # 标题
+    - labels                    # 标签
+    - legend_or_state_panel     # 图例或状态面板
+
+  optional_components:
+    - axis                      # 坐标轴（取决于可视化类型）
+    - grid                      # 网格
+    - tooltip                   # 工具提示
+    - background                # 背景
+
+# 动画标准
+animation:
+  must_have_animation: true
+  min_animation_types: 1
+
+  animation_types:
+    - position                  # 位置动画
+    - color                     # 颜色动画
+    - size                      # 大小动画
+    - rotation                  # 旋转动画
+    - glow                      # 发光效果
+    - opacity                   # 透明度动画
+
+  smooth_animation: true
+  must_use_easing: true         # 必须使用缓动函数
+
+  animation_fps: 60
+  max_animation_speed: "适中，不宜过快"
+
+# 交互标准
+interaction:
+  min_interaction_types: 1      # 最少交互类型（滑块默认有）
+
+  variable_control:
+    must_have_sliders: true     # 必须有滑块
+    slider_must_be_responsive: true  # 滑块必须实时响应
+
+  additional_interactions:
+    recommended: true
+    types:
+      - click
+      - drag
+      - hover
+      - input
+      - dropdown
+
+  must_show_real_time_values: true  # 必须显示实时数值
+
+# 教学质量标准
+educational_quality:
+  must_demonstrate_concept: true
+  must_have_clear_cause_effect: true
+  variables_must_be_meaningful: true
+  must_have_visual_feedback: true
+
+  concept_clarity:
+    use_visual_metaphor: true   # 使用视觉隐喻
+    avoid_abstraction: "避免过度抽象"
+    semantic_design: "设计要有语义"
+
+# 禁止项
+forbidden:
+  apis:
+    - console.log
+    - alert
+    - confirm
+    - prompt
+    - document.*
+    - window.*
+    - eval
+    - setTimeout
+    - setInterval
+    - fetch
+    - XMLHttpRequest
+    - localStorage
+    - sessionStorage
+    - debugger
+    - throw
+    - createArc              # 不存在的API
+    - createJPath            # 不存在的API
+
+  patterns:
+    - "硬编码坐标（应使用比例）"
+    - "未闭合的括号"
+    - "未转义的字符串"
+    - "过度使用全局变量"
+
+# 画布边界约束
+canvas_constraints:
+  use_proportional_coordinates: true  # 使用比例坐标
+
+  safe_drawing_area:
+    x_min: "width * 0.1"       # 左侧边界
+    x_max: "width * 0.95"      # 右侧边界
+    y_min: 60                  # 顶部边界（固定）
+    y_max: "height - 40"       # 底部边界
+
+  must_use_clamp: true         # 动态坐标必须使用 clamp 限制
+
+  leave_space_for_controls:
+    left: "100px (管理端80px)"  # 左侧滑块区域
+    top: "50px"                 # 顶部标题区域
+    right: "50px"               # 右侧边距
+    bottom: "30px"              # 底部边距
+
+# 颜色标准
+colors:
+  min_contrast_ratio: 4.5      # WCAG AA 标准
+
+  forbidden_dark_colors:       # 与深色背景融合的颜色
+    - "#000000"
+    - "#111111"
+    - "#1a1a1a"
+    - "#1e293b"
+    - "#0f172a"
+
+  must_use_semantic_colors: true  # 颜色必须有语义
+
+  color_usage:
+    increase: ["#10B981", "#22C55E"]
+    decrease: ["#EF4444", "#DC2626"]
+    neutral: ["#6B7280", "#9CA3AF"]
+    highlight: ["#FBBF24", "#F59E0B"]
+    active: ["#3B82F6", "#2563EB"]
+
+# 复杂对象标准
+composite_objects:
+  min_composite_objects: 2     # 最少复合对象数量
+  min_shapes_per_object: 3     # 每个复合对象最少图形数
+
+  examples:
+    - "原子（圆形+发光+标签+电子轨道）"
+    - "力矢量（线条+箭头+数值标注）"
+    - "细胞（细胞膜+细胞核+细胞器）"
+
+# 质量评分权重
+scoring_weights:
+  structure: 0.25              # 结构分 25%
+  visual: 0.25                 # 视觉分 25%
+  interaction: 0.25            # 交互分 25%
+  education: 0.25              # 教学分 25%
+
+  pass_threshold: 70           # 及格线 70分
+  excellent_threshold: 85      # 优秀线 85分

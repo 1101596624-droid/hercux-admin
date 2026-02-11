@@ -1,0 +1,136 @@
+# HERCU 课程质量标准
+# 版本: 1.0.0
+# 更新: 2026-02-10
+
+version: "1.0.0"
+
+# 课程整体标准
+course_level:
+  min_chapters: 4
+  max_chapters: 8
+  recommended_chapters: 6
+  estimated_hours_range: [2, 6]
+
+  difficulty_levels:
+    - beginner
+    - intermediate
+    - advanced
+
+  required_components:
+    - core_concepts        # 核心概念列表
+    - learning_objectives  # 学习目标
+    - description          # 课程描述
+
+# 章节质量标准
+chapter_level:
+  # 步骤数量
+  min_steps: 7
+  max_steps: 12
+  recommended_steps: 9
+
+  # 内容质量
+  min_text_length_per_step: 200      # 每步最少字数
+  recommended_text_length: 250       # 推荐字数
+  min_key_points_per_step: 4         # 每步最少要点数
+  recommended_key_points: 5          # 推荐要点数
+  min_total_words: 1500              # 整章最少总字数
+  recommended_total_words: 2200      # 推荐总字数
+
+  # 结构要求
+  must_have_components:
+    - text_content        # 文本讲解
+    - simulator          # 交互模拟器
+    - assessment         # 测验评估
+
+  optional_components:
+    - illustrated_content  # 图文内容
+    - ai_tutor            # AI导师提问
+    - video               # 视频内容
+
+  # 组件分布要求
+  min_text_content_steps: 2
+  min_illustrated_steps: 2
+  min_simulators: 1
+  min_assessments: 1
+  min_ai_tutor_steps: 1           # V3.14 要求
+
+  # 测验标准
+  assessment:
+    min_questions: 3
+    recommended_questions: 4
+    question_types:
+      - single_choice
+      - multiple_choice
+      - true_false
+
+    must_have_explanation: true   # 每题必须有解析
+    min_explanation_length: 50    # 解析最少字数
+
+  # 学习目标
+  learning_objectives:
+    min_count: 3
+    recommended_count: 4
+    format: "动词开头（掌握、理解、应用）"
+    examples:
+      - "理解牛顿第二定律的物理意义"
+      - "掌握力的合成与分解方法"
+      - "应用自由落体公式解决实际问题"
+
+  # 设计理念
+  rationale:
+    min_length: 50
+    recommended_length: 80
+    purpose: "说明本章节的教学设计思路和目标"
+
+# 内容防重复标准
+anti_duplication:
+  track_used_simulators: true      # 追踪已使用的模拟器主题
+  track_covered_topics: true       # 追踪已讲解的主题
+  track_used_questions: true       # 追踪已使用的题目
+
+  max_similarity_threshold: 0.3    # 相似度阈值（超过视为重复）
+
+# 整体平衡性
+balance:
+  theory_practice_ratio: 0.6       # 理论vs实践比例 (60%理论 40%实践)
+  assessment_distribution: "均匀"   # 测验分布要均匀
+  difficulty_progression: "渐进"    # 难度要渐进增加
+
+# 图文内容标准
+illustrated_content:
+  min_description_length: 80
+  recommended_description_length: 100
+  image_purpose: "辅助理解，非装饰"
+
+  layout_types:
+    - text_left_image_right
+    - text_right_image_left
+    - text_top_image_bottom
+
+# AI导师步骤标准 (V3.14)
+ai_tutor:
+  required: true                    # 每章至少1个
+  min_per_chapter: 1
+  max_turns: 5                      # 最多对话轮次
+
+  must_have_components:
+    - opening_message               # 开场白
+    - probing_questions            # 探测性问题
+    - diagnostic_focus             # 诊断焦点
+
+  probing_questions:
+    min_count: 2
+    max_count: 4
+    must_have_follow_ups: true     # 必须有追问策略
+
+  diagnostic_focus:
+    min_key_concepts: 3
+    min_common_misconceptions: 2
+
+# 质量评分阈值
+quality_thresholds:
+  pass_score: 75                    # 通过分数
+  excellent_score: 85               # 优秀分数
+
+  retry_threshold: 60               # 低于此分数需重试
+  max_retry_attempts: 3             # 最大重试次数

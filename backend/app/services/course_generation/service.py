@@ -14,8 +14,10 @@ from .supervisor import CourseSupervisor
 from .generator import ChapterGenerator, GeneratorPromptBuilder
 from .models import (
     GenerationState, CourseOutline, ChapterResult, ReviewResult,
-    ReviewStatus, ChapterQualityStandards, ChapterOutline
+    ReviewStatus, ChapterQualityStandards, ChapterOutline,
+    HTMLSimulatorSpec, HTMLSimulatorQualityScore, HTMLSimulatorQualityStandards
 )
+from .standards_loader import get_standards_loader
 from app.services.gemini_service import gemini_service
 from app.services.storage_service import storage_service
 
@@ -31,9 +33,11 @@ class CourseGenerationService:
     - 生成者：根据指令生成单个章节
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
+        self.db = db  # 保存db用于动态阈值计算
         self.supervisor = CourseSupervisor()
-        self.generator = ChapterGenerator()
+        self.generator = ChapterGenerator(db=db)  # 传递db用于模板学习 (2026-02-11)
+        self.standards_loader = get_standards_loader()  # 新增：标准加载器
 
     async def generate_course_stream(
         self,
@@ -82,6 +86,12 @@ class CourseGenerationService:
 
             outline = await self.supervisor.generate_outline(state, system_prompt)
 
+            # === 新增：自动识别学科并记录到状态 ===
+            classification = self.detect_course_subject(course_title, outline)
+            state.subject_classification = classification  # 保存到状态中供后续使用
+
+            logger.info(f"Course classified as '{classification['subject_name']}' with confidence {classification['confidence']:.2f}")
+
             yield {
                 "event": "outline",
                 "data": {
@@ -100,7 +110,8 @@ class CourseGenerationService:
                             }
                             for ch in outline.chapters
                         ]
-                    }
+                    },
+                    "classification": classification  # 新增：返回学科分类信息
                 }
             }
 
@@ -264,15 +275,59 @@ class CourseGenerationService:
                     chapter_dict = self._chapter_to_dict(chapter)
                     chapter_dict = await self._process_chapter_images(chapter_dict, state.course_title)
 
+                    # === Phase 3: 章节质量评分与学习反馈循环 (2026-02-11) ===
+                    quality_score = None
+                    try:
+                        from app.services.learning import ChapterScorer, UnifiedTemplateService
+
+                        scorer = ChapterScorer()
+                        quality_score = scorer.evaluate(chapter_dict)
+
+                        logger.info(f"Chapter '{chapter.title}' quality score: {quality_score.total_score:.1f}/100")
+
+                        # 如果质量达到90+分，保存为模板供future agent学习
+                        if quality_score.total_score >= 90.0 and self.generator.db:
+                            await self._save_chapter_as_template(
+                                chapter=chapter_dict,
+                                quality_score=quality_score,
+                                subject=state.subject_classification.get('subject_id', 'physics') if state.subject_classification else 'physics',
+                                topic=chapter.title
+                            )
+                            logger.info(f"✨ High-quality chapter (score: {quality_score.total_score:.1f}) saved as template for future learning")
+
+                        # 记录评分结果到数据库（用于监控和分析）
+                        if self.generator.db:
+                            template_service = UnifiedTemplateService(self.generator.db)
+                            await template_service.record_quality_evaluation(
+                                content_type='chapter_content',
+                                content_id=chapter.lesson_id,
+                                quality_score=quality_score.total_score,
+                                score_breakdown={
+                                    'depth_score': quality_score.depth_score,
+                                    'structure_score': quality_score.structure_score,
+                                    'visual_score': quality_score.visual_score,
+                                    'teaching_score': quality_score.teaching_score,
+                                    'simulator_score': quality_score.simulator_score,
+                                },
+                                saved_as_template=(quality_score.total_score >= 90.0)
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to evaluate/save chapter quality: {e}")
+                        # 不中断流程，继续生成
+
                     yield {
                         "event": "chapter_complete",
                         "data": {
                             "index": chapter_index,
                             "total": outline.total_chapters,
                             "chapter": chapter_dict,
-                            "attempts": state.current_attempt + 1
+                            "attempts": state.current_attempt + 1,
+                            "quality_score": quality_score.total_score if quality_score else None
                         }
                     }
+
+            # === 后处理：确保至少有一个 ai_tutor 步骤 ===
+            await self._ensure_ai_tutor_steps(state, generator_system_prompt)
 
             # === 阶段3：打包课程 ===
             yield {
@@ -334,14 +389,20 @@ class CourseGenerationService:
                     "title": step.title,
                     "content": step.content,
                     "simulator_spec": {
-                        "mode": step.simulator_spec.mode,
+                        "mode": step.simulator_spec.mode if hasattr(step.simulator_spec, 'mode') else "html",
                         "name": step.simulator_spec.name,
                         "description": step.simulator_spec.description,
-                        "variables": step.simulator_spec.variables,
-                        "custom_code": step.simulator_spec.custom_code
+                        "html_content": (
+                            html_val := step.simulator_spec.html_content if hasattr(step.simulator_spec, 'html_content') else "",
+                            logger.info(f"[DEBUG] Simulator '{step.simulator_spec.name}' html_content length: {len(html_val)}"),
+                            html_val
+                        )[2],
+                        # 兼容旧字段
+                        "custom_code": step.simulator_spec.html_content if hasattr(step.simulator_spec, 'html_content') else ""
                     } if step.simulator_spec else None,
                     "assessment_spec": step.assessment_spec,
-                    "diagram_spec": step.diagram_spec
+                    "diagram_spec": step.diagram_spec,
+                    "ai_spec": step.ai_spec
                 }
                 for step in chapter.script
             ],
@@ -574,7 +635,8 @@ class CourseGenerationService:
                         "course_title": state.course_title,
                         "chapter_title": chapter.title,
                         "learning_objectives": chapter.learning_objectives,
-                        "chapter_type": chapter_outline.chapter_type.value
+                        "chapter_type": chapter_outline.chapter_type.value,
+                        "subject": state.subject_classification.get('subject_id', 'physics') if state.subject_classification else 'physics'
                     },
                     system_prompt=generator_system_prompt,
                     min_length=50,
@@ -613,7 +675,8 @@ class CourseGenerationService:
                                 "step_title": step.title,
                                 "step_type": step.type,
                                 "key_points": step.content.get('key_points', []) if isinstance(step.content, dict) else [],
-                                "learning_objectives": chapter.learning_objectives
+                                "learning_objectives": chapter.learning_objectives,
+                                "subject": state.subject_classification.get('subject_id', 'physics') if state.subject_classification else 'physics'
                             },
                             system_prompt=generator_system_prompt,
                             min_length=150,
@@ -646,7 +709,8 @@ class CourseGenerationService:
                                     "chapter_title": chapter.title,
                                     "step_title": step.title,
                                     "diagram_type": step.diagram_spec.get('type', 'static_diagram'),
-                                    "elements": step.diagram_spec.get('elements', [])
+                                    "elements": step.diagram_spec.get('elements', []),
+                                    "subject": state.subject_classification.get('subject_id', 'physics') if state.subject_classification else 'physics'
                                 },
                                 system_prompt=generator_system_prompt,
                                 min_length=80,
@@ -674,7 +738,8 @@ class CourseGenerationService:
                                 context={
                                     "question": q.get('question', ''),
                                     "correct_answer": q.get('correct', ''),
-                                    "options": q.get('options', [])
+                                    "options": q.get('options', []),
+                                    "subject": state.subject_classification.get('subject_id', 'physics') if state.subject_classification else 'physics'
                                 },
                                 system_prompt=generator_system_prompt,
                                 min_length=30,
@@ -691,6 +756,28 @@ class CourseGenerationService:
                     else:
                         continue
 
+                # === ai_tutor ===
+                elif step.type == 'ai_tutor':
+                    spec = step.ai_spec or {}
+                    if not spec.get('opening_message') or len(spec.get('opening_message', '')) < 10 \
+                       or not spec.get('probing_questions'):
+                        logger.info(f"Generating AI tutor content for step '{step.title}' (attempt {retry+1})...")
+                        step.ai_spec = await self._generate_ai_tutor_content(
+                            context={
+                                "course_title": state.course_title,
+                                "chapter_title": chapter.title,
+                                "step_title": step.title,
+                                "learning_objectives": chapter.learning_objectives
+                            },
+                            system_prompt=generator_system_prompt
+                        )
+                    step_passed = bool(step.ai_spec and step.ai_spec.get('opening_message'))
+                    if step_passed:
+                        logger.info(f"[Step Check] Step {i+1} ai_tutor passed")
+                        break
+                    else:
+                        continue
+
                 # === simulator (只检测description，代码由专门方法处理) ===
                 elif step.type == 'simulator' and step.simulator_spec:
                     desc = step.simulator_spec.description or ''
@@ -702,7 +789,7 @@ class CourseGenerationService:
                                 "course_title": state.course_title,
                                 "chapter_title": chapter.title,
                                 "simulator_name": step.simulator_spec.name,
-                                "variables": step.simulator_spec.variables
+                                "subject": state.subject_classification.get('subject_id', 'physics') if state.subject_classification else 'physics'
                             },
                             system_prompt=generator_system_prompt,
                             min_length=50,
@@ -795,8 +882,41 @@ class CourseGenerationService:
         min_length: int,
         max_length: int
     ) -> str:
-        """生成单个文本内容"""
+        """生成单个文本内容（增强版：注入学习上下文）"""
         from app.services.claude_service import ClaudeService
+        from app.services.learning import UnifiedTemplateService
+
+        # === 学习上下文注入 (2026-02-11: Phase 3 Learning Integration) ===
+        learning_context = ""
+        if self.generator.db:
+            try:
+                template_service = UnifiedTemplateService(self.generator.db)
+
+                # 根据内容类型检索相关模板
+                subject = context.get('subject', 'physics')  # 从context获取学科
+                topic = context.get('chapter_title', '')  # 使用章节标题作为主题
+
+                # 检索高质量章节模板（只需要1-2个例子）
+                templates = await template_service.get_similar_templates(
+                    template_type='chapter_content',
+                    subject=subject,
+                    topic=topic,
+                    min_quality=90.0,  # 只学习90+分的高质量模板
+                    limit=2
+                )
+
+                if templates:
+                    # 分析模板并提取学习insights
+                    patterns = template_service.analyze_patterns(templates)
+                    learning_context = template_service.format_learning_context(
+                        patterns=patterns,
+                        templates=templates,
+                        template_type='chapter_content'
+                    )
+                    logger.info(f"Injected learning context from {len(templates)} high-quality templates (avg score: {patterns['avg_quality_score']:.1f})")
+            except Exception as e:
+                logger.warning(f"Failed to inject learning context: {e}")
+                # 继续生成，不中断流程
 
         # 方案B：强化提示词，强调纯文本输出
         format_warning = """
@@ -814,6 +934,8 @@ class CourseGenerationService:
 学习目标：{', '.join(context.get('learning_objectives', []))}
 章节类型：{context.get('chapter_type', '')}
 
+{learning_context}
+
 要求：
 - {min_length}-{max_length}字
 - 说明本章的教学设计思路
@@ -828,6 +950,8 @@ class CourseGenerationService:
 步骤类型：{context.get('step_type', '')}
 要点：{', '.join(context.get('key_points', []))}
 学习目标：{', '.join(context.get('learning_objectives', []))}
+
+{learning_context}
 
 要求：
 - {min_length}-{max_length}字
@@ -876,7 +1000,6 @@ class CourseGenerationService:
 课程：{context.get('course_title', '')}
 章节：{context.get('chapter_title', '')}
 模拟器名称：{context.get('simulator_name', '')}
-变量：{', '.join([v.get('label', v.get('name', '')) for v in context.get('variables', [])])}
 
 要求：
 - {min_length}-{max_length}字
@@ -899,6 +1022,119 @@ class CourseGenerationService:
         except Exception as e:
             logger.error(f"Failed to generate {content_type}: {e}")
             return f"[内容生成失败: {content_type}]"
+
+    async def _generate_ai_tutor_content(
+        self,
+        context: Dict[str, Any],
+        system_prompt: str
+    ) -> Dict[str, Any]:
+        """生成AI导师步骤内容"""
+        from app.services.claude_service import ClaudeService
+        import json
+
+        course_title = context.get('course_title', '')
+        chapter_title = context.get('chapter_title', '')
+        step_title = context.get('step_title', chapter_title)
+        objectives = ', '.join(context.get('learning_objectives', []))
+
+        prompt = f"""请为以下课程章节生成AI导师对话内容（苏格拉底式提问），用于检验学生对核心概念的理解。
+
+课程：{course_title}
+章节：{chapter_title}
+步骤标题：{step_title}
+学习目标：{objectives}
+
+请输出一个JSON对象，包含以下字段：
+{{
+    "mode": "proactive_assessment",
+    "opening_message": "AI导师的开场白（50-150字，引导学生思考本章核心问题）",
+    "probing_questions": [
+        {{
+            "question": "探测性问题1",
+            "intent": "该问题的意图",
+            "expected_elements": ["期望学生提到的要素1", "要素2"]
+        }},
+        {{
+            "question": "探测性问题2",
+            "intent": "该问题的意图",
+            "expected_elements": ["期望学生提到的要素1", "要素2"]
+        }},
+        {{
+            "question": "探测性问题3",
+            "intent": "该问题的意图",
+            "expected_elements": ["期望学生提到的要素1", "要素2"]
+        }}
+    ],
+    "diagnostic_focus": {{
+        "key_concepts": ["本章核心概念1", "核心概念2", "核心概念3"],
+        "common_misconceptions": ["常见误区1", "常见误区2"]
+    }},
+    "max_turns": 6
+}}
+
+要求：
+- opening_message 要有亲和力，引导学生思考
+- probing_questions 至少3个，由浅入深
+- diagnostic_focus 中的 key_concepts 和 common_misconceptions 要与学习目标相关
+- 请直接输出JSON，不要有其他内容"""
+
+        try:
+            claude_service = ClaudeService()
+            response = await claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=1000
+            )
+
+            # 尝试解析JSON
+            text = response.strip()
+            # 移除可能的 ```json ``` 包装
+            if text.startswith('```'):
+                text = text.split('\n', 1)[1] if '\n' in text else text[3:]
+            if text.endswith('```'):
+                text = text.rsplit('```', 1)[0]
+            text = text.strip()
+
+            ai_spec = json.loads(text)
+
+            # 确保必要字段
+            if 'max_turns' not in ai_spec:
+                ai_spec['max_turns'] = 6
+            if 'mode' not in ai_spec:
+                ai_spec['mode'] = 'proactive_assessment'
+
+            logger.info(f"AI tutor content generated successfully for '{step_title}'")
+            return ai_spec
+
+        except Exception as e:
+            logger.error(f"Failed to generate AI tutor content: {e}, using fallback")
+            # Fallback: 基于章节标题生成最小可用默认内容
+            return {
+                "mode": "proactive_assessment",
+                "opening_message": f"同学你好！我们刚刚学习了「{chapter_title}」的内容。在继续之前，我想通过几个问题来帮助你巩固理解。请用你自己的话来回答，不需要追求标准答案。",
+                "probing_questions": [
+                    {
+                        "question": f"你能用自己的话解释一下「{chapter_title}」中最核心的概念是什么吗？",
+                        "intent": "检验学生对核心概念的基本理解",
+                        "expected_elements": ["核心概念的定义", "基本原理"]
+                    },
+                    {
+                        "question": f"在「{chapter_title}」中，你觉得哪个知识点最容易被误解？为什么？",
+                        "intent": "探测学生对常见误区的认识",
+                        "expected_elements": ["常见误区", "正确理解"]
+                    },
+                    {
+                        "question": f"如果要把「{chapter_title}」的知识应用到实际场景中，你会怎么做？",
+                        "intent": "检验学生的应用能力",
+                        "expected_elements": ["实际应用场景", "操作步骤"]
+                    }
+                ],
+                "diagnostic_focus": {
+                    "key_concepts": [chapter_title],
+                    "common_misconceptions": ["概念混淆", "理解片面"]
+                },
+                "max_turns": 6
+            }
 
     async def _generate_simulator_codes(
         self,
@@ -938,36 +1174,28 @@ class CourseGenerationService:
         """
         from .models import ChapterResult
 
+        # 构建章节上下文
+        chapter_context = f"""
+课程：{state.course_title}
+章节：{chapter.title}
+学习目标：{', '.join(chapter.learning_objectives)}
+章节主题：{chapter_outline.suggested_simulator if hasattr(chapter_outline, 'suggested_simulator') else chapter.title}
+"""
+
         # 是否使用递进式生成（新策略）
         use_progressive = True
 
         for step_idx, step in enumerate(chapter.script):
             if step.type == 'simulator' and step.simulator_spec:
-                # 方案C：如果变量为空或太少，添加默认变量
-                if not step.simulator_spec.variables or len(step.simulator_spec.variables) < 2:
-                    logger.warning(f"Simulator '{step.simulator_spec.name}' has insufficient variables, adding defaults...")
-                    step.simulator_spec.variables = self._get_default_variables(
-                        step.simulator_spec.name,
-                        step.simulator_spec.description,
-                        chapter.title
-                    )
-
-                code = step.simulator_spec.custom_code or ""
+                code = step.simulator_spec.html_content or ""
                 code_lines = len([l for l in code.split('\n') if l.strip()])
 
                 # 如果代码为空或太短，生成新代码
                 if code_lines < 20:
-                    logger.info(f"Generating code for simulator '{step.simulator_spec.name}'...")
+                    logger.info(f"Generating HTML simulator: '{step.simulator_spec.name}'")
 
-                    # 构建章节上下文
-                    chapter_context = f"""
-课程：{state.course_title}
-章节：{chapter.title}
-学习目标：{', '.join(chapter.learning_objectives)}
-模拟器主题：{chapter_outline.suggested_simulator or step.simulator_spec.description}
-"""
-
-                    if use_progressive:
+                    # ✅ HTML模拟器生成已启用 (2026-02-11)
+                    if use_progressive:  # 启用HTML生成
                         # ========== 递进式生成（新策略）==========
                         logger.info(f"Using progressive generation for '{step.simulator_spec.name}'...")
 
@@ -976,7 +1204,6 @@ class CourseGenerationService:
                             async for event in self.generator.generate_simulator_code_progressive(
                                 simulator_name=step.simulator_spec.name,
                                 simulator_description=step.simulator_spec.description,
-                                variables=step.simulator_spec.variables,
                                 chapter_context=chapter_context,
                                 system_prompt=generator_system_prompt
                             ):
@@ -996,216 +1223,273 @@ class CourseGenerationService:
                                     result_code = event["code"]
 
                             if result_code:
-                                step.simulator_spec.custom_code = result_code
+                                step.simulator_spec.html_content = result_code
                                 new_lines = len([l for l in result_code.split('\n') if l.strip()])
                                 logger.info(f"Progressive generation completed: {new_lines} lines")
 
-                                # 质量评分检查
-                                quality_passed, quality_score, quality_report = self.generator.validate_code_quality(
+                                # === 动态阈值计算 (2026-02-11) ===
+                                from .template_service import TemplateService
+                                template_service = TemplateService(self.db)
+                                thresholds = await template_service.calculate_dynamic_thresholds(subject="physics")
+
+                                dynamic_pass_threshold = thresholds['pass_threshold']
+                                dynamic_save_threshold = thresholds['save_threshold']
+
+                                logger.info(
+                                    f"Dynamic thresholds - Phase: {thresholds['phase']}, "
+                                    f"Pass: {dynamic_pass_threshold:.1f}, Save: {dynamic_save_threshold:.1f}, "
+                                    f"Templates: {thresholds['template_count']}, Avg: {thresholds['avg_quality']:.1f}"
+                                )
+
+                                # HTML质量评分检查 (使用动态阈值)
+                                quality_passed, quality_score, quality_report = self.generator.validate_html_quality(
                                     code=result_code,
-                                    variables=step.simulator_spec.variables,
-                                    threshold=70
+                                    threshold=dynamic_pass_threshold
                                 )
 
                                 if quality_passed:
                                     logger.info(f"Simulator '{step.simulator_spec.name}' quality score: {quality_score.total_score}/100 - PASSED")
+
+                                    # === 质量反馈循环：使用动态保存阈值 ===
+                                    if quality_score.total_score >= dynamic_save_threshold:
+                                        try:
+                                            await self._save_simulator_as_template(
+                                                code=result_code,
+                                                spec=step.simulator_spec,
+                                                quality_score=quality_score,
+                                                subject="physics",  # TODO: 从课程元数据获取
+                                                topic=step.simulator_spec.name
+                                            )
+                                            logger.info(
+                                                f"✨ High-quality simulator (score: {quality_score.total_score}, "
+                                                f"threshold: {dynamic_save_threshold:.1f}) saved as template"
+                                            )
+                                        except Exception as e:
+                                            logger.error(f"Failed to save simulator as template: {e}")
+                                    else:
+                                        logger.info(
+                                            f"Score {quality_score.total_score} below save threshold "
+                                            f"{dynamic_save_threshold:.1f}, not saved as template"
+                                        )
                                 else:
-                                    logger.warning(f"Simulator '{step.simulator_spec.name}' quality score: {quality_score.total_score}/100 - FAILED, using fallback")
-                                    step.simulator_spec.custom_code = self._get_fallback_simulator_code(
-                                        step.simulator_spec.name,
-                                        step.simulator_spec.variables
-                                    )
+                                    logger.warning(f"Simulator '{step.simulator_spec.name}' quality score: {quality_score.total_score}/100 - FAILED")
+                                    # 注意：质量不合格时，保留当前生成的代码（不使用fallback）
+                                    logger.info(f"Using generated code despite low quality score")
 
                         except Exception as e:
                             logger.error(f"Progressive generation failed: {e}")
-                            step.simulator_spec.custom_code = self._get_fallback_simulator_code(
-                                step.simulator_spec.name,
-                                step.simulator_spec.variables
-                            )
+                            # 只有在html_content为空时才是真正的失败，否则只是模板保存失败
+                            if not step.simulator_spec.html_content:
+                                logger.warning(f"Simulator generation truly failed, html_content is empty")
+                            else:
+                                logger.info(f"Simulator code generated successfully ({len(step.simulator_spec.html_content)} chars), only template saving failed")
 
-                    else:
-                        # ========== 原有生成逻辑（保留作为备选）==========
-                        error_history: List[Dict[str, Any]] = []
-                        max_simulator_retries = 3
-
-                        for retry in range(max_simulator_retries):
-                            try:
-                                # 如果有错误历史，获取调整后的提示词
-                                additional_prompt = ""
-                                if error_history:
-                                    check_result = await self.supervisor.check_step_immediately(
-                                        state=state,
-                                        chapter=chapter,
-                                        step_index=step_idx,
-                                        previous_errors=error_history
-                                    )
-                                    additional_prompt = check_result.get('adjusted_prompt', '')
-
-                                # 单独生成模拟器代码
-                                new_code = await self.generator.generate_simulator_code(
-                                    simulator_name=step.simulator_spec.name,
-                                    simulator_description=step.simulator_spec.description,
-                                    variables=step.simulator_spec.variables,
-                                    chapter_context=chapter_context,
-                                    system_prompt=generator_system_prompt,
-                                    additional_prompt=additional_prompt
-                                )
-
-                                if new_code:
-                                    step.simulator_spec.custom_code = new_code
-                                    new_lines = len([l for l in new_code.split('\n') if l.strip()])
-                                    logger.info(f"Simulator code generated: {new_lines} lines")
-
-                                    # === 碎片化检查：立即检查生成的代码 ===
-                                    check_result = await self.supervisor.check_step_immediately(
-                                        state=state,
-                                        chapter=chapter,
-                                        step_index=step_idx,
-                                        previous_errors=error_history
-                                    )
-
-                                    if check_result['approved']:
-                                        # === 新增：质量评分检查 ===
-                                        quality_passed, quality_score, quality_report = self.generator.validate_code_quality(
-                                            code=new_code,
-                                            variables=step.simulator_spec.variables,
-                                            threshold=70  # 质量阈值
-                                        )
-
-                                        if quality_passed:
-                                            logger.info(f"Simulator '{step.simulator_spec.name}' passed check and quality score: {quality_score.total_score}/100")
-                                            break
-                                        else:
-                                            # 质量评分不通过，记录问题并重试
-                                            logger.warning(f"Simulator quality score too low: {quality_score.total_score}/100")
-                                            error_history.append({
-                                                'retry': retry,
-                                                'issues': quality_score.issues,
-                                                'error_type': 'low_quality_score',
-                                                'quality_score': quality_score.total_score,
-                                                'quality_report': quality_report
-                                            })
-
-                                            if retry < max_simulator_retries - 1:
-                                                logger.info(f"Retrying due to low quality score ({retry + 1}/{max_simulator_retries})...")
-                                                continue
-                                            else:
-                                                # 最后一次重试，接受当前代码
-                                                logger.warning(f"Accepting code with quality score {quality_score.total_score}/100 after {max_simulator_retries} retries")
-                                                break
-                                    else:
-                                        # 检查失败，记录错误
-                                        error_history.append({
-                                            'retry': retry,
-                                            'issues': check_result['issues'],
-                                            'error_type': check_result.get('error_type')
-                                        })
-
-                                        if retry < max_simulator_retries - 1:
-                                            # 让AI决定是修改还是重新生成
-                                            decision = await self.supervisor.get_revision_or_regenerate_decision(
-                                                state=state,
-                                                chapter=chapter,
-                                                step_index=step_idx,
-                                                check_result=check_result
-                                            )
-
-                                            logger.info(f"AI decision: {decision['decision']} - {decision['reason']}")
-
-                                            if decision['decision'] == 'revise':
-                                                # 修改模式：保留部分代码，只修改问题部分
-                                                # 这里通过 additional_prompt 传递修改指导
-                                                pass
-                                            # regenerate 模式会在下一次循环重新生成
-
-                                            continue
-                                        else:
-                                            logger.warning(f"Simulator check failed after {max_simulator_retries} retries, using current version")
-
-                                    # 检查是否是 fallback 代码
-                                    if 'Fallback 模拟器' in new_code or '基础模拟器' in new_code:
-                                        if retry < max_simulator_retries - 1:
-                                            error_history.append({
-                                                'retry': retry,
-                                                'issues': ['生成了 fallback 代码'],
-                                                'error_type': 'fallback_code'
-                                            })
-                                            logger.warning(f"Got fallback code, retrying ({retry + 1}/{max_simulator_retries})...")
-                                            continue
-                                        else:
-                                            logger.warning(f"Using fallback code after {max_simulator_retries} retries")
-                                    break
-
-                            except Exception as e:
-                                error_msg = str(e)
-                                logger.error(f"Failed to generate simulator code (attempt {retry + 1}): {error_msg}")
-
-                                # 解析错误类型
-                                if error_msg.startswith('invalid_api:'):
-                                    error_type = 'invalid_api'
-                                elif error_msg.startswith('missing_function:'):
-                                    error_type = 'missing_function'
-                                else:
-                                    error_type = 'exception'
-
-                                error_history.append({
-                                    'retry': retry,
-                                    'issues': [error_msg],
-                                    'error_type': error_type
-                                })
-                                if retry < max_simulator_retries - 1:
-                                    continue
-                                # 最后一次重试失败，使用 fallback 代码
-                                step.simulator_spec.custom_code = self._get_fallback_simulator_code(
-                                    step.simulator_spec.name,
-                                    step.simulator_spec.variables
-                                )
+                    # 旧的备选路径已删除（2026-02-11）- 现在统一使用 progressive 生成
 
         yield {"event": "_chapter_done", "data": {"chapter": chapter}}
 
-    def _get_default_variables(self, name: str, description: str, chapter_title: str) -> list:
+    async def _save_simulator_as_template(
+        self,
+        code: str,
+        spec: 'HTMLSimulatorSpec',
+        quality_score: 'HTMLSimulatorQualityScore',
+        subject: str,
+        topic: str
+    ):
         """
-        方案C：根据模拟器名称和描述生成默认变量
+        保存高质量模拟器作为模板，用于future agent学习 (2026-02-11)
 
-        当骨架生成的变量为空或不足时，提供合理的默认变量（2个）
+        Args:
+            code: HTML代码
+            spec: 模拟器规格
+            quality_score: 质量评分
+            subject: 学科 (如 "physics", "mathematics")
+            topic: 主题 (如 spec.name的标准化版本)
         """
-        # 通用默认变量模板（2个）
-        default_vars = [
-            {"name": "param1", "label": "参数1", "min": 0, "max": 100, "default": 50, "step": 1, "unit": ""},
-            {"name": "param2", "label": "参数2", "min": 0, "max": 100, "default": 50, "step": 1, "unit": ""},
+        from app.models.models import SimulatorTemplate
+        from sqlalchemy import select
+        import re
+
+        if not self.generator.db:
+            logger.warning("No database session available, cannot save template")
+            return
+
+        # 标准化topic名称 (移除特殊字符，转为小写下划线)
+        topic_normalized = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]+', '_', topic).lower().strip('_')
+
+        # 检查是否已存在同名模板
+        result = await self.generator.db.execute(
+            select(SimulatorTemplate).where(
+                SimulatorTemplate.subject == subject,
+                SimulatorTemplate.topic == topic_normalized
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing and existing.quality_score >= quality_score.total_score:
+            logger.info(f"Template already exists with score {existing.quality_score}, skipping save")
+            return
+
+        # 提取代码指标
+        code_lines = len([l for l in code.split('\n') if l.strip()])
+        has_setup_update = 'requestAnimationFrame' in code  # 简单检测动画模式
+        variable_count = 0  # HTML模拟器不使用variables，设为0
+
+        # 提取视觉元素 (简单分析)
+        visual_elements = []
+        if 'arc(' in code or 'circle' in code.lower():
+            visual_elements.append('circles')
+        if 'fillRect' in code or 'strokeRect' in code:
+            visual_elements.append('rectangles')
+        if 'fillText' in code or 'strokeText' in code:
+            visual_elements.append('labels')
+        if 'beginPath' in code and 'lineTo' in code:
+            visual_elements.append('paths')
+
+        # 构建元数据
+        metadata = {
+            "common_apis": self._extract_canvas_apis(code),
+            "color_scheme": self._extract_colors(code),
+            "animation_patterns": [],
+            "interaction_types": [],
+            "structure_insights": f"Score: {quality_score.total_score}/100"
+        }
+
+        if 'requestAnimationFrame' in code:
+            metadata["animation_patterns"].append("requestAnimationFrame")
+        if 'addEventListener' in code:
+            if "'mousemove'" in code or '"mousemove"' in code:
+                metadata["interaction_types"].append("mouse_tracking")
+            if "'click'" in code or '"click"' in code:
+                metadata["interaction_types"].append("mouse_click")
+        if 'type="range"' in code:
+            metadata["interaction_types"].append("slider_control")
+
+        # 创建或更新模板
+        if existing:
+            # 更新现有模板
+            existing.code = code
+            existing.quality_score = quality_score.total_score
+            existing.line_count = code_lines
+            existing.variable_count = variable_count
+            existing.has_setup_update = has_setup_update
+            existing.visual_elements = visual_elements
+            existing.template_metadata = metadata
+            logger.info(f"Updated template {subject}/{topic_normalized} with improved quality score")
+        else:
+            # 创建新模板
+            new_template = SimulatorTemplate(
+                subject=subject,
+                topic=topic_normalized,
+                code=code,
+                quality_score=quality_score.total_score,
+                line_count=code_lines,
+                variable_count=variable_count,
+                has_setup_update=has_setup_update,
+                visual_elements=visual_elements,
+                template_metadata=metadata
+            )
+            self.generator.db.add(new_template)
+            logger.info(f"Created new template {subject}/{topic_normalized} with score {quality_score.total_score}")
+
+        await self.generator.db.commit()
+
+    def _extract_canvas_apis(self, code: str) -> list:
+        """提取代码中使用的Canvas API"""
+        apis = []
+        common_apis = [
+            'fillRect', 'strokeRect', 'clearRect', 'arc', 'beginPath', 'closePath',
+            'moveTo', 'lineTo', 'stroke', 'fill', 'fillText', 'strokeText',
+            'save', 'restore', 'translate', 'rotate', 'scale'
         ]
+        for api in common_apis:
+            if api + '(' in code:
+                apis.append(api)
+        return apis[:15]  # 最多15个
 
-        # 根据关键词匹配更合适的变量
-        keywords = (name + " " + description + " " + chapter_title).lower()
+    def _extract_colors(self, code: str) -> list:
+        """提取代码中使用的颜色值"""
+        import re
+        # 匹配 #RRGGBB 格式
+        hex_colors = re.findall(r'#[0-9A-Fa-f]{6}', code)
+        # 匹配 rgb() 格式
+        rgb_colors = re.findall(r'rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)', code)
+        # 去重并限制数量
+        all_colors = list(set(hex_colors + rgb_colors))
+        return all_colors[:8]  # 最多8个颜色
 
-        if any(k in keywords for k in ["速度", "speed", "运动", "移动"]):
-            default_vars[0] = {"name": "speed", "label": "速度", "min": 1, "max": 100, "default": 50, "step": 1, "unit": "m/s"}
-        if any(k in keywords for k in ["质量", "mass", "重量"]):
-            default_vars[1] = {"name": "mass", "label": "质量", "min": 1, "max": 100, "default": 10, "step": 1, "unit": "kg"}
-        if any(k in keywords for k in ["力", "force", "推力"]) and len(default_vars) < 3:
-            default_vars.append({"name": "force", "label": "力", "min": 0, "max": 100, "default": 20, "step": 1, "unit": "N"})
-        if any(k in keywords for k in ["比例", "ratio", "百分比"]):
-            default_vars[0] = {"name": "ratio", "label": "比例", "min": 0, "max": 100, "default": 50, "step": 5, "unit": "%"}
-        if any(k in keywords for k in ["温度", "temperature", "热"]):
-            default_vars[1] = {"name": "temperature", "label": "温度", "min": 0, "max": 100, "default": 25, "step": 1, "unit": "°C"}
-        if any(k in keywords for k in ["距离", "distance", "长度"]) and len(default_vars) < 3:
-            default_vars.append({"name": "distance", "label": "距离", "min": 1, "max": 100, "default": 50, "step": 1, "unit": "m"})
-        if any(k in keywords for k in ["角度", "angle", "旋转"]):
-            default_vars[0] = {"name": "angle", "label": "角度", "min": 0, "max": 360, "default": 45, "step": 5, "unit": "°"}
-        if any(k in keywords for k in ["频率", "frequency", "hz"]):
-            default_vars[1] = {"name": "frequency", "label": "频率", "min": 1, "max": 100, "default": 10, "step": 1, "unit": "Hz"}
-        if any(k in keywords for k in ["时间", "time", "周期"]) and len(default_vars) < 3:
-            default_vars.append({"name": "time_param", "label": "时间", "min": 1, "max": 60, "default": 10, "step": 1, "unit": "s"})
+    async def _ensure_ai_tutor_steps(self, state: 'GenerationState', generator_system_prompt: str):
+        """后处理：确保课程中至少有一个 ai_tutor 步骤"""
+        from .models import ChapterStep
+        import uuid
 
-        return default_vars
+        # 检查是否已有 ai_tutor 步骤
+        has_ai_tutor = False
+        for chapter in state.completed_chapters:
+            for step in chapter.script:
+                if step.type == 'ai_tutor':
+                    has_ai_tutor = True
+                    break
+            if has_ai_tutor:
+                break
 
-    def _get_fallback_simulator_code(self, name: str, variables: list) -> str:
-        """生成教育性 fallback 模拟器代码（委托给 generator）"""
-        return self.generator._get_fallback_code(name, variables)
+        if has_ai_tutor:
+            logger.info("[PostProcess] Course already has ai_tutor step(s), skipping injection")
+            return
+
+        logger.info("[PostProcess] No ai_tutor step found, injecting one...")
+
+        # 选择第一个含 assessment 的章节，在其第一个 assessment 前注入
+        target_chapter = None
+        insert_index = None
+
+        for chapter in state.completed_chapters:
+            for i, step in enumerate(chapter.script):
+                if step.type == 'assessment':
+                    target_chapter = chapter
+                    insert_index = i
+                    break
+            if target_chapter:
+                break
+
+        # 如果没有含 assessment 的章节，选择最后一个章节的末尾
+        if not target_chapter:
+            target_chapter = state.completed_chapters[-1] if state.completed_chapters else None
+            if target_chapter:
+                insert_index = len(target_chapter.script)
+
+        if not target_chapter:
+            logger.warning("[PostProcess] No chapters available for ai_tutor injection")
+            return
+
+        # 生成 ai_tutor 内容
+        ai_spec = await self._generate_ai_tutor_content(
+            context={
+                "course_title": state.course_title,
+                "chapter_title": target_chapter.title,
+                "step_title": f"AI导师：{target_chapter.title}概念检测",
+                "learning_objectives": target_chapter.learning_objectives
+            },
+            system_prompt=generator_system_prompt
+        )
+
+        # 创建 ai_tutor 步骤
+        ai_tutor_step = ChapterStep(
+            step_id=str(uuid.uuid4()),
+            type='ai_tutor',
+            title=f'AI导师：{target_chapter.title}概念检测',
+            ai_spec=ai_spec
+        )
+
+        # 注入步骤
+        target_chapter.script.insert(insert_index, ai_tutor_step)
+        target_chapter.total_steps = len(target_chapter.script)
+
+        logger.info(f"[PostProcess] Injected ai_tutor step into chapter '{target_chapter.title}' at position {insert_index}")
 
     def _get_default_chapter_skeleton(self, chapter_outline: 'ChapterOutline', chapter_index: int) -> 'ChapterResult':
         """生成默认章节骨架（当JSON解析多次失败时使用）"""
-        from .models import ChapterResult, ChapterStep, SimulatorSpec
+        from .models import ChapterResult, ChapterStep, HTMLSimulatorSpec
         import uuid
 
         # 创建基础步骤
@@ -1233,15 +1517,28 @@ class CourseGenerationService:
                 step_id=str(uuid.uuid4()),
                 type='simulator',
                 title=f'{chapter_outline.title} - 互动模拟',
-                simulator_spec=SimulatorSpec(
+                simulator_spec=HTMLSimulatorSpec(
                     name=chapter_outline.suggested_simulator or f'{chapter_outline.title}模拟器',
                     description='',
-                    variables=[
-                        {'name': 'param1', 'label': '参数1', 'min': 0, 'max': 100, 'default': 50, 'step': 1, 'unit': ''},
-                        {'name': 'param2', 'label': '参数2', 'min': 0, 'max': 100, 'default': 50, 'step': 1, 'unit': ''}
-                    ],
-                    custom_code=''
+                    html_content='',
+                    mode='html'
                 )
+            ),
+            ChapterStep(
+                step_id=str(uuid.uuid4()),
+                type='ai_tutor',
+                title=f'{chapter_outline.title} - AI导师',
+                ai_spec={
+                    "mode": "proactive_assessment",
+                    "opening_message": "",
+                    "probing_questions": [
+                        {"question": "问题1", "intent": "检验理解", "expected_elements": ["要素1"]},
+                        {"question": "问题2", "intent": "深入探测", "expected_elements": ["要素1"]},
+                        {"question": "问题3", "intent": "应用检测", "expected_elements": ["要素1"]}
+                    ],
+                    "diagnostic_focus": {"key_concepts": [chapter_outline.title], "common_misconceptions": ["误区1"]},
+                    "max_turns": 6
+                }
             ),
             ChapterStep(
                 step_id=str(uuid.uuid4()),
@@ -1331,26 +1628,15 @@ class CourseGenerationService:
 
                 # 如果是模拟器，需要单独生成代码
                 if new_step.type == 'simulator' and new_step.simulator_spec:
-                    code = new_step.simulator_spec.custom_code or ""
+                    code = new_step.simulator_spec.html_content or ""
                     code_lines = len([l for l in code.split('\n') if l.strip()])
 
                     if code_lines < 20:
-                        chapter_outline = state.outline.chapters[chapter_index]
-                        chapter_context = f"""
-课程：{state.course_title}
-章节：{chapter.title}
-学习目标：{', '.join(chapter.learning_objectives)}
-模拟器主题：{chapter_outline.suggested_simulator or new_step.simulator_spec.description}
-"""
-                        new_code = await self.generator.generate_simulator_code(
-                            simulator_name=new_step.simulator_spec.name,
-                            simulator_description=new_step.simulator_spec.description,
-                            variables=new_step.simulator_spec.variables,
-                            chapter_context=chapter_context,
-                            system_prompt=generator_system_prompt
-                        )
-                        if new_code:
-                            new_step.simulator_spec.custom_code = new_code
+                        # TODO: 这里应该使用 progressive 生成方法
+                        # 暂时跳过，因为旧的 generate_simulator_code 方法已删除
+                        logger.warning(f"Simulator code too short ({code_lines} lines), but skipping regeneration in fix flow")
+                        # chapter_outline = state.outline.chapters[chapter_index]
+                        # ... (旧代码已删除)
 
                 # 替换原步骤
                 chapter.script[step_index] = new_step
@@ -1364,3 +1650,246 @@ class CourseGenerationService:
                 state.increment_step_retry(step_index)
 
         return fixed_steps
+
+    # ==================== 学科分类系统 ====================
+
+    def detect_course_subject(self, course_title: str, outline: Optional[CourseOutline] = None) -> Dict[str, Any]:
+        """
+        识别课程所属学科（基于标准文档）
+
+        Args:
+            course_title: 课程标题
+            outline: 课程大纲（可选）
+
+        Returns:
+            {
+                'subject_id': 学科ID (physics, chemistry, etc.),
+                'subject_name': 学科名称 (物理学, 化学, etc.),
+                'confidence': 置信度 (0-1),
+                'matched_keywords': 匹配的关键词列表,
+                'color_scheme': 推荐配色方案,
+                'visualization_elements': 推荐可视化元素
+            }
+        """
+        # 收集文本信息
+        text = course_title.lower()
+        if outline:
+            text += " " + outline.description.lower()
+            text += " " + " ".join(outline.core_concepts).lower()
+            for ch in outline.chapters[:3]:  # 只取前3章
+                text += " " + ch.title.lower()
+                text += " " + " ".join(ch.key_concepts).lower()
+
+        # 学科关键词映射（扩展版）
+        subject_keywords = {
+            'physics': {
+                'name': '物理学',
+                'keywords': [
+                    '物理', '力学', '运动', '能量', '电磁', '光学', '热力学', '波动',
+                    'physics', 'force', 'motion', 'energy', 'electromagnetic', 'optics',
+                    '牛顿', '加速度', '速度', '质量', '摩擦', '引力', '惯性'
+                ]
+            },
+            'chemistry': {
+                'name': '化学',
+                'keywords': [
+                    '化学', '反应', '分子', '原子', '化合', '元素', '溶液', '酸碱',
+                    'chemistry', 'reaction', 'molecule', 'atom', 'compound', 'element',
+                    '氧化', '还原', '催化', '离子', '价态'
+                ]
+            },
+            'biology': {
+                'name': '生物学',
+                'keywords': [
+                    '生物', '细胞', '基因', '进化', '生态', '遗传', '蛋白质', 'dna',
+                    'biology', 'cell', 'gene', 'evolution', 'ecology', 'protein',
+                    '生命', '器官', '系统', '代谢', '光合作用'
+                ]
+            },
+            'mathematics': {
+                'name': '数学',
+                'keywords': [
+                    '数学', '函数', '方程', '几何', '代数', '微积分', '统计', '概率',
+                    'math', 'function', 'equation', 'geometry', 'algebra', 'calculus',
+                    '三角', '向量', '矩阵', '导数', '积分'
+                ]
+            },
+            'history': {
+                'name': '历史',
+                'keywords': [
+                    '历史', '朝代', '事件', '文化', '革命', '战争', '帝国', '文明',
+                    'history', 'dynasty', 'event', 'civilization', 'war', 'revolution',
+                    '古代', '中世纪', '近代', '现代', '世纪'
+                ]
+            },
+            'geography': {
+                'name': '地理',
+                'keywords': [
+                    '地理', '地形', '气候', '地球', '地质', '地图', '板块', '环境',
+                    'geography', 'terrain', 'climate', 'earth', 'geology', 'plate',
+                    '河流', '山脉', '海洋', '大陆', '纬度', '经度'
+                ]
+            },
+            'computer_science': {
+                'name': '计算机科学',
+                'keywords': [
+                    '编程', '算法', '计算机', '代码', '软件', '数据结构', '网络',
+                    'programming', 'algorithm', 'computer', 'code', 'software', 'network',
+                    'python', 'java', '编码', '调试', '数据库', 'ai', '人工智能'
+                ]
+            },
+            'medicine': {
+                'name': '医学',
+                'keywords': [
+                    '医学', '疾病', '治疗', '人体', '解剖', '药物', '病理', '诊断',
+                    'medicine', 'disease', 'treatment', 'anatomy', 'drug', 'pathology',
+                    '症状', '器官', '手术', '医疗', '健康'
+                ]
+            }
+        }
+
+        # 计算每个学科的匹配分数
+        scores = {}
+        matched = {}
+
+        for subject_id, subject_info in subject_keywords.items():
+            score = 0
+            keywords_matched = []
+
+            for keyword in subject_info['keywords']:
+                if keyword in text:
+                    score += 1
+                    keywords_matched.append(keyword)
+
+            if score > 0:
+                scores[subject_id] = score
+                matched[subject_id] = keywords_matched
+
+        # 如果没有匹配，返回默认学科（physics）
+        if not scores:
+            logger.info(f"No subject keywords matched for '{course_title}', using default 'physics'")
+            return {
+                'subject_id': 'physics',
+                'subject_name': '物理学',
+                'confidence': 0.0,
+                'matched_keywords': [],
+                'color_scheme': self.standards_loader.get_subject_color_scheme('physics'),
+                'visualization_elements': self.standards_loader.get_recommended_elements_for_subject('physics')
+            }
+
+        # 获取得分最高的学科
+        best_subject_id = max(scores, key=scores.get)
+        best_score = scores[best_subject_id]
+        total_keywords = len(subject_keywords[best_subject_id]['keywords'])
+
+        # 计算置信度
+        confidence = min(1.0, best_score / (total_keywords * 0.3))  # 30%的关键词匹配即高置信度
+
+        logger.info(f"Detected subject '{best_subject_id}' for '{course_title}' (score: {best_score}, confidence: {confidence:.2f})")
+
+        return {
+            'subject_id': best_subject_id,
+            'subject_name': subject_keywords[best_subject_id]['name'],
+            'confidence': confidence,
+            'matched_keywords': matched[best_subject_id],
+            'color_scheme': self.standards_loader.get_subject_color_scheme(best_subject_id),
+            'visualization_elements': self.standards_loader.get_recommended_elements_for_subject(best_subject_id)
+        }
+
+    async def auto_classify_and_update_course(
+        self,
+        course_id: str,
+        course_title: str,
+        outline: Optional[CourseOutline] = None
+    ) -> Dict[str, Any]:
+        """
+        自动识别课程学科并更新到数据库
+
+        Args:
+            course_id: 课程ID
+            course_title: 课程标题
+            outline: 课程大纲（可选）
+
+        Returns:
+            分类结果字典
+        """
+        # 识别学科
+        classification = self.detect_course_subject(course_title, outline)
+
+        # TODO: 将分类结果保存到数据库
+        # 示例代码（需要根据实际数据库结构调整）:
+        # await db.update_course_subject(course_id, classification['subject_id'])
+
+        logger.info(f"Course '{course_id}' classified as '{classification['subject_name']}' (confidence: {classification['confidence']:.2f})")
+
+        return classification
+
+    async def _save_chapter_as_template(
+        self,
+        chapter: Dict[str, Any],
+        quality_score: 'ChapterQualityScore',
+        subject: str,
+        topic: str
+    ):
+        """
+        保存高质量章节作为模板，用于future agent学习 (2026-02-11: Phase 3)
+
+        Args:
+            chapter: 章节内容字典
+            quality_score: ChapterQualityScore对象
+            subject: 学科 (如 "physics", "mathematics")
+            topic: 主题 (章节标题)
+        """
+        from app.services.learning import UnifiedTemplateService, ChapterScorer
+        import re
+
+        if not self.generator.db:
+            logger.warning("No database session available, cannot save chapter template")
+            return
+
+        try:
+            template_service = UnifiedTemplateService(self.generator.db)
+            scorer = ChapterScorer()
+
+            # 标准化topic名称 (移除特殊字符，转为小写下划线)
+            topic_normalized = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]+', '_', topic).lower().strip('_')
+
+            # 提取章节元数据用于学习
+            metadata = scorer.extract_metadata(chapter)
+
+            # 添加额外的学习insights
+            metadata['quality_breakdown'] = {
+                'depth_score': quality_score.depth_score,
+                'structure_score': quality_score.structure_score,
+                'visual_score': quality_score.visual_score,
+                'teaching_score': quality_score.teaching_score,
+                'simulator_score': quality_score.simulator_score,
+            }
+
+            # 保存评分详情
+            score_breakdown = {
+                'depth_score': quality_score.depth_score,
+                'structure_score': quality_score.structure_score,
+                'visual_score': quality_score.visual_score,
+                'teaching_score': quality_score.teaching_score,
+                'simulator_score': quality_score.simulator_score,
+            }
+
+            # 保存为模板
+            await template_service.save_as_template(
+                template_type='chapter_content',
+                subject=subject,
+                topic=topic_normalized,
+                content=chapter,  # 完整章节内容
+                quality_score=quality_score.total_score,
+                score_breakdown=score_breakdown,
+                metadata=metadata,
+                difficulty_level=chapter.get('complexity_level', 'standard')
+            )
+
+            logger.info(f"Chapter template saved: {subject}/{topic_normalized} (score: {quality_score.total_score:.1f})")
+
+        except Exception as e:
+            logger.error(f"Failed to save chapter as template: {e}")
+            import traceback
+            logger.error(traceback.format_exc())

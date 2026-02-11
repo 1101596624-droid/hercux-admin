@@ -1,0 +1,187 @@
+生成完整HTML模拟器。只输出完整的HTML代码，不要任何markdown标记或解释。
+
+【模拟器】{simulator_name}
+【描述】{simulator_description}
+【画布尺寸】800×500（管理端预览），运行时CSS自适应
+【变量】{variables_desc}
+{history_hint}
+
+【HTML标准结构 - 必须完整输出】
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{simulator_name}</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            color: #F1F5F9;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }}
+        #canvas {{
+            display: block;
+            background: #0F172A;
+            border-radius: 8px;
+        }}
+        .controls {{
+            margin-top: 20px;
+            background: rgba(30, 41, 59, 0.95);
+            padding: 15px 25px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(100, 116, 139, 0.3);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }}
+        .control-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }}
+        .control-group label {{
+            font-size: 12px;
+            color: #CBD5E1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }}
+        .value-display {{
+            color: #60A5FA;
+            font-weight: 600;
+            font-size: 14px;
+        }}
+        input[type="range"] {{
+            width: 120px;
+            height: 6px;
+            background: rgba(100, 116, 139, 0.3);
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }}
+        input[type="range"]::-webkit-slider-thumb {{
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            border-radius: 50%;
+            cursor: pointer;
+        }}
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="500"></canvas>
+    <div class="controls">
+{variable_controls_html}
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let variables = {{{variable_init}}};
+
+{variable_listeners_js}
+
+        function animate() {{
+            ctx.fillStyle = '#0F172A';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 在这里实现你的可视化逻辑
+            // 使用 Canvas 2D API 绘制内容
+            // 根据 variables 对象的值进行动态绘制
+
+            requestAnimationFrame(animate);
+        }}
+        animate();
+    </script>
+</body>
+</html>
+
+【Canvas 2D API 参考 - 只能用这些标准API】
+
+绘制形状：
+  ctx.beginPath()
+  ctx.moveTo(x, y)
+  ctx.lineTo(x, y)
+  ctx.arc(x, y, radius, startAngle, endAngle)
+  ctx.quadraticCurveTo(cpx, cpy, x, y)
+  ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillRect(x, y, width, height)
+  ctx.strokeRect(x, y, width, height)
+
+文本：
+  ctx.font = '16px Arial'
+  ctx.textAlign = 'center' | 'left' | 'right'
+  ctx.textBaseline = 'middle' | 'top' | 'bottom'
+  ctx.fillText(text, x, y)
+  ctx.strokeText(text, x, y)
+
+样式：
+  ctx.fillStyle = '#3B82F6'
+  ctx.strokeStyle = '#60A5FA'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round' | 'butt' | 'square'
+  ctx.lineJoin = 'round' | 'miter' | 'bevel'
+  ctx.globalAlpha = 0.8
+  ctx.shadowBlur = 10
+  ctx.shadowColor = '#3B82F6'
+  ctx.shadowOffsetX = 5
+  ctx.shadowOffsetY = 5
+
+变换：
+  ctx.save()
+  ctx.restore()
+  ctx.translate(x, y)
+  ctx.rotate(angle)  // 弧度
+  ctx.scale(sx, sy)
+
+【推荐配色方案】
+主色调: '#3B82F6', '#60A5FA', '#93C5FD'
+次色调: '#8B5CF6', '#A78BFA', '#C4B5FD'
+强调色: '#F59E0B', '#FBBF24', '#FCD34D'
+成功色: '#10B981', '#34D399', '#6EE7B7'
+警告色: '#EF4444', '#F87171', '#FCA5A5'
+文本色: '#F1F5F9', '#E2E8F0', '#CBD5E1', '#94A3B8'
+背景色: '#0F172A', '#1E293B', '#334155'
+
+【完整示例 - 参考圆周运动可视化】
+（查看 F:\9\hercu-agent\benchmark_cases\physics\circular_motion.html）
+
+【核心要求】
+1. 完整HTML文档（DOCTYPE + head + body）
+2. 所有代码在单个文件中（self-contained）
+3. 使用Canvas 2D API绘制（不使用外部库）
+4. 使用requestAnimationFrame动画循环
+5. 至少2个input range控件
+6. 实时显示数值变化
+7. 画布尺寸：width="800" height="500"
+8. 配色协调美观
+9. 代码清晰注释适当
+
+【禁止项】
+❌ 外部库（Three.js, D3.js等）
+❌ eval(), Function(), setTimeout
+❌ fetch(), XMLHttpRequest, localStorage
+❌ 不要markdown代码块标记（```html等）
+❌ 不要任何解释文字
+
+【质量标准】
+- 视觉吸引力：发光效果、渐变、阴影
+- 交互性：至少2个可调参数实时响应
+- 教育性：清晰展示概念计算准确
+- 代码质量：结构清晰注释适当

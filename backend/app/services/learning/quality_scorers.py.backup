@@ -1,0 +1,835 @@
+"""
+Quality Scoring System for Agent Learning
+
+Provides quality evaluation for 4 core content types:
+- AI Tutor dialogues
+- Course chapter content
+- Quiz questions
+- HTML simulators (uses existing HTMLSimulatorQualityScore)
+
+Each scorer implements multi-dimensional evaluation aligned with
+the quality thresholds defined in the unified learning plan.
+"""
+
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
+from abc import ABC, abstractmethod
+import re
+
+
+@dataclass
+class BaseQualityScore:
+    """Base class for quality scores"""
+    total_score: float = 0.0
+    details: Dict[str, Any] = field(default_factory=dict)
+    issues: List[str] = field(default_factory=list)
+    passed: bool = False
+    threshold: float = 75.0
+
+    def calculate_total(self, *score_components: float):
+        """Calculate total score from components"""
+        self.total_score = sum(score_components)
+        self.passed = self.total_score >= self.threshold
+
+    def format_report(self) -> str:
+        """Generate human-readable quality report"""
+        status = "Ã¢ÂÂ Ã©ÂÂÃ¨Â¿Â" if self.passed else "Ã¢ÂÂ Ã¦ÂÂªÃ©ÂÂÃ¨Â¿Â"
+        report = [f"Ã¨Â´Â¨Ã©ÂÂÃ¨Â¯ÂÃ¥ÂÂ: {self.total_score:.1f}/100 ({status})"]
+
+        if self.issues:
+            report.append("
+Ã©ÂÂ®Ã©Â¢Â:")
+            for issue in self.issues:
+                report.append(f"  - {issue}")
+
+        return "
+".join(report)
+
+
+class BaseQualityScorer(ABC):
+    """Abstract base class for quality scorers"""
+
+    @abstractmethod
+    def evaluate(self, content: Any) -> BaseQualityScore:
+        """Evaluate content and return quality score"""
+        pass
+
+    @abstractmethod
+    def extract_metadata(self, content: Any) -> Dict[str, Any]:
+        """Extract learning metadata from content"""
+        pass
+
+
+# =================================================================
+# AI Tutor Dialogue Quality Scorer (NEW)
+# =================================================================
+
+@dataclass
+class TutorDialogueQualityScore(BaseQualityScore):
+    """AI Tutor dialogue quality score
+
+    Scoring dimensions:
+    - Coherence (25): Logical flow, topic consistency
+    - Guidance (25): Effective teaching strategies, question quality
+    - Knowledge (20): Accuracy, depth, relevance
+    - Diagnosis (20): Understanding of student needs, adaptive responses
+    - Teaching Value (10): Engagement, learning outcomes
+
+    Thresholds:
+    - 75: Baseline acceptable dialogue
+    - 85+: High-quality template-worthy dialogue
+    """
+    coherence_score: float = 0.0  # Ã¨Â¿ÂÃ¨Â´Â¯Ã¦ÂÂ§ (0-25)
+    guidance_score: float = 0.0   # Ã¥Â¼ÂÃ¥Â¯Â¼Ã¦ÂÂÃ¦ÂÂ (0-25)
+    knowledge_score: float = 0.0  # Ã§ÂÂ¥Ã¨Â¯ÂÃ¥ÂÂÃ§Â¡Â®Ã¦ÂÂ§ (0-20)
+    diagnosis_score: float = 0.0  # Ã¨Â¯ÂÃ¦ÂÂ­Ã¨ÂÂ½Ã¥ÂÂ (0-20)
+    teaching_score: float = 0.0   # Ã¦ÂÂÃ¥Â­Â¦Ã¤Â»Â·Ã¥ÂÂ¼ (0-10)
+
+    def calculate_total(self):
+        super().calculate_total(
+            self.coherence_score,
+            self.guidance_score,
+            self.knowledge_score,
+            self.diagnosis_score,
+            self.teaching_score,
+        )
+
+    def format_report(self) -> str:
+        status = "Ã¢ÂÂ Ã©ÂÂÃ¨Â¿Â" if self.passed else "Ã¢ÂÂ Ã¦ÂÂªÃ©ÂÂÃ¨Â¿Â"
+        report = [
+            f"AIÃ¥Â¯Â¹Ã¨Â¯ÂÃ¨Â´Â¨Ã©ÂÂÃ¨Â¯ÂÃ¥ÂÂ: {self.total_score:.1f}/100 ({status})",
+            f"  Ã¨Â¿ÂÃ¨Â´Â¯Ã¦ÂÂ§: {self.coherence_score:.1f}/25",
+            f"  Ã¥Â¼ÂÃ¥Â¯Â¼Ã¦ÂÂÃ¦ÂÂ: {self.guidance_score:.1f}/25",
+            f"  Ã§ÂÂ¥Ã¨Â¯ÂÃ¥ÂÂÃ§Â¡Â®Ã¦ÂÂ§: {self.knowledge_score:.1f}/20",
+            f"  Ã¨Â¯ÂÃ¦ÂÂ­Ã¨ÂÂ½Ã¥ÂÂ: {self.diagnosis_score:.1f}/20",
+            f"  Ã¦ÂÂÃ¥Â­Â¦Ã¤Â»Â·Ã¥ÂÂ¼: {self.teaching_score:.1f}/10",
+        ]
+
+        if self.issues:
+            report.append("
+Ã©ÂÂ®Ã©Â¢Â:")
+            for issue in self.issues:
+                report.append(f"  - {issue}")
+
+        return "
+".join(report)
+
+
+class TutorDialogueScorer(BaseQualityScorer):
+    """Scorer for AI tutor dialogues"""
+
+    def evaluate(self, dialogue: List[Dict[str, str]]) -> TutorDialogueQualityScore:
+        """
+        Evaluate an AI tutor dialogue session
+
+        Args:
+            dialogue: List of message dicts with 'role' and 'content' keys
+
+        Returns:
+            TutorDialogueQualityScore object
+        """
+        score = TutorDialogueQualityScore()
+
+        if not dialogue or len(dialogue) < 2:
+            score.issues.append("Ã¥Â¯Â¹Ã¨Â¯ÂÃ¥Â¤ÂªÃ§ÂÂ­Ã¯Â¼ÂÃ¦ÂÂ Ã¦Â³ÂÃ¨Â¯ÂÃ¤Â¼Â°Ã¨Â´Â¨Ã©ÂÂ")
+            return score
+
+        # Extract assistant messages
+        assistant_messages = [m['content'] for m in dialogue if m.get('role') == 'assistant']
+
+        # === Coherence Score (0-25) ===
+        coherence = 0
+        coherence_details = {}
+
+        # 1. Turn count (10)
+        turn_count = len(dialogue)
+        if turn_count >= 10:
+            coherence += 10
+        elif turn_count >= 6:
+            coherence += 7
+        else:
+            coherence += max(0, turn_count - 1)
+        coherence_details['turn_count'] = turn_count
+
+        # 2. Topic consistency (8) - check for topic-related keywords
+        if len(assistant_messages) >= 2:
+            # Simple heuristic: measure keyword overlap between messages
+            all_text = ' '.join(assistant_messages)
+            words = set(re.findall(r'\w{3,}', all_text.lower()))
+            if len(words) > 20:
+                coherence += 8
+            elif len(words) > 10:
+                coherence += 5
+            else:
+                coherence += 2
+        coherence_details['vocabulary_richness'] = len(words) if 'words' in locals() else 0
+
+        # 3. Message length consistency (7) - messages shouldn't be too short
+        avg_length = sum(len(m) for m in assistant_messages) / len(assistant_messages) if assistant_messages else 0
+        if avg_length >= 150:
+            coherence += 7
+        elif avg_length >= 80:
+            coherence += 5
+        elif avg_length >= 40:
+            coherence += 3
+        else:
+            score.issues.append(f"Ã¦Â¶ÂÃ¦ÂÂ¯Ã¥Â¹Â³Ã¥ÂÂÃ©ÂÂ¿Ã¥ÂºÂ¦Ã¤Â¸ÂÃ¨Â¶Â³ ({avg_length:.0f}Ã¥Â­ÂÃ§Â¬Â¦)")
+        coherence_details['avg_message_length'] = avg_length
+
+        score.coherence_score = min(25, coherence)
+
+        # === Guidance Score (0-25) ===
+        guidance = 0
+        guidance_details = {}
+
+        all_text = ' '.join(assistant_messages)
+
+        # 1. Question count (10) - good tutors ask questions
+        question_count = all_text.count('?') + all_text.count('Ã¯Â¼Â')
+        if question_count >= 5:
+            guidance += 10
+        elif question_count >= 3:
+            guidance += 7
+        elif question_count >= 1:
+            guidance += 4
+        else:
+            score.issues.append("Ã§Â¼ÂºÃ¥Â°ÂÃ¥Â¼ÂÃ¥Â¯Â¼Ã¦ÂÂ§Ã©ÂÂ®Ã©Â¢Â")
+        guidance_details['question_count'] = question_count
+
+        # 2. Teaching strategies (10) - presence of explanations, examples
+        strategy_indicators = ['Ã¤Â¾ÂÃ¥Â¦Â', 'Ã¦Â¯ÂÃ¥Â¦Â', 'Ã¥Â°Â±Ã¥ÂÂ', 'Ã¤Â¹ÂÃ¥Â°Â±Ã¦ÂÂ¯Ã¨Â¯Â´', 'Ã¦ÂÂ¢Ã¥ÂÂ¥Ã¨Â¯ÂÃ¨Â¯Â´', 'Ã¨Â®Â©Ã¦ÂÂÃ¤Â»Â¬', 'Ã¦ÂÂÃ¤Â»Â¬Ã¥ÂÂ¯Ã¤Â»Â¥',
+                               'Ã¦ÂÂ³Ã¨Â±Â¡', 'Ã¨ÂÂÃ¨ÂÂ', 'Ã¦ÂÂÃ¨ÂÂ', 'Ã§ÂÂÃ¨Â§Â£', 'Ã¨Â§Â£Ã©ÂÂ', 'Ã¨Â¯Â´Ã¦ÂÂ']
+        strategy_count = sum(1 for indicator in strategy_indicators if indicator in all_text)
+        if strategy_count >= 5:
+            guidance += 10
+        elif strategy_count >= 3:
+            guidance += 6
+        else:
+            guidance += strategy_count * 2
+        guidance_details['strategy_indicators'] = strategy_count
+
+        # 3. Encouragement (5) - positive reinforcement
+        encouragement_words = ['Ã¥Â¾ÂÃ¥Â¥Â½', 'Ã¤Â¸ÂÃ©ÂÂ', 'Ã¦Â­Â£Ã§Â¡Â®', 'Ã¥Â¯Â¹Ã¤ÂºÂ', 'Ã¦Â£Â', 'Ã¤Â¼ÂÃ§Â§Â', 'Ã§Â»Â§Ã§Â»Â­', 'Ã¥ÂÂ Ã¦Â²Â¹']
+        has_encouragement = any(word in all_text for word in encouragement_words)
+        guidance += 5 if has_encouragement else 0
+        guidance_details['has_encouragement'] = has_encouragement
+
+        score.guidance_score = min(25, guidance)
+
+        # === Knowledge Score (0-20) ===
+        knowledge = 0
+        knowledge_details = {}
+
+        # 1. Content depth (10) - longer, detailed responses
+        total_chars = sum(len(m) for m in assistant_messages)
+        if total_chars >= 500:
+            knowledge += 10
+        elif total_chars >= 300:
+            knowledge += 7
+        elif total_chars >= 150:
+            knowledge += 4
+        else:
+            score.issues.append("Ã¥ÂÂÃ¥Â®Â¹Ã¦Â·Â±Ã¥ÂºÂ¦Ã¤Â¸ÂÃ¨Â¶Â³")
+        knowledge_details['total_characters'] = total_chars
+
+        # 2. Technical terms (5) - indicates subject knowledge
+        # This is a simple heuristic - in production, use domain-specific vocabularies
+        long_words = len([w for w in re.findall(r'\w{6,}', all_text)])
+        if long_words >= 10:
+            knowledge += 5
+        elif long_words >= 5:
+            knowledge += 3
+        knowledge_details['technical_terms'] = long_words
+
+        # 3. Structured content (5) - use of lists, steps
+        has_structure = any(marker in all_text for marker in ['1.', '2.', 'Ã¢ÂÂ¢', 'Ã©Â¦ÂÃ¥ÂÂ', 'Ã¥ÂÂ¶Ã¦Â¬Â¡', 'Ã¦ÂÂÃ¥ÂÂ'])
+        knowledge += 5 if has_structure else 0
+        knowledge_details['has_structure'] = has_structure
+
+        score.knowledge_score = min(20, knowledge)
+
+        # === Diagnosis Score (0-20) ===
+        diagnosis = 0
+        diagnosis_details = {}
+
+        # 1. Student message analysis (10) - response to student input
+        user_messages = [m['content'] for m in dialogue if m.get('role') == 'user']
+        if len(user_messages) >= 2:
+            # Check if assistant refers back to student input
+            reference_indicators = ['Ã¤Â½Â Ã¨Â¯Â´', 'Ã¤Â½Â Ã¦ÂÂÃ¥ÂÂ°', 'Ã¤Â½Â Ã©ÂÂ®', 'Ã¤Â½Â Ã§ÂÂÃ©ÂÂ®Ã©Â¢Â', 'Ã¤Â½Â Ã§ÂÂÃ§ÂÂÃ¨Â§Â£', 'Ã¤Â½Â Ã¨Â®Â¤Ã¤Â¸Âº']
+            references = sum(1 for indicator in reference_indicators if indicator in all_text)
+            diagnosis += min(10, references * 3)
+        diagnosis_details['student_references'] = references if 'references' in locals() else 0
+
+        # 2. Adaptive responses (10) - tailored explanations
+        adaptive_indicators = ['Ã¦Â Â¹Ã¦ÂÂ®', 'Ã¥ÂÂºÃ¤ÂºÂ', 'Ã¨ÂÂÃ¨ÂÂÃ¥ÂÂ°', 'Ã©ÂÂÃ¥Â¯Â¹', 'Ã¥Â¯Â¹Ã¤ÂºÂ', 'Ã¥ÂÂ³Ã¤ÂºÂÃ¤Â½Â Ã§ÂÂ']
+        adaptive_count = sum(1 for indicator in adaptive_indicators if indicator in all_text)
+        diagnosis += min(10, adaptive_count * 3)
+        diagnosis_details['adaptive_count'] = adaptive_count
+
+        score.diagnosis_score = min(20, diagnosis)
+
+        # === Teaching Value (0-10) ===
+        teaching = 0
+        teaching_details = {}
+
+        # 1. Learning outcome indicators (5)
+        outcome_words = ['Ã¥Â­Â¦Ã¤Â¼Â', 'Ã¦ÂÂÃ¦ÂÂ¡', 'Ã§ÂÂÃ¨Â§Â£', 'Ã¦ÂÂÃ§ÂÂ½', 'Ã§ÂÂ¥Ã©ÂÂ', 'Ã¨ÂÂ½Ã¥Â¤Â']
+        has_outcomes = any(word in all_text for word in outcome_words)
+        teaching += 5 if has_outcomes else 0
+
+        # 2. Engagement (5) - conversational tone
+        engagement_markers = ['Ã¥ÂÂ', 'Ã¥ÂÂ¢', 'Ã¥ÂÂ§', 'Ã¥ÂÂ', 'Ã¥ÂÂ¦', 'Ã¥ÂÂ¯']
+        engagement_count = sum(all_text.count(m) for m in engagement_markers)
+        teaching += min(5, engagement_count)
+        teaching_details['engagement_markers'] = engagement_count
+
+        score.teaching_score = min(10, teaching)
+
+        # === Aggregate details ===
+        score.details = {
+            'coherence': coherence_details,
+            'guidance': guidance_details,
+            'knowledge': knowledge_details,
+            'diagnosis': diagnosis_details,
+            'teaching': teaching_details,
+        }
+
+        score.calculate_total()
+        return score
+
+    def extract_metadata(self, dialogue: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Extract learning patterns from high-quality dialogues"""
+        assistant_messages = [m['content'] for m in dialogue if m.get('role') == 'assistant']
+        all_text = ' '.join(assistant_messages)
+
+        return {
+            'dialogue_length': len(dialogue),
+            'turn_count': len(dialogue),
+            'avg_message_length': sum(len(m) for m in assistant_messages) / len(assistant_messages) if assistant_messages else 0,
+            'question_count': all_text.count('?') + all_text.count('Ã¯Â¼Â'),
+            'teaching_strategies': self._extract_strategies(all_text),
+            'opening_pattern': assistant_messages[0][:100] if assistant_messages else '',
+            'common_phrases': self._extract_common_phrases(all_text),
+        }
+
+    def _extract_strategies(self, text: str) -> List[str]:
+        strategies = []
+        if 'Ã¤Â¾ÂÃ¥Â¦Â' in text or 'Ã¦Â¯ÂÃ¥Â¦Â' in text:
+            strategies.append('uses_examples')
+        if '?' in text or 'Ã¯Â¼Â' in text:
+            strategies.append('asks_questions')
+        if any(w in text for w in ['Ã©Â¦ÂÃ¥ÂÂ', 'Ã¥ÂÂ¶Ã¦Â¬Â¡', 'Ã¦ÂÂÃ¥ÂÂ']):
+            strategies.append('structured_explanation')
+        if any(w in text for w in ['Ã¦ÂÂ³Ã¨Â±Â¡', 'Ã¥ÂÂÃ¨Â®Â¾']):
+            strategies.append('thought_experiments')
+        return strategies
+
+    def _extract_common_phrases(self, text: str) -> List[str]:
+        common = []
+        phrases = ['Ã¨Â®Â©Ã¦ÂÂÃ¤Â»Â¬', 'Ã¦ÂÂÃ¤Â»Â¬Ã¥ÂÂ¯Ã¤Â»Â¥', 'Ã¤Â½Â Ã¥ÂÂ¯Ã¤Â»Â¥Ã¨Â¯ÂÃ¨Â¯Â', 'Ã¦ÂÂ¢Ã¥ÂÂ¥Ã¨Â¯ÂÃ¨Â¯Â´', 'Ã¤Â¹ÂÃ¥Â°Â±Ã¦ÂÂ¯Ã¨Â¯Â´', 'Ã§Â®ÂÃ¥ÂÂÃ¦ÂÂ¥Ã¨Â¯Â´']
+        for phrase in phrases:
+            if phrase in text:
+                common.append(phrase)
+        return common[:5]
+
+
+# =================================================================
+# Chapter Content Quality Scorer (UPGRADE)
+# =================================================================
+
+@dataclass
+class ChapterQualityScore(BaseQualityScore):
+    """Chapter content quality score
+
+    Scoring dimensions:
+    - Content Depth (30): Completeness, detail, explanations
+    - Structure (25): Organization, logical flow, clarity
+    - Visual Quality (20): Diagrams, images, formatting
+    - Teaching Effectiveness (15): Learning objectives, examples
+    - Simulator Quality (10): If present, simulator quality
+
+    Thresholds:
+    - 80: Baseline acceptable chapter
+    - 90+: High-quality template-worthy chapter
+    """
+    depth_score: float = 0.0       # Ã¥ÂÂÃ¥Â®Â¹Ã¦Â·Â±Ã¥ÂºÂ¦ (0-30)
+    structure_score: float = 0.0   # Ã§Â»ÂÃ¦ÂÂÃ¥ÂÂÃ§ÂÂÃ¦ÂÂ§ (0-25)
+    visual_score: float = 0.0      # Ã¥ÂÂ¾Ã¦ÂÂÃ¨Â´Â¨Ã©ÂÂ (0-20)
+    teaching_score: float = 0.0    # Ã¦ÂÂÃ¥Â­Â¦Ã¦ÂÂÃ¦ÂÂ (0-15)
+    simulator_score: float = 0.0   # Ã¦Â¨Â¡Ã¦ÂÂÃ¥ÂÂ¨Ã¨Â´Â¨Ã©ÂÂ (0-10)
+
+    threshold: float = 80.0
+
+    def calculate_total(self):
+        super().calculate_total(
+            self.depth_score,
+            self.structure_score,
+            self.visual_score,
+            self.teaching_score,
+            self.simulator_score,
+        )
+
+    def format_report(self) -> str:
+        status = "Ã¢ÂÂ Ã©ÂÂÃ¨Â¿Â" if self.passed else "Ã¢ÂÂ Ã¦ÂÂªÃ©ÂÂÃ¨Â¿Â"
+        report = [
+            f"Ã§Â«Â Ã¨ÂÂÃ¥ÂÂÃ¥Â®Â¹Ã¨Â´Â¨Ã©ÂÂÃ¨Â¯ÂÃ¥ÂÂ: {self.total_score:.1f}/100 ({status})",
+            f"  Ã¥ÂÂÃ¥Â®Â¹Ã¦Â·Â±Ã¥ÂºÂ¦: {self.depth_score:.1f}/30",
+            f"  Ã§Â»ÂÃ¦ÂÂÃ¥ÂÂÃ§ÂÂÃ¦ÂÂ§: {self.structure_score:.1f}/25",
+            f"  Ã¥ÂÂ¾Ã¦ÂÂÃ¨Â´Â¨Ã©ÂÂ: {self.visual_score:.1f}/20",
+            f"  Ã¦ÂÂÃ¥Â­Â¦Ã¦ÂÂÃ¦ÂÂ: {self.teaching_score:.1f}/15",
+            f"  Ã¦Â¨Â¡Ã¦ÂÂÃ¥ÂÂ¨Ã¨Â´Â¨Ã©ÂÂ: {self.simulator_score:.1f}/10",
+        ]
+
+        if self.issues:
+            report.append("
+Ã©ÂÂ®Ã©Â¢Â:")
+            for issue in self.issues:
+                report.append(f"  - {issue}")
+
+        return "
+".join(report)
+
+
+class ChapterScorer(BaseQualityScorer):
+    """Scorer for course chapter content"""
+
+    def evaluate(self, chapter: Dict[str, Any]) -> ChapterQualityScore:
+        """
+        Evaluate chapter content quality
+
+        Args:
+            chapter: Chapter data dict with 'script', 'learning_objectives', etc.
+
+        Returns:
+            ChapterQualityScore object
+        """
+        score = ChapterQualityScore()
+
+        script = chapter.get('script', [])
+        if not script:
+            score.issues.append("Ã§Â«Â Ã¨ÂÂÃ¥ÂÂÃ¥Â®Â¹Ã¤Â¸ÂºÃ§Â©Âº")
+            return score
+
+        # === Depth Score (0-30) ===
+        depth = 0
+        depth_details = {}
+
+        # 1. Content length (15)
+        total_text = self._extract_all_text(script)
+        word_count = len(total_text)
+        if word_count >= 2000:
+            depth += 15
+        elif word_count >= 1500:
+            depth += 12
+        elif word_count >= 1000:
+            depth += 8
+        else:
+            score.issues.append(f"Ã¥ÂÂÃ¥Â®Â¹Ã¥Â­ÂÃ¦ÂÂ°Ã¤Â¸ÂÃ¨Â¶Â³ ({word_count}Ã¥Â­Â)")
+            depth += max(0, word_count // 200)
+        depth_details['word_count'] = word_count
+
+        # 2. Explanation quality (10) - detailed explanations
+        explanation_markers = ['Ã¥ÂÂ Ã¤Â¸Âº', 'Ã§ÂÂ±Ã¤ÂºÂ', 'Ã¦ÂÂÃ¤Â»Â¥', 'Ã¥ÂÂ Ã¦Â­Â¤', 'Ã¥ÂÂÃ¥ÂÂ ', 'Ã¥Â¯Â¼Ã¨ÂÂ´', 'Ã©ÂÂ Ã¦ÂÂ', 'Ã¦ÂÂÃ¥ÂÂ³Ã§ÂÂ']
+        explanation_count = sum(total_text.count(m) for m in explanation_markers)
+        depth += min(10, explanation_count * 2)
+        depth_details['explanation_markers'] = explanation_count
+
+        # 3. Examples (5)
+        example_markers = ['Ã¤Â¾ÂÃ¥Â¦Â', 'Ã¦Â¯ÂÃ¥Â¦Â', 'Ã¦Â¯ÂÃ¦ÂÂ¹Ã¨Â¯Â´', 'Ã¤Â¸Â¾Ã¤Â¾Â', 'Ã¤Â¾ÂÃ¥Â­Â']
+        has_examples = any(m in total_text for m in example_markers)
+        depth += 5 if has_examples else 0
+        depth_details['has_examples'] = has_examples
+
+        score.depth_score = min(30, depth)
+
+        # === Structure Score (0-25) ===
+        structure = 0
+        structure_details = {}
+
+        # 1. Step count (8)
+        step_count = len(script)
+        if 4 <= step_count <= 8:
+            structure += 8
+        elif step_count >= 3:
+            structure += 5
+        else:
+            score.issues.append(f"Ã¦Â­Â¥Ã©ÂªÂ¤Ã¦ÂÂ°Ã©ÂÂÃ¤Â¸ÂÃ¥ÂÂÃ§ÂÂ ({step_count}Ã¦Â­Â¥)")
+        structure_details['step_count'] = step_count
+
+        # 2. Learning objectives (7)
+        objectives = chapter.get('learning_objectives', [])
+        if len(objectives) >= 3:
+            structure += 7
+        elif len(objectives) >= 1:
+            structure += 3
+        else:
+            score.issues.append("Ã§Â¼ÂºÃ¥Â°ÂÃ¥Â­Â¦Ã¤Â¹Â Ã§ÂÂ®Ã¦Â Â")
+        structure_details['objective_count'] = len(objectives)
+
+        # 3. Content variety (10) - mix of text, diagrams, simulators
+        content_types = set(step.get('type') for step in script)
+        type_count = len(content_types)
+        if type_count >= 3:
+            structure += 10
+        elif type_count >= 2:
+            structure += 6
+        else:
+            structure += 3
+        structure_details['content_types'] = list(content_types)
+
+        score.structure_score = min(25, structure)
+
+        # === Visual Score (0-20) ===
+        visual = 0
+        visual_details = {}
+
+        # Count visual elements
+        diagram_count = sum(1 for step in script if step.get('type') in ['illustrated_content', 'diagram'])
+        simulator_count = sum(1 for step in script if step.get('type') == 'simulator')
+
+        # 1. Diagram presence (10)
+        if diagram_count >= 2:
+            visual += 10
+        elif diagram_count >= 1:
+            visual += 6
+        else:
+            score.issues.append("Ã§Â¼ÂºÃ¥Â°ÂÃ¥ÂÂ¾Ã¦ÂÂÃ¥ÂÂÃ¥Â®Â¹")
+        visual_details['diagram_count'] = diagram_count
+
+        # 2. Diagram quality (10) - check for descriptions and elements
+        diagram_steps = [s for s in script if s.get('type') in ['illustrated_content', 'diagram']]
+        if diagram_steps:
+            avg_description_length = sum(len(s.get('diagram_spec', {}).get('description', '')) for s in diagram_steps) / len(diagram_steps)
+            if avg_description_length >= 80:
+                visual += 10
+            elif avg_description_length >= 50:
+                visual += 6
+            else:
+                visual += 3
+            visual_details['avg_diagram_description'] = avg_description_length
+
+        score.visual_score = min(20, visual)
+
+        # === Teaching Score (0-15) ===
+        teaching = 0
+        teaching_details = {}
+
+        # 1. Learning objectives quality (6)
+        if objectives:
+            avg_obj_length = sum(len(o) for o in objectives) / len(objectives)
+            if avg_obj_length >= 15:
+                teaching += 6
+            elif avg_obj_length >= 10:
+                teaching += 4
+        teaching_details['avg_objective_length'] = avg_obj_length if 'avg_obj_length' in locals() else 0
+
+        # 2. Key concepts (5)
+        has_key_points = any('key_points' in str(step.get('content', {})) for step in script)
+        teaching += 5 if has_key_points else 0
+        teaching_details['has_key_points'] = has_key_points
+
+        # 3. Rationale (4)
+        rationale = chapter.get('rationale', '')
+        if len(rationale) >= 50:
+            teaching += 4
+        elif len(rationale) >= 20:
+            teaching += 2
+        teaching_details['rationale_length'] = len(rationale)
+
+        score.teaching_score = min(15, teaching)
+
+        # === Simulator Score (0-10) ===
+        if simulator_count > 0:
+            # Basic check - full simulator evaluation would use HTMLSimulatorQualityScore
+            score.simulator_score = 8  # Assume good quality if present
+        else:
+            score.simulator_score = 0
+        depth_details['simulator_count'] = simulator_count
+
+        # === Aggregate details ===
+        score.details = {
+            'depth': depth_details,
+            'structure': structure_details,
+            'visual': visual_details,
+            'teaching': teaching_details,
+        }
+
+        score.calculate_total()
+        return score
+
+    def extract_metadata(self, chapter: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract learning patterns from chapter"""
+        script = chapter.get('script', [])
+        total_text = self._extract_all_text(script)
+
+        return {
+            'step_count': len(script),
+            'content_types': list(set(step.get('type') for step in script)),
+            'word_count': len(total_text),
+            'has_simulator': any(s.get('type') == 'simulator' for s in script),
+            'has_diagrams': any(s.get('type') in ['illustrated_content', 'diagram'] for s in script),
+            'learning_objective_count': len(chapter.get('learning_objectives', [])),
+            'structural_pattern': self._analyze_structure(script),
+        }
+
+    def _extract_all_text(self, script: List[Dict]) -> str:
+        texts = []
+        for step in script:
+            content = step.get('content', {})
+            if isinstance(content, dict):
+                if 'text' in content:
+                    texts.append(content['text'])
+                if 'key_points' in content:
+                    texts.extend(content['key_points'])
+        return ' '.join(texts)
+
+    def _analyze_structure(self, script: List[Dict]) -> str:
+        types = [s.get('type') for s in script]
+        if types[0] == 'text_content' and 'simulator' in types:
+            return 'intro_then_interactive'
+        elif 'simulator' in types and types[-1] in ['assessment', 'text_content']:
+            return 'interactive_then_summary'
+        else:
+            return 'mixed'
+
+
+# =================================================================
+# Quiz Question Quality Scorer (NEW)
+# =================================================================
+
+@dataclass
+class QuizQualityScore(BaseQualityScore):
+    """Quiz question quality score
+
+    Scoring dimensions:
+    - Difficulty Accuracy (25): Appropriate difficulty level
+    - Option Quality (30): Distractors, clarity, plausibility
+    - Explanation Quality (20): Clear, educational explanations
+    - Knowledge Accuracy (15): Correctness, precision
+    - Teaching Value (10): Learning reinforcement
+
+    Thresholds:
+    - 75: Baseline acceptable question
+    - 85+: High-quality template-worthy question
+    """
+    difficulty_score: float = 0.0    # Ã©ÂÂ¾Ã¥ÂºÂ¦Ã¥ÂÂÃ§Â¡Â®Ã¦ÂÂ§ (0-25)
+    option_score: float = 0.0        # Ã©ÂÂÃ©Â¡Â¹Ã¨Â´Â¨Ã©ÂÂ (0-30)
+    explanation_score: float = 0.0   # Ã¨Â§Â£Ã¦ÂÂÃ¨Â´Â¨Ã©ÂÂ (0-20)
+    knowledge_score: float = 0.0     # Ã§ÂÂ¥Ã¨Â¯ÂÃ¥ÂÂÃ§Â¡Â®Ã¦ÂÂ§ (0-15)
+    teaching_score: float = 0.0      # Ã¦ÂÂÃ¥Â­Â¦Ã¤Â»Â·Ã¥ÂÂ¼ (0-10)
+
+    def calculate_total(self):
+        super().calculate_total(
+            self.difficulty_score,
+            self.option_score,
+            self.explanation_score,
+            self.knowledge_score,
+            self.teaching_score,
+        )
+
+    def format_report(self) -> str:
+        status = "Ã¢ÂÂ Ã©ÂÂÃ¨Â¿Â" if self.passed else "Ã¢ÂÂ Ã¦ÂÂªÃ©ÂÂÃ¨Â¿Â"
+        report = [
+            f"Ã©Â¢ÂÃ§ÂÂ®Ã¨Â´Â¨Ã©ÂÂÃ¨Â¯ÂÃ¥ÂÂ: {self.total_score:.1f}/100 ({status})",
+            f"  Ã©ÂÂ¾Ã¥ÂºÂ¦Ã¥ÂÂÃ§Â¡Â®Ã¦ÂÂ§: {self.difficulty_score:.1f}/25",
+            f"  Ã©ÂÂÃ©Â¡Â¹Ã¨Â´Â¨Ã©ÂÂ: {self.option_score:.1f}/30",
+            f"  Ã¨Â§Â£Ã¦ÂÂÃ¨Â´Â¨Ã©ÂÂ: {self.explanation_score:.1f}/20",
+            f"  Ã§ÂÂ¥Ã¨Â¯ÂÃ¥ÂÂÃ§Â¡Â®Ã¦ÂÂ§: {self.knowledge_score:.1f}/15",
+            f"  Ã¦ÂÂÃ¥Â­Â¦Ã¤Â»Â·Ã¥ÂÂ¼: {self.teaching_score:.1f}/10",
+        ]
+
+        if self.issues:
+            report.append("
+Ã©ÂÂ®Ã©Â¢Â:")
+            for issue in self.issues:
+                report.append(f"  - {issue}")
+
+        return "
+".join(report)
+
+
+class QuizScorer(BaseQualityScorer):
+    """Scorer for quiz questions"""
+
+    def evaluate(self, question: Dict[str, Any]) -> QuizQualityScore:
+        """
+        Evaluate quiz question quality
+
+        Args:
+            question: Question dict with 'question', 'options', 'correct_answer', 'explanation'
+
+        Returns:
+            QuizQualityScore object
+        """
+        score = QuizQualityScore()
+
+        question_text = question.get('question', '')
+        options = question.get('options', [])
+        explanation = question.get('explanation', '')
+        difficulty = question.get('difficulty', 'medium')
+
+        if not question_text or not options:
+            score.issues.append("Ã©Â¢ÂÃ§ÂÂ®Ã¦ÂÂÃ©ÂÂÃ©Â¡Â¹Ã§Â¼ÂºÃ¥Â¤Â±")
+            return score
+
+        # === Difficulty Score (0-25) ===
+        difficulty_score = 0
+        difficulty_details = {}
+
+        # 1. Question complexity (15)
+        question_length = len(question_text)
+        if question_length >= 50:
+            difficulty_score += 10
+        elif question_length >= 30:
+            difficulty_score += 7
+        elif question_length >= 15:
+            difficulty_score += 5
+        else:
+            score.issues.append(f"Ã©Â¢ÂÃ§ÂÂ®Ã¦ÂÂÃ¦ÂÂ¬Ã¨Â¿ÂÃ§ÂÂ­ ({question_length}Ã¥Â­ÂÃ§Â¬Â¦)")
+
+        # Check for complexity indicators
+        complexity_markers = ['Ã¥ÂÂÃ¦ÂÂ', 'Ã¦Â¯ÂÃ¨Â¾Â', 'Ã¦ÂÂ¨Ã¦ÂÂ­', 'Ã¨Â§Â£Ã©ÂÂ', 'Ã¤Â¸ÂºÃ¤Â»ÂÃ¤Â¹Â', 'Ã¥Â¦ÂÃ¤Â½Â', 'Ã¨Â®Â¡Ã§Â®Â']
+        has_complexity = any(m in question_text for m in complexity_markers)
+        difficulty_score += 5 if has_complexity else 0
+        difficulty_details['question_length'] = question_length
+        difficulty_details['has_complexity'] = has_complexity
+
+        # 2. Difficulty alignment (10)
+        if difficulty in ['easy', 'medium', 'hard']:
+            difficulty_score += 10
+        difficulty_details['difficulty_level'] = difficulty
+
+        score.difficulty_score = min(25, difficulty_score)
+
+        # === Option Score (0-30) ===
+        option_score = 0
+        option_details = {}
+
+        # 1. Option count (8)
+        option_count = len(options)
+        if option_count == 4:
+            option_score += 8
+        elif option_count == 3:
+            option_score += 6
+        else:
+            score.issues.append(f"Ã©ÂÂÃ©Â¡Â¹Ã¦ÂÂ°Ã©ÂÂÃ¤Â¸ÂÃ¦Â ÂÃ¥ÂÂ ({option_count}Ã¤Â¸Âª)")
+        option_details['option_count'] = option_count
+
+        # 2. Option length consistency (12)
+        if options:
+            lengths = [len(opt) for opt in options]
+            avg_length = sum(lengths) / len(lengths)
+            length_variance = sum((l - avg_length) ** 2 for l in lengths) / len(lengths)
+
+            # Good options have similar lengths
+            if avg_length >= 10:
+                option_score += 6
+            if length_variance < 100:
+                option_score += 6
+            option_details['avg_option_length'] = avg_length
+            option_details['length_variance'] = length_variance
+
+        # 3. Distractor quality (10) - no obvious wrong answers
+        obvious_wrong = ['Ã¤Â»Â¥Ã¤Â¸ÂÃ©ÂÂ½Ã¤Â¸ÂÃ¥Â¯Â¹', 'Ã¦ÂÂ ', 'Ã¦Â²Â¡Ã¦ÂÂ', 'Ã¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨']
+        has_obvious_wrong = any(any(w in opt for w in obvious_wrong) for opt in options)
+        if not has_obvious_wrong:
+            option_score += 10
+        else:
+            score.issues.append("Ã¥Â­ÂÃ¥ÂÂ¨Ã¦ÂÂÃ¦ÂÂ¾Ã©ÂÂÃ¨Â¯Â¯Ã§ÂÂÃ¥Â¹Â²Ã¦ÂÂ°Ã©Â¡Â¹")
+        option_details['has_obvious_wrong'] = has_obvious_wrong
+
+        score.option_score = min(30, option_score)
+
+        # === Explanation Score (0-20) ===
+        explanation_score = 0
+        explanation_details = {}
+
+        # 1. Explanation length (10)
+        explanation_length = len(explanation)
+        if explanation_length >= 100:
+            explanation_score += 10
+        elif explanation_length >= 50:
+            explanation_score += 6
+        elif explanation_length >= 20:
+            explanation_score += 3
+        else:
+            score.issues.append("Ã¨Â§Â£Ã¦ÂÂÃ¨Â¿ÂÃ§ÂÂ­")
+        explanation_details['explanation_length'] = explanation_length
+
+        # 2. Explanation quality (10) - includes reasoning
+        reasoning_markers = ['Ã¥ÂÂ Ã¤Â¸Âº', 'Ã§ÂÂ±Ã¤ÂºÂ', 'Ã¦ÂÂÃ¤Â»Â¥', 'Ã¥ÂÂ Ã¦Â­Â¤', 'Ã¥ÂÂÃ¥ÂÂ ', 'Ã¦Â­Â£Ã§Â¡Â®Ã§Â­ÂÃ¦Â¡ÂÃ¦ÂÂ¯']
+        has_reasoning = any(m in explanation for m in reasoning_markers)
+        explanation_score += 10 if has_reasoning else 5
+        explanation_details['has_reasoning'] = has_reasoning
+
+        score.explanation_score = min(20, explanation_score)
+
+        # === Knowledge Score (0-15) ===
+        knowledge_score = 0
+        knowledge_details = {}
+
+        # 1. Correct answer specified (10)
+        has_correct = 'correct_answer' in question or 'answer' in question
+        knowledge_score += 10 if has_correct else 0
+        if not has_correct:
+            score.issues.append("Ã¦ÂÂªÃ¦ÂÂÃ¥Â®ÂÃ¦Â­Â£Ã§Â¡Â®Ã§Â­ÂÃ¦Â¡Â")
+
+        # 2. Domain vocabulary (5)
+        # Simple heuristic - longer words indicate technical vocabulary
+        technical_words = len([w for w in re.findall(r'\w{5,}', question_text)])
+        knowledge_score += min(5, technical_words)
+        knowledge_details['technical_word_count'] = technical_words
+
+        score.knowledge_score = min(15, knowledge_score)
+
+        # === Teaching Score (0-10) ===
+        teaching_score = 0
+        teaching_details = {}
+
+        # 1. Learning reinforcement (10)
+        # Check if explanation teaches beyond just giving the answer
+        teaching_markers = ['Ã¥Â­Â¦Ã¤Â¹Â ', 'Ã§ÂÂÃ¨Â§Â£', 'Ã¦ÂÂÃ¦ÂÂ¡', 'Ã¨Â®Â°Ã¤Â½Â', 'Ã¦Â³Â¨Ã¦ÂÂ', 'Ã¥ÂÂ³Ã©ÂÂ®']
+        teaching_count = sum(explanation.count(m) for m in teaching_markers)
+        teaching_score += min(10, teaching_count * 3)
+        teaching_details['teaching_markers'] = teaching_count
+
+        score.teaching_score = min(10, teaching_score)
+
+        # === Aggregate details ===
+        score.details = {
+            'difficulty': difficulty_details,
+            'options': option_details,
+            'explanation': explanation_details,
+            'knowledge': knowledge_details,
+            'teaching': teaching_details,
+        }
+
+        score.calculate_total()
+        return score
+
+    def extract_metadata(self, question: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract learning patterns from questions"""
+        question_text = question.get('question', '')
+        options = question.get('options', [])
+        explanation = question.get('explanation', '')
+
+        return {
+            'question_length': len(question_text),
+            'option_count': len(options),
+            'avg_option_length': sum(len(o) for o in options) / len(options) if options else 0,
+            'explanation_length': len(explanation),
+            'difficulty': question.get('difficulty', 'unknown'),
+            'question_type': self._infer_question_type(question_text),
+            'has_calculation': any(char in question_text for char in ['=', '+', '-', 'ÃÂ', 'ÃÂ·']),
+        }
+
+    def _infer_question_type(self, question_text: str) -> str:
+        if 'Ã¤Â¸ÂºÃ¤Â»ÂÃ¤Â¹Â' in question_text or 'Why' in question_text:
+            return 'reasoning'
+        elif 'Ã¨Â®Â¡Ã§Â®Â' in question_text or 'Ã¥Â¤ÂÃ¥Â°Â' in question_text:
+            return 'calculation'
+        elif 'Ã¥Â®ÂÃ¤Â¹Â' in question_text or 'Ã¦ÂÂ¯Ã¤Â»ÂÃ¤Â¹Â' in question_text:
+            return 'definition'
+        else:
+            return 'general'

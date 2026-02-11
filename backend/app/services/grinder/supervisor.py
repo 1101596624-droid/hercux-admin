@@ -6,8 +6,11 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from sqlalchemy.orm import Session
 
 from app.services.claude_service import ClaudeService
+from app.services.learning.quality_scorers import QuizScorer, QuizQualityScore
+from app.services.learning.template_service import UnifiedTemplateService
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +24,15 @@ class GrinderSupervisor:
     2. 审核生成的题目质量
     3. 验证答案正确性
     4. 检测并修复 JSON 格式问题
+    5. 质量评分和学习模板保存 (NEW)
     """
 
-    def __init__(self):
+    def __init__(self, db: Session = None):
         self.claude_service = ClaudeService()
         self._search_service = None
+        self.db = db
+        self.quiz_scorer = QuizScorer()
+        self.template_service = UnifiedTemplateService(db) if db else None
 
     @property
     def search_service(self):
@@ -84,6 +91,14 @@ class GrinderSupervisor:
 
                 if review_result['approved']:
                     logger.info(f"Exam approved on attempt {attempt + 1}")
+
+                    # 5. 质量评分和保存高质量题目为学习模板
+                    if self.template_service:
+                        quality_results = await self._evaluate_and_save_quality_questions(
+                            exam, topic, review_result
+                        )
+                        review_result['quality_results'] = quality_results
+
                     return {
                         'exam': exam,
                         'review': review_result,
@@ -448,12 +463,237 @@ class GrinderSupervisor:
             logger.warning(f"Answer verification failed: {e}")
             return {'correct': True, 'reason': '验证失败，默认通过'}
 
+    async def _evaluate_and_save_quality_questions(
+        self,
+        exam: Dict[str, Any],
+        topic: str,
+        review_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        对审核通过的题目进行质量评分，并保存85+分的题目为学习模板
+
+        Args:
+            exam: 考试数据
+            topic: 主题
+            review_result: 审核结果
+
+        Returns:
+            质量评分结果统计
+        """
+        questions = exam.get('questions', [])
+        quality_results = {
+            'total_evaluated': 0,
+            'high_quality_count': 0,
+            'saved_as_template': 0,
+            'quality_scores': [],
+            'saved_questions': []
+        }
+
+        if not questions:
+            return quality_results
+
+        logger.info(f"Evaluating quality for {len(questions)} questions")
+
+        for question in questions:
+            try:
+                # 转换题目格式为QuizScorer期望的格式
+                quiz_data = self._convert_question_format(question)
+
+                # 使用QuizScorer评分
+                quality_score = self.quiz_scorer.evaluate(quiz_data)
+
+                quality_results['total_evaluated'] += 1
+                quality_results['quality_scores'].append({
+                    'question_id': question.get('id'),
+                    'score': quality_score.total_score,
+                    'passed': quality_score.passed
+                })
+
+                logger.info(
+                    f"Question {question.get('id')} quality score: "
+                    f"{quality_score.total_score:.1f}/100 (threshold: 85)"
+                )
+
+                # 85+分自动保存为学习模板
+                if quality_score.total_score >= 85.0:
+                    quality_results['high_quality_count'] += 1
+
+                    # 提取科目和难度
+                    subject = self._infer_subject(topic)
+                    difficulty = self._infer_difficulty(question)
+
+                    # 保存为模板
+                    template = await self.template_service.save_as_template(
+                        template_type='quiz_question',
+                        subject=subject,
+                        topic=topic,
+                        content=quiz_data,
+                        quality_score=quality_score.total_score,
+                        score_breakdown={
+                            'difficulty_score': quality_score.difficulty_score,
+                            'option_score': quality_score.option_score,
+                            'explanation_score': quality_score.explanation_score,
+                            'knowledge_score': quality_score.knowledge_score,
+                            'teaching_score': quality_score.teaching_score,
+                        },
+                        metadata=self.quiz_scorer.extract_metadata(quiz_data),
+                        difficulty_level=difficulty
+                    )
+
+                    if template:
+                        quality_results['saved_as_template'] += 1
+                        quality_results['saved_questions'].append({
+                            'question_id': question.get('id'),
+                            'template_id': template.id,
+                            'quality_score': quality_score.total_score
+                        })
+                        logger.info(
+                            f"Question {question.get('id')} saved as learning template "
+                            f"(ID: {template.id}, score: {quality_score.total_score:.1f})"
+                        )
+                    else:
+                        logger.info(
+                            f"Question {question.get('id')} is duplicate, "
+                            f"template usage count updated"
+                        )
+
+            except Exception as e:
+                logger.error(f"Failed to evaluate question {question.get('id')}: {e}")
+                continue
+
+        logger.info(
+            f"Quality evaluation complete: {quality_results['high_quality_count']}/{quality_results['total_evaluated']} "
+            f"high-quality questions, {quality_results['saved_as_template']} saved as templates"
+        )
+
+        return quality_results
+
+    def _convert_question_format(self, question: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        将Grinder题目格式转换为QuizScorer期望的格式
+
+        Grinder格式:
+        {
+            "id": 1,
+            "type": "choice",
+            "text": "题目内容",
+            "options": ["A. 选项1", "B. 选项2", ...],
+            "correct": 0,
+            "explanation": "解析"
+        }
+
+        QuizScorer格式:
+        {
+            "question": "题目内容",
+            "options": ["选项1", "选项2", ...],
+            "correct_answer": "选项1",
+            "explanation": "解析",
+            "difficulty": "medium"
+        }
+        """
+        question_type = question.get('type', 'choice')
+
+        if question_type == 'choice':
+            options = question.get('options', [])
+            correct_index = question.get('correct', 0)
+
+            # 移除选项前缀 (A. B. C. D.)
+            cleaned_options = []
+            for opt in options:
+                # 去掉 "A. ", "B. " 等前缀
+                cleaned = opt
+                if len(opt) > 3 and opt[1:3] == '. ':
+                    cleaned = opt[3:]
+                cleaned_options.append(cleaned)
+
+            # 获取正确答案
+            correct_answer = cleaned_options[correct_index] if 0 <= correct_index < len(cleaned_options) else cleaned_options[0]
+
+            return {
+                'question': question.get('text', ''),
+                'options': cleaned_options,
+                'correct_answer': correct_answer,
+                'explanation': question.get('explanation', ''),
+                'difficulty': self._infer_difficulty(question),
+                'category': question.get('category', 'general')
+            }
+
+        elif question_type == 'blank':
+            return {
+                'question': question.get('text', ''),
+                'options': ['填空题'],
+                'correct_answer': question.get('answer', ''),
+                'explanation': question.get('explanation', ''),
+                'difficulty': self._infer_difficulty(question),
+                'category': question.get('category', 'general')
+            }
+
+        elif question_type == 'analysis':
+            return {
+                'question': question.get('text', ''),
+                'options': ['开放性问题'],
+                'correct_answer': '见解析',
+                'explanation': question.get('explanation', ''),
+                'difficulty': 'hard',
+                'category': question.get('category', 'general')
+            }
+
+        else:
+            # 默认格式
+            return {
+                'question': question.get('text', ''),
+                'options': question.get('options', []),
+                'correct_answer': str(question.get('answer', '')),
+                'explanation': question.get('explanation', ''),
+                'difficulty': 'medium',
+                'category': question.get('category', 'general')
+            }
+
+    def _infer_subject(self, topic: str) -> str:
+        """从主题推断科目"""
+        topic_lower = topic.lower()
+
+        subject_keywords = {
+            'physics': ['物理', 'physics', '力学', '电磁', '光学', '热学'],
+            'mathematics': ['数学', 'math', '代数', '几何', '微积分', '概率'],
+            'chemistry': ['化学', 'chemistry', '有机', '无机', '元素'],
+            'computer_science': ['编程', 'programming', '算法', '数据结构', 'python', 'javascript', '计算机'],
+            'biology': ['生物', 'biology', '细胞', '基因', '进化'],
+            'history': ['历史', 'history', '朝代', '战争'],
+            'language': ['语言', '英语', 'english', '语法', '词汇'],
+        }
+
+        for subject, keywords in subject_keywords.items():
+            if any(keyword in topic_lower for keyword in keywords):
+                return subject
+
+        return 'general'
+
+    def _infer_difficulty(self, question: Dict[str, Any]) -> str:
+        """从题目内容推断难度"""
+        question_type = question.get('type', 'choice')
+
+        # 分析题默认为困难
+        if question_type == 'analysis':
+            return 'hard'
+
+        # 根据题目长度和复杂度推断
+        text = question.get('text', '')
+        text_length = len(text)
+
+        if text_length > 100:
+            return 'hard'
+        elif text_length > 50:
+            return 'medium'
+        else:
+            return 'easy'
+
 
 # 单例
 _grinder_supervisor = None
 
-def get_grinder_supervisor() -> GrinderSupervisor:
+def get_grinder_supervisor(db: Session = None) -> GrinderSupervisor:
     global _grinder_supervisor
-    if _grinder_supervisor is None:
-        _grinder_supervisor = GrinderSupervisor()
+    if _grinder_supervisor is None or (_grinder_supervisor.db is None and db is not None):
+        _grinder_supervisor = GrinderSupervisor(db)
     return _grinder_supervisor

@@ -12,6 +12,14 @@
     @apply border-dark-200;
   }
 
+  html {
+    @apply bg-slate-50;
+  }
+
+  body {
+    @apply bg-slate-50;
+  }
+
   h1, h2, h3, h4, h5, h6 {
     @apply font-semibold text-dark-900;
   }

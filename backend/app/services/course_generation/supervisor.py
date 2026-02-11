@@ -12,9 +12,10 @@ from app.services.claude_service import ClaudeService
 from .models import (
     GenerationState, CourseOutline, ChapterOutline, ChapterResult,
     ReviewResult, ReviewStatus, ChapterType, ChapterQualityStandards,
-    SimulatorQualityStandards, SimulatorSpec, ChapterStep, StepReviewResult
+    ChapterStep, StepReviewResult, HTMLSimulatorSpec, HTMLSimulatorQualityStandards
 )
 from .generator import JSONRepairTool
+from .standards_loader import get_standards_loader
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class CourseSupervisor:
         self.quality_standards = ChapterQualityStandards()
         self.conversation_messages: List[Dict[str, str]] = []
         self._search_service = None
+        self.standards_loader = get_standards_loader()  # 新增：标准加载器
 
     @property
     def search_service(self):
@@ -319,15 +321,15 @@ class CourseSupervisor:
                 (ChapterType.INTRODUCTION, "simple", ["text_content"]),
                 (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator"]),
                 (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "assessment"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
                 (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content", "assessment"]),
-                (ChapterType.PRACTICE, "standard", ["text_content", "simulator", "assessment"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content", "ai_tutor", "assessment"]),
+                (ChapterType.PRACTICE, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
                 (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
                 (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "assessment"]),
+                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
                 (ChapterType.PRACTICE, "standard", ["text_content", "simulator"]),
-                (ChapterType.ASSESSMENT, "simple", ["text_content", "assessment"]),
+                (ChapterType.ASSESSMENT, "simple", ["text_content", "ai_tutor", "assessment"]),
             ]
             for i in range(fallback_count):
                 t = templates[i] if i < len(templates) else templates[-1]
@@ -371,6 +373,8 @@ class CourseSupervisor:
 - 核心概念：{', '.join(chapter_outline.key_concepts) if chapter_outline.key_concepts else '见下方'}
 - 学习目标：{', '.join(chapter_outline.learning_objectives) if chapter_outline.learning_objectives else '见下方'}
 - 建议模拟器主题：{chapter_outline.suggested_simulator or '根据内容自行设计'}
+
+{self._get_visualization_recommendations(state, chapter_outline)}
 
 【课程整体信息】
 - 课程描述：{outline.description}
@@ -459,10 +463,12 @@ class CourseSupervisor:
    - text_content（纯文本讲解）
    - illustrated_content（图文讲解）
    - simulator（互动模拟器）
+   - ai_tutor（AI导师苏格拉底式提问 - 检验学生理解深度）
    - assessment（测验）
 3. 【重要】同一课程内的图片和模拟器必须有明显区别，不能重复相似的视觉内容
-4. 学习目标：至少 4 个，使用动词开头
-5. 每个步骤的 key_points：3-5 个要点
+4. 【重要】每章建议在 assessment 前安排一个 ai_tutor 步骤，通过AI导师对话检验学生理解
+5. 学习目标：至少 4 个，使用动词开头
+6. 每个步骤的 key_points：3-5 个要点
 
 === 模拟器变量要求（重要）===
 
@@ -545,6 +551,18 @@ class CourseSupervisor:
         }},
         {{
             "step_id": "step_4",
+            "type": "ai_tutor",
+            "title": "AI导师：核心概念检测",
+            "ai_spec": {{
+                "mode": "proactive_assessment",
+                "opening_message": "",
+                "probing_questions": [{{"question":"问题","intent":"意图","expected_elements":["要素"]}}],
+                "diagnostic_focus": {{"key_concepts":["概念"],"common_misconceptions":["误区"]}},
+                "max_turns": 6
+            }}
+        }},
+        {{
+            "step_id": "step_5",
             "type": "assessment",
             "title": "知识检测",
             "assessment_spec": {{
@@ -581,7 +599,7 @@ class CourseSupervisor:
 
 【章节结构要求】
 - 步骤数量由你根据章节内容深度自主决定
-- 步骤类型自主搭配（text_content、illustrated_content、simulator、assessment）
+- 步骤类型自主搭配（text_content、illustrated_content、simulator、ai_tutor、assessment）
 - 同一课程内的图片和模拟器必须有明显区别
 
 请直接输出JSON，不要有其他内容。
@@ -610,15 +628,19 @@ class CourseSupervisor:
             issues.append(f"步骤过少，只有{chapter.total_steps}步，内容可能不完整")
             content_score -= 15
 
-        # === 2. 检查模拟器质量（不限数量，但检查区别性） ===
+        # === 2. 检查模拟器质量（使用统一评分系统）===
         simulators = [s for s in chapter.script if s.type == 'simulator']
         for i, step in enumerate(chapter.script):
             if step.type == 'simulator' and step.simulator_spec:
-                sim_issues = step.simulator_spec.validate(self.quality_standards.simulator_standards)
-                if sim_issues:
-                    simulator_issues.extend(sim_issues)
+                # 使用统一的质量评分系统
+                quality_score = step.simulator_spec.calculate_quality_score(self.quality_standards.simulator_standards)
+
+                # 根据评分结果判断质量
+                if not quality_score.passed:
+                    simulator_issues.extend(quality_score.issues)
                     problematic_steps.append(i)
-                    simulator_score -= len(sim_issues) * 10
+                    # 根据分数扣分
+                    simulator_score -= (100 - quality_score.total_score)
 
                 # 检查是否与已使用的模拟器重复
                 if step.simulator_spec.name in state.used_simulators:
@@ -761,7 +783,7 @@ class CourseSupervisor:
             prompt += f"\n{i+1}. [{step.type}] {step.title}"
             if step.type == 'simulator' and step.simulator_spec:
                 prompt += f"\n   模拟器：{step.simulator_spec.name}"
-                prompt += f"\n   变量：{[v.get('label') for v in step.simulator_spec.variables]}"
+                # HTML模拟器不再有variables字段
 
         prompt += f"""
 
@@ -939,7 +961,7 @@ class CourseSupervisor:
         if step.type == 'simulator' and step.simulator_spec:
             context['simulator_name'] = step.simulator_spec.name
             context['simulator_description'] = step.simulator_spec.description
-            context['variables'] = step.simulator_spec.variables
+            # HTML模拟器不再有variables字段
 
         return context
 
@@ -1005,10 +1027,14 @@ class CourseSupervisor:
 
         elif step.type == 'simulator':
             if step.simulator_spec:
-                sim_issues = step.simulator_spec.validate(self.quality_standards.simulator_standards)
-                if sim_issues:
-                    issues.extend(sim_issues)
-                    score -= len(sim_issues) * 10
+                # 使用统一的质量评分系统
+                quality_score = step.simulator_spec.calculate_quality_score(self.quality_standards.simulator_standards)
+
+                # 根据评分结果判断质量
+                if not quality_score.passed:
+                    issues.extend(quality_score.issues)
+                    # 分数转换：quality_score是0-100分，我们的score也是0-100分
+                    score = quality_score.total_score
 
                 # 检查是否重复
                 if step.simulator_spec.name in state.used_simulators:
@@ -1106,19 +1132,8 @@ class CourseSupervisor:
         if len(ill_titles) > 1 and len(set(ill_titles)) < len(ill_titles):
             issues.append("同一章节内有重复的图文标题，需要有明显区别")
 
-        # 3. 检查模拟器变量定义
-        for step in chapter.script:
-            if step.type == 'simulator' and step.simulator_spec:
-                vars_count = len(step.simulator_spec.variables)
-                if vars_count < 2:
-                    issues.append(f"模拟器'{step.simulator_spec.name}'变量不足：{vars_count}个，至少需要2个")
-
-                # 检查变量完整性
-                for var in step.simulator_spec.variables:
-                    required_fields = ['name', 'label', 'min', 'max', 'default']
-                    missing = [f for f in required_fields if f not in var or var[f] is None]
-                    if missing:
-                        issues.append(f"变量'{var.get('name', '未命名')}'缺少字段：{', '.join(missing)}")
+        # 3. 模拟器检查 (HTML格式已在生成时验证，此处跳过)
+        # HTML模拟器使用完整的HTML/JS代码，不需要变量完整性检查
 
         # 4. 检查学习目标
         if len(chapter.learning_objectives) < 3:
@@ -1228,7 +1243,7 @@ class CourseSupervisor:
         step: 'ChapterStep',
         previous_errors: List[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """检查模拟器步骤"""
+        """检查HTML模拟器步骤（使用统一质量评分系统）"""
         issues = []
         error_type = None
 
@@ -1241,47 +1256,25 @@ class CourseSupervisor:
 
         spec = step.simulator_spec
 
-        # 1. 检查代码是否存在
-        code = spec.custom_code or ''
-        if not code.strip():
-            issues.append("模拟器代码为空")
-            error_type = 'empty_code'
-        else:
-            # 2. 检查代码行数
-            lines = [l for l in code.split('\n') if l.strip()]
-            if len(lines) < 60:
-                issues.append(f"代码太短：{len(lines)}行，至少需要60行")
-                error_type = 'short_code'
+        # 使用统一的质量评分系统
+        quality_score = spec.calculate_quality_score(self.quality_standards.simulator_standards)
 
-            # 3. 检查必要函数
-            if 'function setup' not in code and 'setup(' not in code:
-                issues.append("缺少 setup 函数")
-                error_type = 'missing_function'
-            if 'function update' not in code and 'update(' not in code:
-                issues.append("缺少 update 函数")
-                error_type = 'missing_function'
+        # 如果未通过质量阈值，收集所有问题
+        if not quality_score.passed:
+            issues = quality_score.issues.copy()
+            # 根据分数判断错误类型
+            if quality_score.visual_score < 10:
+                error_type = 'poor_visual_quality'
+            elif quality_score.interaction_score < 5:
+                error_type = 'insufficient_interaction'
+            elif quality_score.canvas_score < 10:
+                error_type = 'poor_canvas_usage'
+            elif quality_score.structure_score < 10:
+                error_type = 'poor_structure'
+            else:
+                error_type = 'low_quality_score'
 
-            # 4. 检查禁止的API
-            forbidden_apis = ['createArc', 'ctx.arc', 'drawArc']
-            for api in forbidden_apis:
-                if api in code:
-                    issues.append(f"使用了不存在的API：{api}")
-                    error_type = 'invalid_api'
-
-            # 5. 检查括号闭合
-            open_brackets = code.count('{') + code.count('(') + code.count('[')
-            close_brackets = code.count('}') + code.count(')') + code.count(']')
-            if open_brackets != close_brackets:
-                issues.append(f"括号不匹配：开{open_brackets}个，闭{close_brackets}个")
-                error_type = 'unclosed_brackets'
-
-        # 6. 检查变量
-        if len(spec.variables) < 2:
-            issues.append(f"变量不足：{len(spec.variables)}个，至少需要2个")
-            if not error_type:
-                error_type = 'insufficient_variables'
-
-        # 7. 检查重复
+        # 检查重复
         if spec.name in state.used_simulators:
             issues.append(f"模拟器'{spec.name}'与前面章节重复")
             if not error_type:
@@ -1290,7 +1283,8 @@ class CourseSupervisor:
         return {
             'approved': len(issues) == 0,
             'issues': issues,
-            'error_type': error_type
+            'error_type': error_type,
+            'quality_score': quality_score.total_score
         }
 
     async def _check_content_step(
@@ -1406,7 +1400,114 @@ class CourseSupervisor:
             prompt_additions.append(f"  - {issue}")
 
         # 根据错误类型添加针对性指导
-        if error_type == 'invalid_api':
+        if error_type == 'poor_visual_quality':
+            prompt_additions.append("""
+【视觉质量不足 - 配色和视觉设计问题】
+模拟器的视觉质量评分过低。请注意：
+
+1. **配色协调性**：
+   - 避免使用过多高饱和度颜色（饱和度>0.6的颜色不超过2种）
+   - 控制亮度对比，不要使用过于刺眼的颜色搭配
+   - 推荐使用柔和色调：#3b82f6(蓝)、#10b981(绿)、#f59e0b(橙)、#8b5cf6(紫)
+
+2. **视觉元素**：
+   - 至少使用5种以上不同颜色
+   - 添加文字标签说明(fillText)
+   - 显示实时数据(textContent/innerText)
+
+3. **禁止**：
+   - 不要使用纯色高亮背景（如亮紫色背景）
+   - 避免高饱和度颜色直接相邻
+""")
+
+        elif error_type == 'insufficient_interaction':
+            prompt_additions.append("""
+【交互性严重不足 - 必须添加拖动或点击交互】
+模拟器缺少交互性。**至少需要2个拖动或点击交互**：
+
+1. **拖动交互**（推荐）：
+   - 使用 mousedown + mousemove + mouseup 事件
+   - 示例：拖动一个元素改变位置或参数
+   ```javascript
+   let dragging = false;
+   canvas.addEventListener('mousedown', (e) => {
+       dragging = true;
+   });
+   canvas.addEventListener('mousemove', (e) => {
+       if (dragging) {
+           // 更新元素位置
+       }
+   });
+   canvas.addEventListener('mouseup', () => {
+       dragging = false;
+   });
+   ```
+
+2. **点击交互**：
+   - 使用 click 事件监听器
+   - 示例：点击切换状态、点击显示/隐藏元素
+   ```javascript
+   canvas.addEventListener('click', (e) => {
+       // 处理点击
+   });
+   ```
+
+3. **配合动画**：
+   - 交互必须有对应的动画反馈
+   - 使用 requestAnimationFrame 实现平滑动画
+
+**要求**：至少实现2个独立的交互元素！
+""")
+
+        elif error_type == 'poor_canvas_usage':
+            prompt_additions.append("""
+【Canvas API使用不足】
+Canvas 2D API使用质量不足。请：
+
+1. 增加 Canvas API 调用次数（至少60次 ctx. 调用）
+2. 使用多样化的绘图方法：
+   - fillRect, strokeRect（矩形）
+   - arc（圆形）
+   - beginPath, lineTo, stroke（路径）
+   - fillText（文字）
+   - save, restore（状态保存）
+
+3. 实现动画：
+   - function animate() {...}
+   - requestAnimationFrame(animate)
+   - 使用时间变量实现动态效果
+""")
+
+        elif error_type == 'poor_structure':
+            prompt_additions.append("""
+【HTML结构不完整】
+HTML结构存在问题。必须包含：
+
+1. <!DOCTYPE html>
+2. 完整的 <html><head><body> 结构
+3. <canvas> 元素
+4. <style> 样式标签
+5. <script> 脚本标签
+6. 至少2个 <input type="range"> 控件
+
+代码至少100行。
+""")
+
+        elif error_type == 'low_quality_score':
+            prompt_additions.append("""
+【综合质量不达标】
+模拟器整体质量评分过低。请全面提升：
+
+1. 结构完整性（20分）
+2. Canvas使用质量（25分）
+3. 视觉效果（20分）- 注意配色协调
+4. 交互性（20分）- 至少2个拖动或点击交互
+5. 教学价值（15分）
+
+目标：总分至少75分（优质85+分）
+""")
+
+        elif error_type == 'invalid_api':
             prompt_additions.append("""
 【API使用警告 - 严重错误】
 你使用了不存在的API！只能使用以下白名单内的API：
@@ -1672,4 +1773,432 @@ ctx.setPosition(elementId, safeX, safeY);
                 'decision': 'revise' if len(issues) <= 2 else 'regenerate',
                 'reason': '基于问题数量的默认决策',
                 'revision_plan': ''
+            }
+
+    def _get_visualization_recommendations(
+        self,
+        state: GenerationState,
+        chapter_outline: ChapterOutline
+    ) -> str:
+        """
+        生成可视化元素和配色推荐（基于标准文档）
+
+        Args:
+            state: 生成状态
+            chapter_outline: 章节大纲
+
+        Returns:
+            推荐信息的文本
+        """
+        try:
+            # 识别学科（基于课程标题和关键词）
+            subject = self._detect_subject(state.course_title, chapter_outline.key_concepts)
+
+            # 获取学科配色方案
+            color_scheme = self.standards_loader.get_subject_color_scheme(subject)
+
+            # 获取推荐的可视化元素
+            viz_elements = self.standards_loader.get_recommended_elements_for_subject(subject)
+
+            # 构建推荐文本
+            recommendation = f"""
+【可视化设计推荐】（基于学科：{subject}）
+
+=== 配色方案 ===
+学科：{color_scheme.get('name', subject)}
+设计理念：{color_scheme.get('philosophy', '严谨专业的学科配色')}
+
+主色：{color_scheme.get('primary', '#3B82F6')}
+次色：{color_scheme.get('secondary', '#10B981')}
+强调色：{color_scheme.get('accent', '#F59E0B')}
+成功色：{color_scheme.get('success', '#10B981')}
+警告色：{color_scheme.get('danger', '#EF4444')}
+中性色：{color_scheme.get('neutral', '#6B7280')}
+高亮色：{color_scheme.get('highlight', '#FBBF24')}
+
+特定用途颜色：
+"""
+            # 添加use_cases中的颜色
+            use_cases = color_scheme.get('use_cases', {})
+            for use_case, color in list(use_cases.items())[:6]:  # 只显示前6个
+                recommendation += f"  - {use_case}: {color}\n"
+
+            recommendation += """
+=== 推荐可视化元素 ===
+"""
+            # 添加每个推荐元素的说明
+            if viz_elements:
+                for elem_id in viz_elements[:5]:  # 只显示前5个
+                    elem = self.standards_loader.get_visualization_element(elem_id)
+                    if elem:
+                        recommendation += f"- {elem.get('name', elem_id)}（{elem_id}）: {elem.get('description', '可视化元素')}\n"
+            else:
+                recommendation += "- 使用圆形、矩形、线条等基础图形\n- 添加文字标签和数据显示\n- 实现交互控制和动画效果\n"
+
+            recommendation += """
+=== 画布约束（重要）===
+- 画布尺寸由 ctx.width 和 ctx.height 动态获取，不同端尺寸不同
+- 所有坐标必须使用比例计算，如: x = width * 0.5, y = height * 0.3
+- 安全绘制区域: x在[width*0.12, width*0.95], y在[55, height-35]
+- 动态坐标必须用 ctx.math.clamp() 限制范围
+- 禁止硬编码绝对坐标（如 x=500），否则在不同端会超出边界
+
+=== 视觉质量要求 ===
+- 颜色对比度 >= 4.5:1（背景是深色#1e293b，元素必须使用亮色）
+- 禁止使用深色（#000000, #111111, #1e293b等），否则元素不可见
+- 使用缓动函数实现平滑动画（推荐 easeOutBack, easeInOutElastic）
+- 每个视觉元素要有明确的教学意义
+
+"""
+            return recommendation
+
+        except Exception as e:
+            logger.warning(f"Failed to generate visualization recommendations: {e}")
+            # 返回默认推荐
+            return """
+【可视化设计推荐】
+
+=== 基础配色 ===
+主色：#3B82F6（蓝色）
+次色：#10B981（绿色）
+强调色：#F59E0B（橙色）
+
+=== 推荐元素 ===
+- 使用圆形、矩形、线条等基础图形组合
+- 添加文字标签说明
+- 实现平滑动画效果
+
+"""
+
+    def _detect_subject(self, course_title: str, key_concepts: List[str]) -> str:
+        """
+        识别课程所属学科
+
+        Args:
+            course_title: 课程标题
+            key_concepts: 核心概念列表
+
+        Returns:
+            学科ID（physics, chemistry, biology, mathematics, etc.）
+        """
+        # 将标题和概念合并
+        text = f"{course_title} {' '.join(key_concepts)}".lower()
+
+        # 学科关键词映射
+        subject_keywords = {
+            'physics': ['物理', '力学', '运动', '能量', '电磁', '光学', 'physics', 'force', 'motion', 'energy'],
+            'chemistry': ['化学', '反应', '分子', '原子', '化合', 'chemistry', 'reaction', 'molecule', 'atom'],
+            'biology': ['生物', '细胞', '基因', '进化', '生态', 'biology', 'cell', 'gene', 'evolution', '生命'],
+            'mathematics': ['数学', '函数', '方程', '几何', '代数', 'math', 'function', 'equation', 'geometry'],
+            'history': ['历史', '朝代', '事件', '文化', 'history', 'dynasty', 'event', '年代'],
+            'geography': ['地理', '地形', '气候', '地球', 'geography', 'terrain', 'climate', 'earth'],
+            'computer_science': ['编程', '算法', '计算机', '代码', 'programming', 'algorithm', 'computer', 'code'],
+            'medicine': ['医学', '疾病', '治疗', '人体', 'medicine', 'disease', 'treatment', 'anatomy']
+        }
+
+        # 计算每个学科的匹配分数
+        scores = {}
+        for subject, keywords in subject_keywords.items():
+            score = sum(1 for kw in keywords if kw in text)
+            if score > 0:
+                scores[subject] = score
+
+        # 返回得分最高的学科，如果没有匹配则返回physics作为默认
+        if scores:
+            return max(scores, key=scores.get)
+        else:
+            return 'physics'
+
+    def recommend_interaction_types(
+        self,
+        simulator_name: str,
+        simulator_description: str,
+        variables: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        为模拟器推荐合适的交互类型
+
+        Args:
+            simulator_name: 模拟器名称
+            simulator_description: 模拟器描述
+            variables: 变量列表
+
+        Returns:
+            推荐的交互类型列表（包含详细信息）
+        """
+        try:
+            # 加载所有交互类型
+            interaction_types = self.standards_loader.get_interaction_types()
+            all_types = interaction_types.get('interaction_types', [])
+
+            # 基础推荐：slider（变量控制）- 所有模拟器都需要
+            recommended = []
+
+            # 分析文本关键词
+            text = f"{simulator_name} {simulator_description}".lower()
+
+            # 推荐逻辑
+            recommendations = {
+                'click': ['点击', '选择', '切换', 'click', 'select', 'toggle', '按钮', '开关'],
+                'drag': ['拖动', '移动', '位置', 'drag', 'move', 'position', '拖拽'],
+                'hover': ['悬停', '提示', '查看', 'hover', 'tooltip', 'info', '详情'],
+                'play_pause': ['动画', '播放', '时间', 'animation', 'play', 'time', '演示'],
+                'timeline_scrub': ['时间线', '进度', '历史', 'timeline', 'progress', 'history', '演变'],
+                'pinch_zoom': ['缩放', '放大', '查看', 'zoom', 'scale', 'view', '细节'],
+                'rotate': ['旋转', '3d', '视角', 'rotate', '3d', 'angle', '角度'],
+                'key_press': ['键盘', '控制', '快捷', 'keyboard', 'control', 'shortcut'],
+                'dropdown_select': ['模式', '类型', '选项', 'mode', 'type', 'option', '切换'],
+                'text_input': ['输入', '参数', '搜索', 'input', 'parameter', 'search', '自定义']
+            }
+
+            for type_id, keywords in recommendations.items():
+                if any(kw in text for kw in keywords):
+                    type_info = self.standards_loader.get_interaction_type(type_id)
+                    if type_info:
+                        recommended.append({
+                            'id': type_id,
+                            'name': type_info['name'],
+                            'description': type_info['description'],
+                            'difficulty': type_info['difficulty'],
+                            'priority': 'recommended'
+                        })
+
+            # 如果没有推荐，添加默认的基础交互
+            if not recommended:
+                for default_id in ['click', 'hover']:
+                    type_info = self.standards_loader.get_interaction_type(default_id)
+                    if type_info:
+                        recommended.append({
+                            'id': default_id,
+                            'name': type_info['name'],
+                            'description': type_info['description'],
+                            'difficulty': type_info['difficulty'],
+                            'priority': 'default'
+                        })
+
+            # 限制推荐数量（最多3个）
+            return recommended[:3]
+
+        except Exception as e:
+            logger.warning(f"Failed to recommend interaction types: {e}")
+            return []
+
+    def generate_interaction_recommendation_text(
+        self,
+        simulator_name: str,
+        simulator_description: str,
+        variables: List[Dict[str, Any]]
+    ) -> str:
+        """
+        生成交互方式推荐的文本（用于提示词）
+
+        Args:
+            simulator_name: 模拟器名称
+            simulator_description: 模拟器描述
+            variables: 变量列表
+
+        Returns:
+            推荐文本
+        """
+        recommendations = self.recommend_interaction_types(
+            simulator_name,
+            simulator_description,
+            variables
+        )
+
+        if not recommendations:
+            return ""
+
+        text = "\n【推荐交互方式】\n"
+        text += "基于模拟器特性，推荐以下交互方式：\n\n"
+
+        for rec in recommendations:
+            text += f"- **{rec['name']}** ({rec['id']})：{rec['description']}\n"
+            text += f"  难度：{rec['difficulty']}，优先级：{rec['priority']}\n"
+
+        text += "\n提示：可根据实际需求选择1-2种交互方式，保持界面简洁。\n"
+
+        return text
+
+    async def evaluate_aesthetic_quality(
+        self,
+        code: str,
+        simulator_name: str,
+        subject: str = 'physics'
+    ) -> Dict[str, Any]:
+        """
+        评估模拟器代码的美学质量
+
+        Args:
+            code: 模拟器代码
+            simulator_name: 模拟器名称
+            subject: 学科
+
+        Returns:
+            {
+                'overall_score': 0-100,
+                'color_score': 0-25,
+                'composition_score': 0-25,
+                'animation_score': 0-25,
+                'refinement_score': 0-25,
+                'issues': List[str],
+                'suggestions': List[str]
+            }
+        """
+        try:
+            score = {
+                'overall_score': 0,
+                'color_score': 0,
+                'composition_score': 0,
+                'animation_score': 0,
+                'refinement_score': 0,
+                'issues': [],
+                'suggestions': []
+            }
+
+            # === 1. 配色评估 (0-25分) ===
+            color_scheme = self.standards_loader.get_subject_color_scheme(subject)
+            recommended_colors = [
+                color_scheme['base_colors']['primary'],
+                color_scheme['base_colors']['secondary'],
+                color_scheme['base_colors']['accent']
+            ]
+
+            # 检查是否使用了推荐配色
+            colors_used = 0
+            for color in recommended_colors:
+                if color.lower() in code.lower():
+                    colors_used += 1
+
+            score['color_score'] = min(25, colors_used * 8)
+
+            # 检查是否使用了深色（不可见）
+            forbidden_colors = ['#000000', '#111111', '#1e293b', '#0f172a', '#1a1a1a']
+            for dark_color in forbidden_colors:
+                if dark_color in code:
+                    score['issues'].append(f"使用了深色{dark_color}，在深色背景下不可见")
+                    score['color_score'] -= 10
+
+            # 检查对比度
+            if '#ffffff' in code or '#e2e8f0' in code or '#f8fafc' in code:
+                score['color_score'] += 5  # 有亮色文字
+
+            # === 2. 构图评估 (0-25分) ===
+            # 检查是否有标题
+            if 'title' in code.lower() or '标题' in code:
+                score['composition_score'] += 5
+            else:
+                score['issues'].append("缺少标题")
+
+            # 检查是否有图例或状态面板
+            if 'legend' in code.lower() or 'panel' in code.lower() or '图例' in code or '面板' in code:
+                score['composition_score'] += 5
+            else:
+                score['issues'].append("缺少图例或状态面板")
+
+            # 检查是否有足够的文字标注
+            text_count = code.count('createText')
+            if text_count >= 6:
+                score['composition_score'] += 10
+            elif text_count >= 3:
+                score['composition_score'] += 5
+            else:
+                score['issues'].append(f"文字标注太少（{text_count}个）")
+
+            # 检查层次感
+            if code.count('createCircle') + code.count('createRect') >= 10:
+                score['composition_score'] += 5
+
+            # === 3. 动画评估 (0-25分) ===
+            # 检查是否使用了缓动函数
+            easing_functions = ['lerp', 'easeIn', 'easeOut', 'easeInOut', 'easeOutBack']
+            has_easing = any(ease in code for ease in easing_functions)
+
+            if has_easing:
+                score['animation_score'] += 10
+                score['suggestions'].append("很好地使用了缓动函数")
+            else:
+                score['issues'].append("建议使用缓动函数（lerp, easeOut等）实现平滑动画")
+
+            # 检查动画类型
+            animation_types = 0
+            if 'setPosition' in code or '.x =' in code or '.y =' in code:
+                animation_types += 1
+            if 'setColor' in code or 'setAlpha' in code:
+                animation_types += 1
+            if 'setScale' in code or 'setRotation' in code:
+                animation_types += 1
+            if 'setGlow' in code:
+                animation_types += 1
+
+            score['animation_score'] += min(10, animation_types * 3)
+
+            # 检查时间驱动动画
+            if 'ctx.time' in code or 'math.sin' in code or 'math.cos' in code:
+                score['animation_score'] += 5
+
+            # === 4. 精致度评估 (0-25分) ===
+            # 检查圆角使用
+            if 'cornerRadius' in code:
+                score['refinement_score'] += 5
+                score['suggestions'].append("使用了圆角，视觉更柔和")
+            else:
+                score['suggestions'].append("建议为矩形添加圆角（cornerRadius）")
+
+            # 检查发光效果
+            if 'setGlow' in code:
+                score['refinement_score'] += 5
+                score['suggestions'].append("使用了发光效果，增强视觉吸引力")
+
+            # 检查代码组织
+            if '// ===' in code or '// ---' in code or code.count('\n\n') >= 3:
+                score['refinement_score'] += 5
+
+            # 检查变量命名
+            import re
+            var_names = re.findall(r'\b(?:let|const)\s+(\w+)', code)
+            meaningful = sum(1 for name in var_names if len(name) > 2 and not name.startswith('_'))
+            if meaningful >= 8:
+                score['refinement_score'] += 5
+
+            # 检查注释
+            comment_count = code.count('//') + code.count('/*')
+            if comment_count >= 6:
+                score['refinement_score'] += 5
+            elif comment_count < 3:
+                score['issues'].append("注释太少")
+
+            # === 计算总分 ===
+            score['color_score'] = max(0, min(25, score['color_score']))
+            score['composition_score'] = max(0, min(25, score['composition_score']))
+            score['animation_score'] = max(0, min(25, score['animation_score']))
+            score['refinement_score'] = max(0, min(25, score['refinement_score']))
+
+            score['overall_score'] = (
+                score['color_score'] +
+                score['composition_score'] +
+                score['animation_score'] +
+                score['refinement_score']
+            )
+
+            # 生成总体建议
+            if score['overall_score'] >= 80:
+                score['suggestions'].insert(0, "✓ 美学质量优秀，视觉呈现精致")
+            elif score['overall_score'] >= 60:
+                score['suggestions'].insert(0, "良好，但仍有提升空间")
+            else:
+                score['suggestions'].insert(0, "需要改进视觉设计")
+
+            return score
+
+        except Exception as e:
+            logger.error(f"Failed to evaluate aesthetic quality: {e}")
+            return {
+                'overall_score': 0,
+                'color_score': 0,
+                'composition_score': 0,
+                'animation_score': 0,
+                'refinement_score': 0,
+                'issues': [str(e)],
+                'suggestions': []
             }

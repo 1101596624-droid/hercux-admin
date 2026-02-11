@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from enum import Enum
 from datetime import datetime
+import re
 
 
 class ReviewStatus(Enum):
@@ -25,97 +26,101 @@ class ChapterType(Enum):
 
 
 @dataclass
-class SimulatorQualityStandards:
-    """模拟器质量标准 - 函数图版 (2026-02-08 因果关系函数图)
+class HTMLSimulatorQualityStandards:
+    """HTML模拟器质量标准 (2026-02-11)
 
-    设计原则：
-    1. 画布使用比例坐标，适配不同端尺寸
-    2. 代码长度适中，减少截断风险
-    3. 确保核心功能：变量联动、函数曲线、清晰标签
-    4. 视觉精细度：坐标系、函数曲线、当前值标注、数值面板
+    HTML格式模拟器使用标准Canvas 2D API，不再使用ctx.createCircle等专有API
+    基础模板75分，优质模板85-95分
     """
 
-    # === 代码质量标准（平衡级）===
-    min_code_lines: int = 80                    # 最少代码行数
-    max_code_lines: int = 200                   # 最多代码行数
-    must_have_setup: bool = True                # 必须有 setup 函数
-    must_have_update: bool = True               # 必须有 update 函数
-    must_use_variables: bool = True             # 必须使用变量（与滑块联动）
+    # === 代码质量标准 ===
+    min_code_lines: int = 100                   # 最少代码行数（HTML格式较长）
+    max_code_lines: int = 1200                  # 最多代码行数
+    must_have_html_structure: bool = True       # 必须有完整HTML结构
+    must_have_doctype: bool = True              # 必须有 <!DOCTYPE html>
+    must_have_canvas: bool = True               # 必须有 <canvas> 元素
+    must_have_style: bool = True                # 必须有 <style> 标签
+    must_have_script: bool = True               # 必须有 <script> 标签
+    must_use_variables: bool = True             # 必须使用变量
     min_variables: int = 2                      # 最少变量数量
-    max_variables: int = 3                      # 最多变量数量
-    min_functions: int = 2                      # 最少自定义函数数量
-    min_comments: int = 6                       # 最少注释行数
+    max_variables: int = 4                      # 最多变量数量
+    min_comments: int = 5                       # 最少注释行数
 
-    # === 视觉质量标准（精细级）===
-    min_visual_elements: int = 5                # 最少视觉元素类型
-    min_total_shapes: int = 15                  # 最少图形总数（函数图风格）
-    must_have_animation: bool = True            # 必须有动画效果
-    must_have_labels: bool = True               # 必须有文字标签说明
-    must_have_legend: bool = True               # 必须有图例
-    must_have_data_display: bool = True         # 必须有数据显示
-    must_have_background: bool = False          # 背景装饰可选
-    must_have_title: bool = True                # 必须有标题
-    must_have_axis: bool = True                 # 函数图必须有坐标轴
-    must_have_tooltip: bool = False             # 提示信息可选
-    min_colors_used: int = 5                    # 最少使用颜色数量
-    min_text_elements: int = 6                  # 最少文字元素数量
-    recommended_colors: List[str] = field(default_factory=lambda: [
-        '#3B82F6',  # 蓝色
-        '#10B981',  # 绿色
-        '#F59E0B',  # 橙色
-        '#EF4444',  # 红色
-        '#8B5CF6',  # 紫色
-        '#EC4899',  # 粉色
-        '#06B6D4',  # 青色
-        '#FBBF24',  # 黄色
-        '#14B8A6',  # 青绿色
-        '#F97316',  # 深橙色
+    # === Canvas API 使用标准 ===
+    min_canvas_api_calls: int = 30              # 最少Canvas API调用数（ctx.）
+    must_use_animation_frame: bool = True       # 必须使用 requestAnimationFrame
+    recommended_canvas_apis: List[str] = field(default_factory=lambda: [
+        'ctx.fillRect',
+        'ctx.strokeRect',
+        'ctx.arc',
+        'ctx.beginPath',
+        'ctx.lineTo',
+        'ctx.fill',
+        'ctx.stroke',
+        'ctx.fillText',
+        'ctx.save',
+        'ctx.restore',
     ])
 
-    # === 交互质量标准（核心）===
+    # === 视觉质量标准 ===
+    min_colors_used: int = 5                    # 最少使用颜色数量
+    must_have_title: bool = True                # 必须有标题
+    must_have_labels: bool = True               # 必须有文字标签
+    must_have_data_display: bool = True         # 必须有数据显示
+    must_have_animation: bool = True            # 必须有动画效果
+    recommended_colors: List[str] = field(default_factory=lambda: [
+        '#3B82F6', '#60A5FA', '#93C5FD',       # 蓝色系
+        '#8B5CF6', '#A78BFA', '#C4B5FD',       # 紫色系
+        '#F59E0B', '#FBBF24', '#FCD34D',       # 橙黄系
+        '#10B981', '#34D399', '#6EE7B7',       # 绿色系
+        '#EF4444', '#F87171', '#FCA5A5',       # 红色系
+        '#F1F5F9', '#E2E8F0', '#CBD5E1',       # 文本色
+    ])
+
+    # === HTML控件标准 ===
+    min_input_controls: int = 2                 # 最少input range控件数量
+    must_show_control_values: bool = True       # 必须显示控件当前值
+    must_have_event_listeners: bool = True      # 必须有事件监听器
+
+    # === 交互质量标准 ===
     variable_must_affect_visual: bool = True    # 变量必须影响视觉效果
     must_show_real_time_values: bool = True     # 必须实时显示数值
     smooth_animation: bool = True               # 动画必须流畅
-    must_have_state_panel: bool = True          # 必须有状态面板
-    must_have_progress_indicator: bool = False  # 进度指示器可选
-    min_animation_types: int = 1                # 最少动画类型数量
 
-    # === 教学质量标准（核心）===
+    # === 教学质量标准 ===
     must_demonstrate_concept: bool = True       # 必须演示核心概念
     must_have_clear_cause_effect: bool = True   # 必须有清晰的因果关系
     variables_must_be_meaningful: bool = True   # 变量必须有实际意义
     must_have_visual_feedback: bool = True      # 变量变化必须有视觉反馈
-    must_have_educational_value: bool = True    # 必须有教学价值
-    must_show_formula: bool = False             # 公式可选
 
     # === 禁止项 ===
     forbidden_patterns: List[str] = field(default_factory=lambda: [
-        'console.log',      # 不要调试代码
-        'alert(',           # 不要弹窗
-        'document.',        # 不要操作DOM
-        'window.',          # 不要操作window
-        'eval(',            # 不要eval
-        'setTimeout',       # 不要用setTimeout（用ctx.time）
-        'setInterval',      # 不要用setInterval
-        'fetch(',           # 不要网络请求
-        'XMLHttpRequest',   # 不要网络请求
-        'localStorage',     # 不要本地存储
-        'sessionStorage',   # 不要会话存储
-        'debugger',         # 不要调试语句
-        'throw ',           # 不要抛出异常
-        'createArc',        # 不存在此API
+        'eval(',
+        'Function(',
+        'console.log',
+        'alert(',
+        'confirm(',
+        'prompt(',
+        'setTimeout',
+        'setInterval',
+        'fetch(',
+        'XMLHttpRequest',
+        'localStorage',
+        'sessionStorage',
+        'debugger',
+        'document.write',
+        'innerHTML',
+        'outerHTML',
     ])
 
-    # === 简陋图形禁止项 ===
-    forbidden_simple_representations: List[str] = field(default_factory=lambda: [
-        '单个圆形代表人物',
-        '单个矩形代表建筑',
-        '单个圆形代表动物',
-        '单个矩形代表车辆',
-        '纯色背景无装饰',
-        '无标签的图形',
-        '无动画的静态图',
-    ])
+    # === 质量评分权重 ===
+    score_weights: Dict[str, int] = field(default_factory=lambda: {
+        'structure': 20,        # HTML结构完整性
+        'canvas_usage': 25,     # Canvas API使用质量
+        'visual_quality': 20,   # 视觉效果质量
+        'interactivity': 20,    # 交互性
+        'education': 15,        # 教学价值
+    })
 
 
 @dataclass
@@ -147,8 +152,8 @@ class ChapterQualityStandards:
     min_diagram_elements: int = 3               # 最少图片元素数
 
     # === 模拟器标准 ===
-    simulator_standards: SimulatorQualityStandards = field(
-        default_factory=SimulatorQualityStandards
+    simulator_standards: HTMLSimulatorQualityStandards = field(
+        default_factory=HTMLSimulatorQualityStandards
     )
 
     # === 禁止项（扩展）===
@@ -201,381 +206,477 @@ class CourseOutline:
 
 
 @dataclass
-class SimulatorSpec:
-    """模拟器规格"""
+class HTMLSimulatorSpec:
+    """HTML模拟器规格 (2026-02-11)"""
     name: str
     description: str
-    mode: str = "custom"
-    variables: List[Dict[str, Any]] = field(default_factory=list)
-    custom_code: str = ""
+    html_content: str = ""
+    mode: str = "html"
 
-    def validate(self, standards: SimulatorQualityStandards) -> List[str]:
-        """验证模拟器是否符合质量标准，返回问题列表"""
+    def validate(self, standards: HTMLSimulatorQualityStandards) -> List[str]:
+        """验证HTML模拟器是否符合质量标准，返回问题列表"""
         issues = []
+        code = self.html_content
+
+        # 检查HTML结构
+        if standards.must_have_doctype and '<!DOCTYPE html>' not in code:
+            issues.append("缺少 <!DOCTYPE html> 声明")
+
+        if standards.must_have_html_structure:
+            if '<html' not in code:
+                issues.append("缺少 <html> 标签")
+            if '<head>' not in code:
+                issues.append("缺少 <head> 标签")
+            if '<body>' not in code:
+                issues.append("缺少 <body> 标签")
+
+        if standards.must_have_canvas and '<canvas' not in code:
+            issues.append("缺少 <canvas> 元素")
+
+        if standards.must_have_style and '<style>' not in code:
+            issues.append("缺少 <style> 标签")
+
+        if standards.must_have_script and '<script>' not in code:
+            issues.append("缺少 <script> 标签")
 
         # 检查代码行数
-        code_lines = len([l for l in self.custom_code.split('\n') if l.strip()])
+        code_lines = len([l for l in code.split('\n') if l.strip()])
         if code_lines < standards.min_code_lines:
             issues.append(f"代码太短，只有{code_lines}行，至少需要{standards.min_code_lines}行")
-        if hasattr(standards, 'max_code_lines') and code_lines > standards.max_code_lines:
+        if code_lines > standards.max_code_lines:
             issues.append(f"代码过长，有{code_lines}行，最多{standards.max_code_lines}行")
 
-        # 检查必要函数
-        if standards.must_have_setup and 'function setup' not in self.custom_code:
-            issues.append("缺少 setup 函数")
-        if standards.must_have_update and 'function update' not in self.custom_code:
-            issues.append("缺少 update 函数")
-
-        # 检查自定义函数数量（新增）
-        if hasattr(standards, 'min_functions'):
-            function_count = self.custom_code.count('function ') - 2  # 减去 setup 和 update
-            if function_count < standards.min_functions:
-                issues.append(f"自定义函数太少，只有{max(0, function_count)}个，建议至少{standards.min_functions}个辅助函数")
-
-        # 检查变量使用
-        if standards.must_use_variables:
-            if 'ctx.getVar' not in self.custom_code:
-                issues.append("没有使用变量（ctx.getVar），模拟器无法与滑块联动")
-
-        # 检查变量数量
-        if len(self.variables) < standards.min_variables:
-            issues.append(f"变量太少，只有{len(self.variables)}个，至少需要{standards.min_variables}个")
-        if len(self.variables) > standards.max_variables:
-            issues.append(f"变量太多，有{len(self.variables)}个，最多{standards.max_variables}个")
-
-        # 检查视觉元素类型
-        visual_methods = ['createCircle', 'createRect', 'createText', 'createLine', 'createCurve', 'createPolygon', 'createArc', 'createPath']
-        visual_count = sum(1 for m in visual_methods if m in self.custom_code)
-        if visual_count < standards.min_visual_elements:
-            issues.append(f"视觉元素类型太少，只用了{visual_count}种，至少需要{standards.min_visual_elements}种")
-
-        # 检查图形总数（新增）
-        if hasattr(standards, 'min_total_shapes'):
-            total_shapes = sum(self.custom_code.count(m) for m in visual_methods)
-            if total_shapes < standards.min_total_shapes:
-                issues.append(f"图形总数太少，只有{total_shapes}个，至少需要{standards.min_total_shapes}个图形元素")
-
-        # 检查颜色使用（新增）
-        if hasattr(standards, 'min_colors_used'):
-            import re
-            color_pattern = r"#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgb\([^)]+\)|rgba\([^)]+\)"
-            colors_found = set(re.findall(color_pattern, self.custom_code))
-            if len(colors_found) < standards.min_colors_used:
-                issues.append(f"颜色使用太少，只用了{len(colors_found)}种颜色，至少需要{standards.min_colors_used}种")
+        # 检查Canvas API使用
+        canvas_api_count = code.count('ctx.')
+        if canvas_api_count < standards.min_canvas_api_calls:
+            issues.append(f"Canvas API调用太少，只有{canvas_api_count}处，至少需要{standards.min_canvas_api_calls}处")
 
         # 检查动画
-        if standards.must_have_animation:
-            animation_indicators = ['ctx.time', 'ctx.math.sin', 'ctx.math.cos', 'setPosition', 'setRotation', 'setScale', 'math.lerp']
-            has_animation = any(ind in self.custom_code for ind in animation_indicators)
-            if not has_animation:
-                issues.append("没有动画效果，模拟器应该有动态变化（使用 ctx.time 或 math 函数）")
+        if standards.must_use_animation_frame and 'requestAnimationFrame' not in code:
+            issues.append("没有使用 requestAnimationFrame 实现动画循环")
 
-        # 检查标签
+        # 检查变量
+        if standards.must_use_variables:
+            if 'variables' not in code and 'let ' not in code:
+                issues.append("没有定义变量")
+
+        # 检查HTML控件
+        input_count = code.count('<input type="range"')
+        if input_count < standards.min_input_controls:
+            issues.append(f"input range控件太少，只有{input_count}个，至少需要{standards.min_input_controls}个")
+
+        if standards.must_have_event_listeners:
+            if 'addEventListener' not in code:
+                issues.append("没有事件监听器，控件无法响应用户操作")
+
+        # 检查视觉元素
         if standards.must_have_labels:
-            if 'createText' not in self.custom_code:
+            if 'fillText' not in code and 'strokeText' not in code:
                 issues.append("没有文字标签，用户无法理解模拟器展示的内容")
 
-        # 检查标题（新增）
-        if hasattr(standards, 'must_have_title') and standards.must_have_title:
-            # 检查是否有大字号的标题文本
-            if self.custom_code.count('createText') < 2:
-                issues.append("缺少标题，模拟器应该有明显的标题说明")
-
-        # 检查背景装饰（新增）
-        if hasattr(standards, 'must_have_background') and standards.must_have_background:
-            background_indicators = ['for (let', 'for(let', 'grid', 'background', '网格']
-            has_background = any(ind in self.custom_code.lower() for ind in background_indicators)
-            if not has_background and self.custom_code.count('createLine') < 5:
-                issues.append("缺少背景装饰（如网格线、刻度线等），视觉效果单调")
-
-        # 检查状态面板（新增）
-        if hasattr(standards, 'must_have_state_panel') and standards.must_have_state_panel:
-            panel_indicators = ['Label', 'status', 'panel', '状态', '数据', 'setText']
-            has_panel = any(ind in self.custom_code for ind in panel_indicators)
-            if not has_panel:
-                issues.append("缺少状态/数据显示面板，用户无法看到实时数值变化")
-
-        # 检查注释数量（新增）
-        if hasattr(standards, 'min_comments') and standards.min_comments > 0:
-            comment_count = self.custom_code.count('//') + self.custom_code.count('/*')
-            if comment_count < standards.min_comments:
-                issues.append(f"注释太少，只有{comment_count}处，至少需要{standards.min_comments}处注释说明")
-
-        # 检查文字元素数量（新增）
-        if hasattr(standards, 'min_text_elements') and standards.min_text_elements > 0:
-            text_count = self.custom_code.count('createText')
-            if text_count < standards.min_text_elements:
-                issues.append(f"文字元素太少，只有{text_count}个，至少需要{standards.min_text_elements}个文字标签")
-
-        # 检查坐标轴/刻度（新增）
-        if hasattr(standards, 'must_have_axis') and standards.must_have_axis:
-            axis_indicators = ['axis', '坐标', '刻度', 'scale', 'tick', 'grid', 'for (let', 'for(let']
-            has_axis = any(ind in self.custom_code.lower() for ind in axis_indicators)
-            if not has_axis and self.custom_code.count('createLine') < 8:
-                issues.append("缺少坐标轴或刻度线，建议添加网格或刻度增强可读性")
-
-        # 检查提示信息（新增）
-        if hasattr(standards, 'must_have_tooltip') and standards.must_have_tooltip:
-            tooltip_indicators = ['tooltip', 'hint', '提示', 'info', 'setText', 'Label']
-            has_tooltip = any(ind in self.custom_code for ind in tooltip_indicators)
-            if not has_tooltip:
-                issues.append("缺少提示信息或动态文字更新，建议添加实时数据显示")
-
-        # 检查动画类型数量（新增）
-        if hasattr(standards, 'min_animation_types') and standards.min_animation_types > 0:
-            animation_types = {
-                'position': any(x in self.custom_code for x in ['setPosition', 'wolf.x', 'prey.x', '.x =', '.y =']),
-                'rotation': 'setRotation' in self.custom_code or 'rotate' in self.custom_code.lower(),
-                'scale': 'setScale' in self.custom_code or 'scale' in self.custom_code.lower(),
-                'color': any(x in self.custom_code for x in ['setColor', 'barColor', 'color =']),
-                'opacity': 'setOpacity' in self.custom_code or 'opacity' in self.custom_code.lower(),
-                'time_based': 'ctx.time' in self.custom_code or 'math.sin' in self.custom_code.lower(),
-            }
-            animation_count = sum(1 for v in animation_types.values() if v)
-            if animation_count < standards.min_animation_types:
-                issues.append(f"动画类型太少，只有{animation_count}种，至少需要{standards.min_animation_types}种动画效果")
-
-        # 检查层次感对象（新增）
-        if hasattr(standards, 'must_have_layered_objects') and standards.must_have_layered_objects:
-            # 检查是否有组合对象（多个图形组成一个对象）
-            object_indicators = ['body', 'head', 'legs', 'tail', 'ears', 'eyes', 'arms', 'wheels']
-            layered_count = sum(1 for ind in object_indicators if ind in self.custom_code.lower())
-            if layered_count < 3:
-                issues.append("缺少层次感的组合对象，主要元素应由多个图形组合而成（如身体、头部、四肢等）")
-
-        # 检查进度/状态指示器（新增）
-        if hasattr(standards, 'must_have_progress_indicator') and standards.must_have_progress_indicator:
-            progress_indicators = ['bar', 'progress', 'energy', 'health', 'status', '进度', '状态', '能量']
-            has_progress = any(ind in self.custom_code.lower() for ind in progress_indicators)
-            if not has_progress:
-                issues.append("缺少进度或状态指示器（如能量条、进度条等）")
+        # 检查颜色使用
+        color_pattern = r"#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgb\([^)]+\)|rgba\([^)]+\)"
+        colors_found = set(re.findall(color_pattern, code))
+        if len(colors_found) < standards.min_colors_used:
+            issues.append(f"颜色使用太少，只用了{len(colors_found)}种颜色，至少需要{standards.min_colors_used}种")
 
         # 检查禁止项
         for pattern in standards.forbidden_patterns:
-            if pattern in self.custom_code:
+            if pattern in code:
                 issues.append(f"代码中包含禁止使用的模式：{pattern}")
 
         return issues
 
-    def calculate_quality_score(self, standards: SimulatorQualityStandards = None) -> 'CodeQualityScore':
+    def calculate_quality_score(self, standards: HTMLSimulatorQualityStandards = None) -> 'HTMLSimulatorQualityScore':
         """
-        计算模拟器代码质量评分 (0-100)
+        计算HTML模拟器质量评分 (0-100)
 
         评分维度:
-        - 结构分 (0-25): setup/update函数、代码组织、函数数量
-        - 视觉分 (0-25): 元素丰富度、颜色、动画效果
-        - 交互分 (0-25): 变量联动、实时反馈、状态显示
-        - 教学分 (0-25): 概念演示、注释、可读性
+        - 结构分 (0-20): HTML结构完整性
+        - Canvas使用分 (0-25): Canvas API调用质量
+        - 视觉分 (0-20): 颜色、标签、数据显示
+        - 交互分 (0-20): 变量控件、事件监听
+        - 教学分 (0-15): 概念演示、注释
+
+        75分标准: 24个基础模板
         """
-        import re
-
         if standards is None:
-            standards = SimulatorQualityStandards()
+            standards = HTMLSimulatorQualityStandards()
 
-        score = CodeQualityScore()
-        code = self.custom_code
+        score = HTMLSimulatorQualityScore()
+        code = self.html_content
         lines = code.split('\n')
         non_empty_lines = [l for l in lines if l.strip()]
 
-        # ========== 结构分 (0-25) ==========
+        # ========== 结构分 (0-20) ==========
         structure = 0
         structure_details = {}
 
-        # 1. setup 函数 (5分)
-        has_setup = 'function setup' in code
-        structure += 5 if has_setup else 0
-        structure_details['has_setup'] = has_setup
+        # 1. DOCTYPE (3分)
+        has_doctype = '<!DOCTYPE html>' in code
+        structure += 3 if has_doctype else 0
+        structure_details['has_doctype'] = has_doctype
 
-        # 2. update 函数 (5分)
-        has_update = 'function update' in code
-        structure += 5 if has_update else 0
-        structure_details['has_update'] = has_update
+        # 2. 完整HTML结构 (8分)
+        has_html = '<html' in code
+        has_head = '<head>' in code
+        has_body = '<body>' in code
+        has_canvas = '<canvas' in code
+        structure += 2 if has_html else 0
+        structure += 2 if has_head else 0
+        structure += 2 if has_body else 0
+        structure += 2 if has_canvas else 0
+        structure_details['html_structure'] = {
+            'html': has_html, 'head': has_head,
+            'body': has_body, 'canvas': has_canvas
+        }
 
-        # 3. 代码行数 (5分): 80-200行得满分
+        # 3. 必要标签 (6分)
+        has_style = '<style>' in code
+        has_script = '<script>' in code
+        has_controls = '<input type="range"' in code
+        structure += 2 if has_style else 0
+        structure += 2 if has_script else 0
+        structure += 2 if has_controls else 0
+        structure_details['required_tags'] = {
+            'style': has_style, 'script': has_script, 'controls': has_controls
+        }
+
+        # 4. 代码行数 (3分): 100-1200行
         line_count = len(non_empty_lines)
         if line_count >= standards.min_code_lines:
             if line_count <= standards.max_code_lines:
-                structure += 5
+                structure += 3
             else:
-                structure += 3  # 超长扣2分
-        else:
-            structure += max(0, int(5 * line_count / standards.min_code_lines))
+                structure += 2
         structure_details['line_count'] = line_count
 
-        # 4. 辅助函数数量 (5分): 2个以上得满分
-        function_count = code.count('function ') - 2  # 减去 setup 和 update
-        function_count = max(0, function_count)
-        structure += min(5, function_count * 2)
-        structure_details['function_count'] = function_count
+        score.structure_score = min(20, structure)
 
-        # 5. 代码组织 (5分): 有清晰的代码块分隔
-        has_sections = code.count('\n\n') >= 3 or code.count('// ===') >= 2
-        structure += 5 if has_sections else 2
-        structure_details['has_sections'] = has_sections
+        # ========== Canvas使用分 (0-25) ==========
+        canvas = 0
+        canvas_details = {}
 
-        score.structure_score = min(25, structure)
+        # 1. Canvas API调用数量 (10分)
+        canvas_api_count = code.count('ctx.')
+        if canvas_api_count >= 100:
+            canvas += 10
+        elif canvas_api_count >= 60:
+            canvas += 8
+        elif canvas_api_count >= 30:
+            canvas += 6
+        else:
+            canvas += max(0, canvas_api_count // 5)
+        canvas_details['api_call_count'] = canvas_api_count
 
-        # ========== 视觉分 (0-25) ==========
+        # 2. 动画实现 (8分)
+        has_animate_function = 'function animate' in code or 'function draw' in code
+        has_request_frame = 'requestAnimationFrame' in code
+        uses_time_based = 'Date.now()' in code or 'performance.now()' in code or 'time' in code.lower()
+        canvas += 3 if has_animate_function else 0
+        canvas += 3 if has_request_frame else 0
+        canvas += 2 if uses_time_based else 0
+        canvas_details['animation'] = {
+            'animate_function': has_animate_function,
+            'request_frame': has_request_frame,
+            'time_based': uses_time_based
+        }
+
+        # 3. Canvas API多样性 (7分)
+        canvas_apis = ['fillRect', 'strokeRect', 'arc', 'beginPath', 'lineTo',
+                       'fill', 'stroke', 'fillText', 'save', 'restore']
+        apis_used = sum(1 for api in canvas_apis if api in code)
+        canvas += min(7, apis_used)
+        canvas_details['api_diversity'] = apis_used
+
+        score.canvas_score = min(25, canvas)
+
+        # ========== 视觉分 (0-20) ==========
         visual = 0
         visual_details = {}
 
-        # 1. 视觉元素类型 (5分)
-        visual_methods = ['createCircle', 'createRect', 'createText', 'createLine', 'createCurve', 'createPolygon']
-        visual_types_used = sum(1 for m in visual_methods if m in code)
-        visual += min(5, visual_types_used)
-        visual_details['visual_types'] = visual_types_used
-
-        # 2. 图形总数 (5分) - 函数图风格标准
-        total_shapes = sum(code.count(m) for m in visual_methods)
-        if total_shapes >= 20:
-            visual += 5
-        elif total_shapes >= 15:
-            visual += 4
-        elif total_shapes >= 10:
-            visual += 3
-        elif total_shapes >= 5:
-            visual += 1
-        visual_details['total_shapes'] = total_shapes
-
-        # 3. 颜色丰富度 (3分)
+        # 1. 颜色使用与配色协调性 (7分)
         color_pattern = r"#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgb\([^)]+\)|rgba\([^)]+\)"
         colors_found = set(re.findall(color_pattern, code))
-        visual += min(3, len(colors_found) // 2)
-        visual_details['colors_count'] = len(colors_found)
+        color_count = len(colors_found)
 
-        # 4. 动画效果 (4分)
-        animation_indicators = {
-            'time_based': 'ctx.time' in code,
-            'sin_cos': 'math.sin' in code.lower() or 'math.cos' in code.lower(),
-            'position': 'setPosition' in code,
-            'rotation': 'setRotation' in code,
-            'scale': 'setScale' in code,
+        # 解析颜色为RGB值
+        def parse_color_to_rgb(color_str):
+            """解析颜色字符串为RGB元组 (0-255)"""
+            if color_str.startswith('#'):
+                hex_color = color_str[1:]
+                if len(hex_color) == 3:
+                    hex_color = ''.join([c*2 for c in hex_color])
+                if len(hex_color) == 6:
+                    try:
+                        return (int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16))
+                    except:
+                        return None
+            elif color_str.startswith('rgb'):
+                try:
+                    nums = re.findall(r'\d+', color_str)
+                    if len(nums) >= 3:
+                        return (int(nums[0]), int(nums[1]), int(nums[2]))
+                except:
+                    return None
+            return None
+
+        # 分析配色协调性
+        high_saturation_count = 0  # 高饱和度颜色数量
+        brightness_variance = []   # 亮度方差
+
+        for color in colors_found:
+            rgb = parse_color_to_rgb(color)
+            if rgb:
+                r, g, b = rgb
+                # 计算亮度 (0-1)
+                luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+                brightness_variance.append(luminance)
+
+                # 检测饱和度
+                max_rgb = max(r, g, b)
+                min_rgb = min(r, g, b)
+                saturation = (max_rgb - min_rgb) / max_rgb if max_rgb > 0 else 0
+
+                # 统计高饱和度颜色 (饱和度>0.6)
+                if saturation > 0.6:
+                    high_saturation_count += 1
+
+        # 配色协调性惩罚
+        color_harmony_penalty = 0
+
+        # 1) 过多高饱和度颜色 -> 刺眼 (最多扣8分)
+        if high_saturation_count >= 5:
+            color_harmony_penalty += 8
+            visual_details['issue_high_saturation'] = f"{high_saturation_count}种高饱和度颜色严重过多"
+        elif high_saturation_count >= 4:
+            color_harmony_penalty += 5
+            visual_details['issue_high_saturation'] = f"{high_saturation_count}种高饱和度颜色过多"
+        elif high_saturation_count >= 3:
+            color_harmony_penalty += 3
+
+        # 2) 亮度差异过大 -> 对比刺眼 (最多扣7分)
+        if len(brightness_variance) >= 3:
+            import statistics
+            variance = statistics.variance(brightness_variance)
+            # 方差>0.2说明亮度差异非常大，严重刺眼
+            if variance > 0.2:
+                color_harmony_penalty += 7
+                visual_details['issue_brightness_contrast'] = f"亮度对比严重过强(方差={variance:.2f})"
+            # 方差>0.15说明亮度差异很大，可能刺眼
+            elif variance > 0.15:
+                color_harmony_penalty += 4
+                visual_details['issue_brightness_contrast'] = f"亮度对比过强(方差={variance:.2f})"
+
+        # 基础颜色数量分
+        if color_count >= 8:
+            visual += 7
+        elif color_count >= 5:
+            visual += 5
+        else:
+            visual += color_count
+
+        # 应用配色协调性惩罚(最多扣15分)
+        visual = max(0, visual - min(15, color_harmony_penalty))
+        visual_details['colors_used'] = color_count
+        visual_details['high_saturation_count'] = high_saturation_count
+        visual_details['color_harmony_penalty'] = color_harmony_penalty
+
+        # 2. 文字标签 (6分)
+        has_filltext = 'fillText' in code
+        has_title = 'title' in code.lower() or '<h1' in code or '<h2' in code
+        filltext_count = code.count('fillText')
+        visual += 3 if has_filltext else 0
+        visual += 2 if has_title else 0
+        visual += min(1, filltext_count // 5)
+        visual_details['text_elements'] = {
+            'has_filltext': has_filltext,
+            'has_title': has_title,
+            'filltext_count': filltext_count
         }
-        animation_count = sum(1 for v in animation_indicators.values() if v)
-        visual += min(4, animation_count)
-        visual_details['animation_types'] = animation_count
 
-        # 5. 图形元素丰富度 (3分) - 坐标轴+曲线+面板等
-        create_calls = re.findall(r'elements\.(\w+)\s*=\s*ctx\.create\w+', code)
-        # 也统计循环内批量创建的元素
-        loop_create_count = len(re.findall(r'ctx\.create(Circle|Rect|Curve|Text)', code))
-        total_elements = max(len(create_calls), loop_create_count)
-        richness_score = 0
-        if total_elements >= 12:
-            richness_score = 3
-        elif total_elements >= 8:
-            richness_score = 2
-        elif total_elements >= 4:
-            richness_score = 1
-        visual += richness_score
-        visual_details['named_elements'] = total_elements
+        # 3. 数据显示 (7分)
+        has_value_display = 'value-display' in code or 'textContent' in code
+        has_label_update = 'textContent' in code or 'innerText' in code
+        value_display_count = code.count('textContent') + code.count('innerText')
+        visual += 3 if has_value_display else 0
+        visual += 2 if has_label_update else 0
+        visual += min(2, value_display_count // 2)
+        visual_details['data_display'] = {
+            'has_value_display': has_value_display,
+            'has_label_update': has_label_update,
+            'update_count': value_display_count
+        }
 
-        # 6. 坐标轴+函数曲线检查 (3分) - 是否有坐标轴线和函数曲线
-        has_axis_line = bool(re.search(r'(axis|Axis|坐标|xAxis|yAxis|axisLine)\w*\s*=\s*ctx\.createLine', code))
-        has_function_curve = bool(re.search(r'(createCurve|setCurvePoints)', code))
-        axis_curve_score = 0
-        if has_axis_line and has_function_curve:
-            axis_curve_score = 3
-        elif has_axis_line or has_function_curve:
-            axis_curve_score = 1
-        visual += axis_curve_score
-        visual_details['has_axis_and_curve'] = axis_curve_score > 0
+        score.visual_score = min(20, visual)
 
-        # 7. 数据面板完整性 (2分) - 背景框+标签+数值
-        has_panel_bg = bool(re.search(r'(panel|bg|background|Bar|Bg)\w*\s*=\s*ctx\.createRect', code, re.IGNORECASE))
-        has_panel_label = bool(re.search(r'(Label|label|Info|info)\w*\s*=\s*ctx\.createText', code, re.IGNORECASE))
-        panel_score = 0
-        if has_panel_bg and has_panel_label:
-            panel_score = 2
-        elif has_panel_bg or has_panel_label:
-            panel_score = 1
-        visual += panel_score
-        visual_details['has_data_panel'] = panel_score > 0
-
-        score.visual_score = min(25, visual)
-
-        # ========== 交互分 (0-25) ==========
+        # ========== 交互分 (0-20) ==========
         interaction = 0
         interaction_details = {}
 
-        # 1. 变量联动 (10分)
-        uses_getvar = 'ctx.getVar' in code
-        interaction += 10 if uses_getvar else 0
-        interaction_details['uses_getvar'] = uses_getvar
+        # 1. 变量控件 (6分) - 降低权重，为拖动/点击腾出空间
+        input_count = code.count('<input type="range"')
+        if input_count >= 3:
+            interaction += 6
+        elif input_count >= 2:
+            interaction += 4
+        else:
+            interaction += input_count * 2
+        interaction_details['input_controls'] = input_count
 
-        # 2. 变量数量合理 (5分)
-        var_count = len(self.variables)
-        if standards.min_variables <= var_count <= standards.max_variables:
-            interaction += 5
-        elif var_count > 0:
+        # 2. 拖动交互 (7分) - 新增！至少需要2个拖动/点击交互
+        # 检测鼠标事件
+        has_mousedown = 'mousedown' in code.lower()
+        has_mousemove = 'mousemove' in code.lower()
+        has_mouseup = 'mouseup' in code.lower()
+        has_click = 'click' in code.lower() or 'onclick' in code.lower()
+
+        # 拖动交互 = mousedown + mousemove + mouseup
+        has_drag_interaction = has_mousedown and has_mousemove and has_mouseup
+        # 点击交互
+        click_listener_count = code.count("addEventListener('click'") + code.count('addEventListener("click"')
+
+        # 评分
+        if has_drag_interaction:
+            interaction += 4  # 拖动交互4分
+            interaction_details['has_drag'] = True
+        else:
+            interaction_details['has_drag'] = False
+
+        if click_listener_count >= 2:
+            interaction += 3  # 2个以上点击3分
+        elif click_listener_count >= 1:
+            interaction += 2  # 1个点击2分
+
+        interaction_details['click_count'] = click_listener_count
+        interaction_details['mouse_events'] = {
+            'mousedown': has_mousedown,
+            'mousemove': has_mousemove,
+            'mouseup': has_mouseup
+        }
+
+        # 3. 事件监听 (4分) - 降低权重
+        listener_count = code.count('addEventListener')
+        has_input_listener = 'addEventListener(\'input\'' in code
+        if listener_count >= 4:
+            interaction += 4
+        elif listener_count >= 3:
             interaction += 3
-        interaction_details['var_count'] = var_count
+        elif listener_count >= 2:
+            interaction += 2
+        else:
+            interaction += listener_count
+        interaction_details['event_listeners'] = {
+            'listener_count': listener_count,
+            'has_input_listener': has_input_listener
+        }
 
-        # 3. 实时数值显示 (5分)
-        has_text_update = 'setText' in code
-        interaction += 5 if has_text_update else 0
-        interaction_details['has_text_update'] = has_text_update
+        # 4. 实时更新与动画响应 (3分)
+        updates_variables = 'variables.' in code or 'variables[' in code
+        updates_display = 'textContent' in code
+        has_animate_loop = 'function animate' in code and 'requestAnimationFrame' in code
+        interaction += 1 if updates_variables else 0
+        interaction += 1 if updates_display else 0
+        interaction += 1 if has_animate_loop else 0
+        interaction_details['real_time_update'] = {
+            'updates_variables': updates_variables,
+            'updates_display': updates_display,
+            'animate_loop': has_animate_loop
+        }
 
-        # 4. 状态面板 (5分)
-        panel_indicators = ['Label', 'status', 'panel', 'Status', 'Panel', 'Info']
-        has_panel = any(ind in code for ind in panel_indicators)
-        interaction += 5 if has_panel else 0
-        interaction_details['has_panel'] = has_panel
+        score.interaction_score = min(20, interaction)
 
-        score.interaction_score = min(25, interaction)
+        # 交互不足严重惩罚(17分) - 至少需要2个拖动或点击交互
+        interactive_element_count = (1 if has_drag_interaction else 0) + click_listener_count
+        if interactive_element_count < 2:
+            score.interaction_score = max(0, score.interaction_score - 17)
+            interaction_details['interaction_penalty'] = 17
+            interaction_details['interactive_elements'] = interactive_element_count
+        # 交互过多惩罚(10分) - 最多4个交互，过多影响学习效果
+        elif interactive_element_count > 4:
+            score.interaction_score = max(0, score.interaction_score - 10)
+            interaction_details['interaction_penalty'] = 10
+            interaction_details['interactive_elements'] = interactive_element_count
+            interaction_details['too_many_interactions'] = True
 
-        # ========== 教学分 (0-25) ==========
+        # ========== 教学分 (0-15) ==========
         education = 0
         education_details = {}
 
-        # 1. 注释数量 (8分)
+        # 1. 注释说明 (6分)
         comment_count = code.count('//') + code.count('/*')
-        education += min(8, comment_count)
+        if comment_count >= 10:
+            education += 6
+        elif comment_count >= 5:
+            education += 4
+        else:
+            education += min(6, comment_count)
         education_details['comment_count'] = comment_count
 
-        # 2. 有标题 (5分)
-        text_count = code.count('createText')
-        has_title = text_count >= 2  # 至少2个文本元素（标题+其他）
-        education += 5 if has_title else (2 if text_count >= 1 else 0)
-        education_details['text_count'] = text_count
+        # 2. 概念演示 (5分)
+        demonstrates_concept = any(word in code.lower() for word in
+                                   ['物理', '数学', '化学', '生物', '算法', '公式', 'formula'])
+        has_clear_visualization = 'arc' in code or 'lineTo' in code
+        education += 3 if demonstrates_concept else 0
+        education += 2 if has_clear_visualization else 0
+        education_details['concept_demonstration'] = {
+            'demonstrates_concept': demonstrates_concept,
+            'has_visualization': has_clear_visualization
+        }
 
-        # 3. 有图例/说明 (5分)
-        legend_indicators = ['legend', 'Legend', '图例', '说明', 'label', 'Label']
-        has_legend = any(ind in code for ind in legend_indicators)
-        education += 5 if has_legend else 0
-        education_details['has_legend'] = has_legend
+        # 3. 变量命名 (4分)
+        meaningful_var_names = sum(1 for var in ['velocity', 'acceleration', 'angle',
+                                                   'radius', 'frequency', 'amplitude']
+                                   if var in code.lower())
+        education += min(4, meaningful_var_names)
+        education_details['meaningful_vars'] = meaningful_var_names
 
-        # 4. 变量命名可读性 (7分)
-        # 检查是否使用有意义的变量名（非单字母）
-        var_pattern = r'\b(let|const|var)\s+(\w+)'
-        var_names = re.findall(var_pattern, code)
-        meaningful_vars = sum(1 for _, name in var_names if len(name) > 2 and not name.startswith('_'))
-        education += min(7, meaningful_vars)
-        education_details['meaningful_vars'] = meaningful_vars
-
-        score.education_score = min(25, education)
+        score.education_score = min(15, education)
 
         # ========== 汇总 ==========
         score.details = {
             'structure': structure_details,
+            'canvas': canvas_details,
             'visual': visual_details,
             'interaction': interaction_details,
             'education': education_details,
         }
 
         # 收集问题
-        if not has_setup:
-            score.issues.append("缺少 setup 函数")
-        if not has_update:
-            score.issues.append("缺少 update 函数")
-        if line_count < standards.min_code_lines:
-            score.issues.append(f"代码行数不足 ({line_count}/{standards.min_code_lines})")
-        if visual_types_used < 3:
-            score.issues.append(f"视觉元素类型太少 ({visual_types_used}种)")
-        if not uses_getvar:
-            score.issues.append("未使用变量联动 (ctx.getVar)")
-        if comment_count < 3:
-            score.issues.append(f"注释太少 ({comment_count}处)")
+        if not has_doctype:
+            score.issues.append("缺少 <!DOCTYPE html> 声明")
+        if not has_canvas:
+            score.issues.append("缺少 <canvas> 元素")
+        if not has_request_frame:
+            score.issues.append("未使用 requestAnimationFrame 实现动画")
+        if input_count < 2:
+            score.issues.append(f"input range控件太少 ({input_count}个)")
+        if listener_count < 2:
+            score.issues.append(f"事件监听器太少 ({listener_count}个)")
+        if color_count < 5:
+            score.issues.append(f"颜色使用太少 ({color_count}种)")
+
+        # 配色协调性问题
+        if high_saturation_count >= 3:
+            score.issues.append(f"配色刺眼: {high_saturation_count}种高饱和度颜色过多，建议使用柔和色调")
+        if 'issue_brightness_contrast' in visual_details:
+            score.issues.append(f"配色刺眼: {visual_details['issue_brightness_contrast']}，建议降低亮度对比")
+
+        # 交互性问题
+        if not has_drag_interaction and click_listener_count < 2:
+            score.issues.append(f"交互性不足: 缺少拖动交互或点击交互(至少需要2个)，当前拖动={has_drag_interaction}, 点击={click_listener_count}")
+        elif not has_drag_interaction:
+            score.issues.append("建议添加拖动交互: 使用mousedown/mousemove/mouseup实现可拖动元素")
+        elif click_listener_count < 1:
+            score.issues.append("建议添加点击交互: 使用click事件监听器")
+
+        # 交互过多问题
+        if interaction_details.get('too_many_interactions'):
+            score.issues.append(f"交互过多: 当前{interactive_element_count}个交互，最多4个。过多交互会影响学习效果和用户体验")
+
+        # 动画响应问题
+        if (has_drag_interaction or click_listener_count > 0) and not has_animate_loop:
+            score.issues.append("交互缺少动画响应: 有交互但未使用requestAnimationFrame实现动画反馈")
 
         score.calculate_total()
         return score
@@ -639,13 +740,25 @@ class CodeSyntaxError:
 
 
 @dataclass
-class CodeQualityScore:
-    """代码质量评分"""
-    total_score: int = 0                        # 总分 (0-100)
-    structure_score: int = 0                    # 结构分 (0-25): setup/update函数、代码组织
-    visual_score: int = 0                       # 视觉分 (0-25): 元素丰富度、颜色、动画
-    interaction_score: int = 0                  # 交互分 (0-25): 变量联动、实时反馈
-    education_score: int = 0                    # 教学分 (0-25): 概念演示、注释、可读性
+class HTMLSimulatorQualityScore:
+    """HTML模拟器质量评分 (2026-02-11)
+
+    评分维度:
+    - 结构分 (0-20): HTML结构完整性、Canvas元素、必要标签
+    - Canvas使用分 (0-25): Canvas API调用质量、动画实现
+    - 视觉分 (0-20): 颜色使用、标签文字、数据显示
+    - 交互分 (0-20): 变量控件、事件监听、实时更新
+    - 教学分 (0-15): 概念演示、因果关系、注释说明
+
+    75分: 基础模板标准 (24个标准模板)
+    85-95分: 优质模拟器
+    """
+    total_score: int = 0
+    structure_score: int = 0        # HTML结构完整性 (0-20)
+    canvas_score: int = 0           # Canvas API使用 (0-25)
+    visual_score: int = 0           # 视觉效果质量 (0-20)
+    interaction_score: int = 0      # 交互性 (0-20)
+    education_score: int = 0        # 教学价值 (0-15)
 
     # 详细评分项
     details: Dict[str, Any] = field(default_factory=dict)
@@ -655,22 +768,29 @@ class CodeQualityScore:
 
     # 是否通过质量阈值
     passed: bool = False
-    threshold: int = 70                         # 质量阈值
+    threshold: int = 74             # 质量阈值（监督者通过标准）
 
     def calculate_total(self):
         """计算总分"""
-        self.total_score = self.structure_score + self.visual_score + self.interaction_score + self.education_score
+        self.total_score = (
+            self.structure_score +
+            self.canvas_score +
+            self.visual_score +
+            self.interaction_score +
+            self.education_score
+        )
         self.passed = self.total_score >= self.threshold
 
     def format_report(self) -> str:
         """生成评分报告"""
         status = "✓ 通过" if self.passed else "✗ 未通过"
         report = [
-            f"代码质量评分: {self.total_score}/100 ({status})",
-            f"  结构分: {self.structure_score}/25",
-            f"  视觉分: {self.visual_score}/25",
-            f"  交互分: {self.interaction_score}/25",
-            f"  教学分: {self.education_score}/25",
+            f"HTML模拟器质量评分: {self.total_score}/100 ({status})",
+            f"  结构分: {self.structure_score}/20 (HTML结构完整性)",
+            f"  Canvas使用分: {self.canvas_score}/25 (Canvas API质量)",
+            f"  视觉分: {self.visual_score}/20 (视觉效果)",
+            f"  交互分: {self.interaction_score}/20 (交互性)",
+            f"  教学分: {self.education_score}/15 (教学价值)",
         ]
 
         if self.issues:
@@ -685,12 +805,13 @@ class CodeQualityScore:
 class ChapterStep:
     """章节步骤"""
     step_id: str
-    type: str  # text_content, illustrated_content, simulator, assessment
+    type: str  # text_content, illustrated_content, simulator, ai_tutor, assessment
     title: str
     content: Optional[Dict[str, Any]] = None
-    simulator_spec: Optional[SimulatorSpec] = None
+    simulator_spec: Optional['HTMLSimulatorSpec'] = None  # 只支持HTML格式模拟器
     assessment_spec: Optional[Dict[str, Any]] = None
     diagram_spec: Optional[Dict[str, Any]] = None
+    ai_spec: Optional[Dict[str, Any]] = None  # AI导师规格
 
 
 @dataclass
@@ -779,6 +900,9 @@ class GenerationState:
 
     # 大纲
     outline: Optional[CourseOutline] = None
+
+    # 学科分类信息（新增）
+    subject_classification: Optional[Dict[str, Any]] = None
 
     # 已完成的章节
     completed_chapters: List[ChapterResult] = field(default_factory=list)

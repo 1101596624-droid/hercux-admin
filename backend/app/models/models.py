@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Float, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
@@ -111,6 +111,43 @@ class CourseNode(Base):
     course = relationship("Course", back_populates="nodes")
     progress = relationship("LearningProgress", back_populates="node")
     children = relationship("CourseNode", backref="parent", remote_side=[id])
+
+
+class SimulatorTemplate(Base):
+    """HTML simulator template for agent learning (2026-02-11)
+
+    Stores high-quality HTML simulator templates (75+ points) for the AI agent to learn from.
+    Templates serve as reference examples for code structure, Canvas API usage, and interaction patterns.
+    """
+    __tablename__ = "simulator_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subject = Column(String(100), nullable=False, index=True)  # e.g., "physics", "mathematics"
+    topic = Column(String(255), nullable=False, index=True)    # e.g., "projectile_motion", "matrix_operations"
+
+    # Core content
+    code = Column(Text, nullable=False)  # Full HTML code
+    quality_score = Column(Float, nullable=False, index=True)  # 0-100, baseline 75
+
+    # Code metrics (for quick filtering)
+    line_count = Column(Integer, nullable=False)
+    variable_count = Column(Integer, default=0)
+    has_setup_update = Column(Boolean, default=False)  # setup() and update() pattern
+
+    # Visual and interaction features
+    visual_elements = Column(JSON)  # ["grid", "vectors", "particles", "labels"]
+
+    # Template metadata for learning
+    template_metadata = Column(JSON)  # {
+        # "common_apis": ["fillRect", "arc", "beginPath", "stroke"],
+        # "color_scheme": ["#FF6B6B", "#4ECDC4", "#45B7D1"],
+        # "animation_patterns": ["requestAnimationFrame", "physics_update"],
+        # "interaction_types": ["mouse_drag", "slider_control"],
+        # "structure_insights": "Uses modular state management with clear separation"
+    # }
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class LearningProgress(Base):
@@ -639,4 +676,65 @@ class UserLearningSettings(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# ============================================
+# Unified Learning System (统一Agent学习系统)
+# ============================================
+
+class ContentTemplate(Base):
+    """Unified content template for agent learning (2026-02-11)
+
+    Stores high-quality content templates for 4 core features:
+    - simulator: HTML simulator code
+    - tutor_dialogue: AI tutor dialogue patterns
+    - chapter_content: Course chapter content
+    - quiz_question: Quiz questions
+
+    Templates serve as reference examples for the AI agent to learn from
+    and improve content generation quality over time.
+    """
+    __tablename__ = "content_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_type = Column(String(50), nullable=False, index=True)  # 'simulator', 'tutor_dialogue', 'chapter_content', 'quiz_question'
+    subject = Column(String(100), nullable=False, index=True)  # e.g., "physics", "mathematics"
+    topic = Column(String(255), nullable=False, index=True)    # e.g., "projectile_motion", "linear_algebra"
+
+    # Core content (JSON format)
+    content = Column(Text, nullable=False)  # JSON string containing the template content
+    quality_score = Column(Float, nullable=False, index=True)  # 0-100 quality score
+
+    # Quality breakdown
+    score_breakdown = Column(JSON)  # Detailed scoring per dimension
+
+    # Learning metadata
+    template_metadata = Column(JSON)  # {
+        # Template-specific patterns and insights extracted for learning
+        # e.g., "dialogue_strategies", "code_patterns", "content_structure"
+    # }
+
+    # Type-specific fields
+    difficulty_level = Column(String(50))  # For quiz/chapter: "entry", "beginner", etc.
+    content_hash = Column(String(64), index=True)  # For deduplication
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    usage_count = Column(Integer, default=0)  # Track how many times this template was used
+
+
+class QualityEvaluation(Base):
+    """Quality evaluation records for all content types (2026-02-11)
+
+    Tracks quality assessments of generated content to monitor
+    learning progress and decide which content to save as templates.
+    """
+    __tablename__ = "quality_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    content_type = Column(String(50), nullable=False, index=True)  # 'simulator', 'tutor_dialogue', 'chapter_content', 'quiz_question'
+    content_id = Column(String(255), nullable=False, index=True)  # Unique identifier for the content
+    quality_score = Column(Float, nullable=False)
+    score_breakdown = Column(JSON)  # Detailed scoring per dimension
+    saved_as_template = Column(Integer, default=0)  # Whether this was saved as a template
+    evaluated_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 

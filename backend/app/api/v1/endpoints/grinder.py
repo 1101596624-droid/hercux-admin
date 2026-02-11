@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from typing import List, Optional
+from sqlalchemy.orm import Session
 import httpx
 import json
 import ssl
@@ -15,7 +16,8 @@ import logging
 from app.models.models import User
 from app.core.security import get_current_user
 from app.core.config import settings
-from app.services.grinder.service import grinder_service
+from app.services.grinder.service import get_grinder_service
+from app.db.session import get_db
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -268,19 +270,25 @@ class ExamGenerateRequest(BaseModel):
 @router.post("/generate-exam")
 async def generate_exam_supervised(
     request: ExamGenerateRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
-    监督式生成考试题目
+    监督式生成考试题目 + 学习集成
 
     特点：
     1. 自动搜索最新信息确保内容时效性
     2. AI 监督者审核题目质量
     3. 验证答案正确性
     4. 自动修复 JSON 格式问题
+    5. 使用QuizScorer对审核通过的题目评分 (NEW)
+    6. 85+分的题目自动保存为学习模板 (NEW)
     """
     try:
         logger.info(f"Generating supervised exam for topic: {request.topic}")
+
+        # 使用数据库会话创建service
+        grinder_service = get_grinder_service(db)
 
         result = await grinder_service.generate_exam(
             topic=request.topic,
@@ -288,10 +296,26 @@ async def generate_exam_supervised(
             focus_categories=request.focus_categories
         )
 
+        # 提取质量评分结果
+        review = result.get('review', {})
+        quality_results = review.get('quality_results', {})
+
         return {
             "success": True,
             "exam": result.get('exam'),
-            "review": result.get('review'),
+            "review": {
+                "approved": review.get('approved', False),
+                "score": review.get('score', 0),
+                "issues": review.get('issues', []),
+                "suggestions": review.get('suggestions', [])
+            },
+            "quality_evaluation": {
+                "total_evaluated": quality_results.get('total_evaluated', 0),
+                "high_quality_count": quality_results.get('high_quality_count', 0),
+                "saved_as_template": quality_results.get('saved_as_template', 0),
+                "quality_scores": quality_results.get('quality_scores', []),
+                "saved_questions": quality_results.get('saved_questions', [])
+            },
             "metadata": {
                 "latest_info_used": result.get('latest_info_used', False),
                 "generation_attempts": result.get('attempts', 1),

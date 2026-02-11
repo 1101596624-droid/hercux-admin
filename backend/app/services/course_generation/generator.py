@@ -10,37 +10,70 @@ from typing import AsyncGenerator, Dict, Any, Optional, List
 
 from app.services.claude_service import ClaudeService
 from .models import (
-    GenerationState, ChapterResult, ChapterStep, SimulatorSpec,
-    ChapterOutline, CodeSyntaxError, SyntaxErrorType, CodeQualityScore
+    GenerationState, ChapterResult, ChapterStep,
+    ChapterOutline, CodeSyntaxError, SyntaxErrorType,
+    HTMLSimulatorSpec, HTMLSimulatorQualityScore
 )
+from .standards_loader import get_standards_loader
+from .template_service import TemplateService
 
 logger = logging.getLogger(__name__)
 
-# 模拟器代码可用的API白名单
-VALID_CREATE_APIS = [
-    'createCircle', 'createRect', 'createText', 'createLine',
-    'createCurve', 'createPolygon'
+# Canvas 2D API白名单 (2026-02-11: HTML格式使用Canvas 2D API)
+CANVAS_2D_DRAWING_APIS = [
+    # 基础矩形绘制
+    'fillRect', 'strokeRect', 'clearRect',
+    # 路径绘制
+    'beginPath', 'closePath', 'moveTo', 'lineTo', 'arc', 'arcTo',
+    'quadraticCurveTo', 'bezierCurveTo', 'rect', 'ellipse',
+    # 填充和描边
+    'fill', 'stroke', 'clip',
+    # 文本
+    'fillText', 'strokeText', 'measureText',
+    # 图像
+    'drawImage', 'createImageData', 'getImageData', 'putImageData',
+    # 渐变和图案
+    'createLinearGradient', 'createRadialGradient', 'createPattern',
+    'addColorStop',
+    # 变换
+    'save', 'restore', 'scale', 'rotate', 'translate',
+    'transform', 'setTransform', 'resetTransform',
+    # 像素操作
+    'createImageData', 'getImageData', 'putImageData',
 ]
-VALID_OPERATION_APIS = [
-    'setPosition', 'setScale', 'setRotation', 'setAlpha',
-    'setColor', 'setText', 'setVisible', 'remove', 'clear',
-    'setGlow', 'setCurvePoints', 'setRadius', 'setSize'
-]
-VALID_VAR_APIS = ['getVar', 'setVar']
-VALID_CTX_PROPERTIES = ['width', 'height', 'time', 'deltaTime', 'math']
 
-ALL_VALID_APIS = VALID_CREATE_APIS + VALID_OPERATION_APIS + VALID_VAR_APIS + VALID_CTX_PROPERTIES
+CANVAS_2D_PROPERTIES = [
+    'fillStyle', 'strokeStyle', 'lineWidth', 'lineCap', 'lineJoin',
+    'miterLimit', 'lineDashOffset', 'font', 'textAlign', 'textBaseline',
+    'direction', 'globalAlpha', 'globalCompositeOperation',
+    'shadowBlur', 'shadowColor', 'shadowOffsetX', 'shadowOffsetY',
+]
+
+ANIMATION_APIS = ['requestAnimationFrame', 'cancelAnimationFrame']
+
+# 旧的ctx API白名单 (已废弃，仅用于检测和警告)
+DEPRECATED_CTX_APIS = [
+    'createCircle', 'createRect', 'createText', 'createLine',
+    'createCurve', 'createPolygon', 'setPosition', 'setScale',
+    'setRotation', 'setAlpha', 'setColor', 'setText', 'setVisible',
+    'remove', 'clear', 'setGlow', 'setCurvePoints', 'setRadius',
+    'setSize', 'getVar', 'setVar'
+]
+
+# 所有有效的API（新的Canvas 2D API）
+ALL_VALID_APIS = CANVAS_2D_DRAWING_APIS + CANVAS_2D_PROPERTIES + ANIMATION_APIS
 
 # 禁止使用的API（常见错误写法）
 FORBIDDEN_APIS = [
-    'rect', 'circle', 'line', 'text', 'polygon', 'curve',  # 简写形式
-    'drawRect', 'drawCircle', 'drawLine', 'drawText',      # draw前缀
-    'fillRect', 'fillCircle', 'strokeRect',                # canvas原生API
-    'arc', 'moveTo', 'lineTo', 'beginPath', 'closePath',   # canvas路径API
-    'fillText', 'strokeText', 'fill', 'stroke',            # canvas绑定API
-    'createPath', 'path',                                   # 不存在的path API
-    'updateText', 'updateCircle', 'updateRect', 'updateLine',  # 不存在的update API
-    'update', 'create',                                     # 单独的update/create
+    # 简写形式（不存在）
+    'rect', 'circle', 'line', 'text', 'polygon', 'curve',
+    # draw前缀的错误写法（不存在）
+    'drawRect', 'drawCircle', 'drawLine', 'drawText',
+    # 不存在的方法
+    'fillCircle', 'strokeCircle',  # Canvas没有这些
+    'createPath', 'path',
+    'updateText', 'updateCircle', 'updateRect', 'updateLine',
+    'update', 'create',  # 单独的关键词
 ]
 
 
@@ -270,9 +303,11 @@ class ChapterGenerator:
     3. 内置 JSON 修复逻辑
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
         self.claude_service = ClaudeService()
         self.json_repair = JSONRepairTool()
+        self.standards_loader = get_standards_loader()  # 新增：标准加载器
+        self.db = db  # 数据库会话，用于模板学习
 
     async def generate_chapter(
         self,
@@ -303,230 +338,25 @@ class ChapterGenerator:
         ):
             yield chunk
 
-    async def generate_simulator_code(
-        self,
-        simulator_name: str,
-        simulator_description: str,
-        variables: List[Dict],
-        chapter_context: str,
-        system_prompt: str,
-        additional_prompt: str = ""
-    ) -> str:
-        """
-        单独生成模拟器代码（分步生成的第二步）
-
-        Args:
-            simulator_name: 模拟器名称
-            simulator_description: 模拟器描述
-            variables: 变量列表
-            chapter_context: 章节上下文
-            system_prompt: 系统提示词
-            additional_prompt: 额外提示词（用于动态调整，如错误修复指导）
-
-        Returns:
-            生成的 JavaScript 代码
-        """
-        variables_desc = "\n".join([
-            f"  - {v.get('name')}: {v.get('label')} (范围: {v.get('min')}-{v.get('max')}, 默认: {v.get('default')})"
-            for v in variables
-        ])
-
-        prompt = f"""请为以下模拟器生成完整的 JavaScript 代码。
-
-【模拟器信息】
-名称：{simulator_name}
-描述：{simulator_description}
-
-【变量定义】
-{variables_desc}
-
-【章节上下文】
-{chapter_context}
-
-【必须遵循的代码结构 - 严格按此模板】
-```javascript
-// {simulator_name}
-let elements = {{}};
-
-function setup(ctx) {{
-  const {{ width, height }} = ctx;
-  // 在这里初始化所有视觉元素
-  // 必须包含：标题、图例、背景、主要图形元素
-}}
-
-function update(ctx) {{
-  const {{ width, height, math, time }} = ctx;
-  // 读取变量
-  const var1 = ctx.getVar('变量名');
-  // 更新显示
-  // 必须响应所有变量变化
-}}
-```
-
-【禁止事项 - 违反将导致代码无法运行】
-- 禁止使用 ctx.rect、ctx.circle、ctx.line、ctx.text（必须用 ctx.createRect、ctx.createCircle 等）
-- 禁止省略 setup 或 update 函数
-- 禁止使用深色：#000000、#1a1a1a、#2c3e50、#333333（背景是深色，会看不见）
-
-【代码要求】
-1. 必须有 function setup(ctx) 和 function update(ctx) 两个函数
-2. 使用 ctx.getVar('变量名') 读取滑块变量值
-3. 代码 80-150 行，结构清晰
-4. 必须有：标题、图例、变量数值显示、主要动画元素
-5. 使用 ctx.math.lerp 实现平滑过渡
-
-【内容完整性要求】
-- 每个变量都必须有对应的视觉反馈
-- 核心动画逻辑必须完整（不能只画静态图）
-- 标题、图例、数值显示缺一不可
-
-【画布尺寸与边界约束 - 非常重要】
-- 画布尺寸通过 ctx.width / ctx.height 获取（不同端尺寸不同，必须用比例计算）
-- 所有元素必须完全在画布内，不能超出边界
-- 动画轨迹必须限制在画布范围内，使用 ctx.math.clamp 约束坐标
-- 安全绘制区域：
-  * 左边界：x >= width * 0.1（左侧预留给滑块控制区）
-  * 右边界：x <= width * 0.95
-  * 顶部：y >= 60（标题区域）
-  * 底部：y <= height - 40（底部留给变量标签）
-- 数据面板放在主体区域内部，不要贴边
-- 所有动画坐标必须用 math.clamp 限制在安全区域内
-
-【颜色规范 - 严格遵守，只能使用以下颜色】
-画布背景是深色(#0f172a)，必须使用以下亮色：
-
-推荐颜色（直接复制使用）：
-- 标题文字：'#ffffff'
-- 普通文字：'#e2e8f0'
-- 数值显示：'#60a5fa'
-- 主色调：'#6366f1'（靛蓝）
-- 次色调：'#8b5cf6'（紫色）
-- 强调色：'#a855f7'（亮紫）
-- 成功/正确：'#22c55e'（绿色）
-- 警告/注意：'#f59e0b'（橙色）
-- 错误/危险：'#ef4444'（红色）
-- 辅助线条：'#94a3b8'（浅灰）
-
-绝对禁止的颜色（会导致不可见）：
-#000000, #111111, #1a1a1a, #1e293b, #0f172a, #1f2937
-#222222, #2c3e50, #333333, #334155, #374151, #444444
-#555555, #666666（任何深色或中灰色都禁止）
-
-【可用的绘图 API - 返回元素ID字符串】
-- ctx.createCircle(x, y, radius, color) → id
-- ctx.createRect(x, y, width, height, color, cornerRadius?) → id
-- ctx.createText(text, x, y, {{fontSize?, fontWeight?, color?, align?}}) → id
-- ctx.createLine([{{x,y}}, ...], color, lineWidth?) → id
-- ctx.createCurve([{{x,y}}, ...], color, lineWidth?, smooth?) → id  // 平滑曲线
-- ctx.createPolygon([{{x,y}}, ...], fillColor, strokeColor?) → id
-
-【元素操作 API - 使用元素ID】
-- ctx.setPosition(id, x, y)
-- ctx.setScale(id, sx, sy)
-- ctx.setRotation(id, angleDegrees)
-- ctx.setAlpha(id, alpha)  // 0-1
-- ctx.setColor(id, color)
-- ctx.setText(id, newText)
-- ctx.setVisible(id, visible)
-- ctx.remove(id)
-- ctx.clear()
-
-【变量和工具】
-- ctx.getVar('name') → number  // 读取滑块变量
-- ctx.setVar('name', value)    // 设置变量
-- ctx.width, ctx.height  // 画布宽高（不同端尺寸不同，用比例计算）
-- ctx.time  // 累计时间(秒)
-- ctx.deltaTime  // 帧间隔(秒)
-- ctx.math.sin/cos/tan/abs/sqrt/pow/min/max/random/PI
-- ctx.math.lerp(a, b, t)  // 线性插值
-- ctx.math.clamp(value, min, max)
-- ctx.math.wave(t, frequency?, amplitude?)
-
-【重要】
-- 只输出纯 JavaScript 代码
-- 不要有 ```javascript 标记
-- 不要有任何解释文字
-- 代码必须完整可运行
-- 不要使用 createArc（不存在此方法）"""
-
-        # 添加动态调整的提示词（如果有）
-        if additional_prompt:
-            prompt += f"\n\n{additional_prompt}"
-
-        # 方案C：增加 max_tokens 避免截断
-        response = await self.claude_service.generate_raw_response(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            max_tokens=8000
-        )
-
-        # 方案D：更强的代码清理
-        code = self._clean_simulator_code(response)
-
-        # 方案B：代码结构检查与修复
-        code = self._ensure_code_structure(code, variables)
-
-        # 方案A：代码语法验证 + 方案3：自动补全截断代码
-        is_valid, error = self._validate_js_syntax(code)
-        if not is_valid:
-            logger.warning(f"Generated code has syntax error: {error}")
-
-            # 方案3：尝试自动补全未闭合的括号
-            if "Unclosed brackets" in str(error):
-                logger.info("Attempting to auto-fix unclosed brackets...")
-                code = self._auto_fix_unclosed_brackets(code)
-                is_valid, error = self._validate_js_syntax(code)
-
-                if is_valid:
-                    logger.info(f"Auto-fix successful! Code now has {len(code.splitlines())} lines")
-                else:
-                    logger.error(f"Auto-fix failed, still has error: {error}")
-                    logger.error(f"Code preview: {code[:500]}...")
-                    return self._get_fallback_code(simulator_name, variables)
-            else:
-                logger.error(f"Code preview: {code[:500]}...")
-                return self._get_fallback_code(simulator_name, variables)
-
-        # 方案E：API白名单验证 - 检查是否使用了无效的API
-        api_valid, api_error, invalid_apis = self._validate_api_usage(code)
-        if not api_valid:
-            logger.warning(f"Generated code uses invalid API: {api_error}")
-            logger.error(f"Invalid APIs found: {invalid_apis}")
-            # 返回错误信息，让上层触发重试
-            raise ValueError(f"invalid_api:{','.join(invalid_apis)}")
-
-        # 方案F：颜色对比度验证 - 检查是否使用了深色（与背景融合）
-        color_valid, color_errors, dark_colors = self._validate_color_contrast(code)
-        if not color_valid:
-            logger.warning(f"Generated code uses low contrast colors: {dark_colors}")
-            for err in color_errors:
-                logger.warning(f"  Line {err.line_number}: {err.message}")
-            # 返回错误信息，让上层触发重试
-            raise ValueError(f"low_contrast:{','.join(dark_colors)}")
-
-        return code
+    # 旧的 generate_simulator_code 方法已删除（2026-02-11）
+    # 现在统一使用 generate_simulator_code_progressive（async generator版本）
 
     async def generate_simulator_code_progressive(
         self,
         simulator_name: str,
         simulator_description: str,
-        variables: List[Dict],
         chapter_context: str,
         system_prompt: str
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        生产者-监督者架构生成模拟器代码（async generator）
+        生产者-监督者架构生成HTML模拟器代码（async generator）
+
+        HTML模拟器直接生成完整的HTML/JS代码，不需要variables配置
 
         Yields:
             {"type": "progress", "round": N, "max_rounds": 3, "stage": str, "message": str}
             {"type": "result", "code": str, "score": int, "source": "generated"|"fallback"}
         """
-        variables_desc = "\n".join([
-            f"  - {v.get('name')}: {v.get('label')} (范围: {v.get('min')}-{v.get('max')}, 默认: {v.get('default')})"
-            for v in variables
-        ])
-        variable_names = [v.get('name') for v in variables]
-
         max_rounds = 3
         best_code = None
         best_score = 0
@@ -538,12 +368,10 @@ function update(ctx) {{
             # ========== 生产者生成代码 ==========
             if round_num == 1:
                 yield {"type": "progress", "round": round_num, "max_rounds": max_rounds,
-                       "stage": "generating", "message": f"正在生成模拟器代码 (第{round_num}轮)..."}
+                       "stage": "generating", "message": f"正在生成HTML模拟器代码 (第{round_num}轮)..."}
                 code = await self._producer_generate(
                     simulator_name=simulator_name,
                     simulator_description=simulator_description,
-                    variables_desc=variables_desc,
-                    variable_names=variable_names,
                     system_prompt=system_prompt,
                     history=None
                 )
@@ -556,24 +384,21 @@ function update(ctx) {{
                 if decision == 'regenerate':
                     logger.info(f"[Producer] Decision: regenerate from scratch")
                     yield {"type": "progress", "round": round_num, "max_rounds": max_rounds,
-                           "stage": "generating", "message": f"重新生成模拟器代码 (第{round_num}轮)..."}
+                           "stage": "generating", "message": f"重新生成HTML模拟器代码 (第{round_num}轮)..."}
                     code = await self._producer_generate(
                         simulator_name=simulator_name,
                         simulator_description=simulator_description,
-                        variables_desc=variables_desc,
-                        variable_names=variable_names,
                         system_prompt=system_prompt,
                         history=history
                     )
                 else:
                     logger.info(f"[Producer] Decision: fix existing code")
                     yield {"type": "progress", "round": round_num, "max_rounds": max_rounds,
-                           "stage": "fixing", "message": f"修复模拟器代码 (第{round_num}轮)..."}
+                           "stage": "fixing", "message": f"修复HTML模拟器代码 (第{round_num}轮)..."}
                     code = await self._producer_fix_code(
                         code=best_code,
                         issues=history[-1]['issues'] if history else [],
                         simulator_name=simulator_name,
-                        variable_names=variable_names,
                         system_prompt=system_prompt
                     )
 
@@ -583,8 +408,8 @@ function update(ctx) {{
 
             # ========== 监督者审核打分 ==========
             yield {"type": "progress", "round": round_num, "max_rounds": max_rounds,
-                   "stage": "reviewing", "message": f"审核模拟器代码 (第{round_num}轮)..."}
-            score, issues = self._supervisor_review(code, variable_names)
+                   "stage": "reviewing", "message": f"审核HTML模拟器代码 (第{round_num}轮)..."}
+            score, issues = self._supervisor_review(code)
             logger.info(f"[Supervisor] Score: {score}/100, Issues: {len(issues)}")
 
             history.append({
@@ -598,31 +423,93 @@ function update(ctx) {{
                 best_score = score
                 best_code = code
 
-            if score >= 70:
+            if score >= 74:
                 logger.info(f"[Simulator Gen] Passed with score {score}/100")
                 yield {"type": "result", "code": self._auto_fix_colors(code), "score": score, "source": "generated"}
                 return
 
-            logger.warning(f"[Round {round_num}] Score {score}/100 < 70, issues: {issues}")
+            logger.warning(f"[Round {round_num}] Score {score}/100 < 74, issues: {issues}")
 
         # 所有轮次结束
         if best_code and best_score >= 40:
             logger.warning(f"[Simulator Gen] Using best code with score {best_score}/100")
             yield {"type": "result", "code": self._auto_fix_colors(best_code), "score": best_score, "source": "generated"}
         else:
-            logger.error(f"[Simulator Gen] All rounds failed, using fallback")
-            yield {"type": "result", "code": self._get_fallback_code(simulator_name, variables), "score": 0, "source": "fallback"}
+            logger.error(f"[Simulator Gen] All rounds failed, returning empty HTML")
+            # 返回一个简单的错误提示HTML，而不是fallback代码
+            error_html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>{simulator_name}</title></head>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#ef4444;font-family:sans-serif;">
+<div style="text-align:center;">
+<h2>模拟器生成失败</h2>
+<p>{simulator_name}</p>
+<p style="color:#94a3b8;">请重试或联系管理员</p>
+</div>
+</body>
+</html>"""
+            yield {"type": "result", "code": error_html, "score": 0, "source": "fallback"}
+
+    async def _fetch_learning_templates(self, subject: str, topic: str) -> str:
+        """
+        从数据库获取高质量模板并提取学习模式 (2026-02-11)
+
+        Args:
+            subject: 学科名称 (如 "physics", "mathematics")
+            topic: 主题名称 (如 "projectile_motion", "matrix_operations")
+
+        Returns:
+            格式化的学习上下文字符串，包含API使用模式、颜色方案等
+        """
+        if not self.db:
+            logger.warning("[Template Learning] No database session, skipping template learning")
+            return ""
+
+        try:
+            template_service = TemplateService(self.db)
+
+            # 获取相似的高质量模板 (最多2个，避免prompt过长)
+            templates = await template_service.get_similar_templates(
+                subject=subject,
+                topic=topic,
+                min_quality_score=75.0,
+                limit=2
+            )
+
+            if not templates:
+                logger.info(f"[Template Learning] No templates found for {subject}/{topic}")
+                return ""
+
+            # 分析模板模式
+            patterns = await template_service.analyze_template_patterns(templates)
+
+            # 格式化为学习上下文
+            learning_context = template_service.format_learning_context(patterns, templates)
+
+            logger.info(
+                f"[Template Learning] Loaded {len(templates)} templates, "
+                f"avg score {patterns['avg_quality_score']:.1f}"
+            )
+
+            return "\n" + learning_context + "\n"
+
+        except Exception as e:
+            logger.error(f"[Template Learning] Error fetching templates: {e}")
+            return ""
 
     async def _producer_generate(
         self,
         simulator_name: str,
         simulator_description: str,
-        variables_desc: str,
-        variable_names: List[str],
         system_prompt: str,
-        history: Optional[List[Dict]] = None
+        history: Optional[List[Dict]] = None,
+        subject: str = "physics",  # 学科，用于模板学习
+        topic: str = ""  # 主题，用于模板学习
     ) -> Optional[str]:
-        """生产者：生成完整模拟器代码"""
+        """生产者：生成完整HTML模拟器 (2026-02-10: 改为HTML格式，2026-02-11: 集成模板学习)"""
+
+        # 获取模板学习上下文
+        learning_context = await self._fetch_learning_templates(subject, topic)
 
         # 构建历史问题提示
         history_hint = ""
@@ -631,223 +518,203 @@ function update(ctx) {{
             for h in history:
                 history_hint += f"- 第{h['round']}轮 ({h['score']}分): {', '.join(h['issues'][:3])}\n"
 
-        prompt = f"""生成模拟器代码。只输出代码，不要解释。
+        prompt = f"""生成完整HTML模拟器。只输出完整的HTML代码，不要任何markdown标记或解释。
 
 【模拟器】{simulator_name}
 【描述】{simulator_description}
-【画布尺寸】通过 ctx.width / ctx.height 获取（不同端尺寸不同，必须用比例计算）
-【安全绘制区域 - 严格遵守】
-- 左边界：x >= width * 0.12
-- 右边界：x <= width * 0.95
-- 顶部：y >= 55（标题区域）
-- 底部：y <= height - 35
-- 所有动态坐标必须用 math.clamp 限制在安全区域内
-【变量】
-{variables_desc}
+【画布尺寸】800×500（管理端预览），运行时CSS自适应
 {history_hint}
+{learning_context}
 
-【核心设计原则 - 交互式因果关系函数图】
-模拟器用坐标系和函数曲线展示"自变量对因变量的影响"。
-滑块拖动时曲线形态实时变化，直观展示因果关系。
-核心元素：坐标系（X轴=自变量范围，Y轴=因变量范围）、函数曲线（用createCurve+setCurvePoints画f(x)曲线）、
-当前值标注（竖线+亮点标注当前滑块值对应的点）、多曲线对比（不同因变量用不同颜色）、右侧数值面板（实时显示计算结果）。
-【重要】坐标轴和刻度必须固定不变！X轴和Y轴的范围、刻度线、刻度标签全部在setup中确定，update中绝对不能修改。
-拖动滑块只改变曲线的形态和标注点的位置，坐标系本身不动。
-禁止做具象机械动画（如人物跑步、球体碰撞、复杂运动轨迹、人体动作），也禁止画任何示意图、图示、小人、图标。
-正确做法：整个画面只有坐标系、函数曲线、标注点、数值面板，不画其他任何东西。
+【HTML标准结构 - 完整输出】
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{simulator_name}</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            color: #F1F5F9;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }}
+        #canvas {{
+            display: block;
+            background: #0F172A;
+            border-radius: 8px;
+        }}
+        .controls {{
+            margin-top: 20px;
+            background: rgba(30, 41, 59, 0.95);
+            padding: 15px 25px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(100, 116, 139, 0.3);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }}
+        .control-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }}
+        .control-group label {{
+            font-size: 12px;
+            color: #CBD5E1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }}
+        .value-display {{
+            color: #60A5FA;
+            font-weight: 600;
+            font-size: 14px;
+        }}
+        input[type="range"] {{
+            width: 120px;
+            height: 6px;
+            background: rgba(100, 116, 139, 0.3);
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }}
+        input[type="range"]::-webkit-slider-thumb {{
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            border-radius: 50%%;
+            cursor: pointer;
+        }}
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="500"></canvas>
+    <div class="controls">
+        <!-- 变量控制HTML将在这里生成 -->
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let variables = {{/* 变量初始值 */}};
 
-【第一步：场景规划（在代码注释中完成）】
-写代码前，先用注释规划整个场景：
-// === 场景规划 ===
-// 元素清单：[坐标轴、刻度线、函数曲线、当前值竖线、标注点、数值面板、标签等]
-// 安全区域：x=[width*0.12, width*0.95], y=[55, height-35]
-// 布局：标题(居中,y=35) → 坐标系+曲线(左侧/中央) → 数值面板(右侧)
-// 函数逻辑：[X轴范围、Y轴范围、曲线方程f(x)]
-// 变量响应：[变量A变化→曲线形态如何变、标注点如何移动]
-// 边界保护：所有动态坐标用 math.clamp 限制
+        // 变量监听器将在这里生成
 
-然后严格按规划写 setup() 和 update()。
+        function animate() {{
+            ctx.fillStyle = '#0F172A';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-【代码结构 - 必须严格遵守】
-// {{simulator_name}}
-let elements = {{}};
+            // 在这里实现可视化逻辑
+            // 使用 Canvas 2D API 绘制内容
+            // 根据 variables 对象的值进行动态绘制
 
-function setup(ctx) {{
-  const {{ width, height }} = ctx;
-  // 1. 创建标题
-  elements.title = ctx.createText('{simulator_name}', width/2, 30, {{fontSize: 20, fontWeight: 'bold', color: '#ffffff', align: 'center'}});
-  // 2. 画坐标轴（X轴和Y轴，用createLine）— 固定不变
-  // 3. 画刻度线和刻度标签（X轴和Y轴各5-8个刻度）— 固定不变，用固定的最大范围
-  // 4. 创建函数曲线（用 createCurve，不同因变量用不同颜色）
-  // 5. 创建当前值竖线（createLine）和标注点（createCircle）
-  // 6. 创建右侧数值面板（矩形背景+数值标签）
-}}
+            requestAnimationFrame(animate);
+        }}
+        animate();
+    </script>
+</body>
+</html>
 
-function update(ctx) {{
-  const {{ width, height, math, time }} = ctx;
-  // 1. 读取所有变量
-{chr(10).join([f"  const {name} = ctx.getVar('{name}');" for name in variable_names])}
-  // 2. 根据变量值重新计算曲线上所有点的坐标（坐标轴范围不变，只变曲线形态）
-  // 3. 用 setCurvePoints 更新函数曲线
-  // 4. 移动当前值竖线和标注点到对应位置
-  // 5. 用 setText 更新数值面板显示（不要更新刻度标签）
-}}
+【Canvas 2D API 参考 - 只能用这些标准API】
 
-【API白名单 - 只能用这些，注意参数格式】
-创建:
-  ctx.createText(text, x, y, {{fontSize, fontWeight, color, align}}) → id
-  ctx.createRect(x, y, width, height, color, cornerRadius?) → id
-  ctx.createCircle(x, y, radius, color) → id
-  ctx.createLine(x1, y1, x2, y2, {{color, width}}) → id  ← 4个坐标+选项对象
-  ctx.createCurve(pointsArray, color, lineWidth) → id
-  ctx.createPolygon(pointsArray, fillColor, strokeColor?) → id
-操作:
-  ctx.setText(id, text)
-  ctx.setPosition(id, x, y) 或 ctx.setPosition(lineId, x1, y1, x2, y2)
-  ctx.setColor(id, color)
-  ctx.setScale(id, sx, sy)
-  ctx.setRotation(id, angleDeg)
-  ctx.setAlpha(id, alpha)
-  ctx.setVisible(id, true/false)
-  ctx.setGlow(id, blur, color?) ← 发光效果，blur=0关闭，blur=10-20发光，color可选
-  ctx.setCurvePoints(id, pointsArray, smooth?) ← 动态更新曲线的点，smooth默认true
-  ctx.setRadius(id, radius) ← 动态改变圆的半径
-  ctx.setSize(id, w, h) ← 动态改变矩形尺寸
-  ctx.remove(id)
-  ctx.clear()
-读取: ctx.getVar('name'), ctx.time, ctx.deltaTime
-数学: ctx.math.sin/cos/tan/atan2/abs/floor/ceil/round/sqrt/pow/min/max/random/PI
-      ctx.math.lerp(a, b, t), ctx.math.clamp(val, min, max)
-      ctx.math.smoothstep(edge0, edge1, x), ctx.math.wave(t, freq?, amp?)
-      ctx.math.degToRad(deg), ctx.math.radToDeg(rad)
+绘制形状：
+  ctx.beginPath()
+  ctx.moveTo(x, y)
+  ctx.lineTo(x, y)
+  ctx.arc(x, y, radius, startAngle, endAngle)
+  ctx.quadraticCurveTo(cpx, cpy, x, y)
+  ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillRect(x, y, width, height)
+  ctx.strokeRect(x, y, width, height)
 
-【颜色白名单 - 只能用这些】
-'#ffffff', '#e2e8f0', '#60a5fa', '#6366f1', '#8b5cf6', '#a855f7', '#94a3b8', '#22c55e', '#f59e0b', '#ef4444'
+文本：
+  ctx.font = '16px Arial'
+  ctx.textAlign = 'center' | 'left' | 'right'
+  ctx.textBaseline = 'middle' | 'top' | 'bottom'
+  ctx.fillText(text, x, y)
+  ctx.strokeText(text, x, y)
 
-【完整示例 - 弹簧弹力与形变关系（2个变量：弹性系数k、形变量x）】
-// 弹簧弹力与形变关系
-let elements = {{}};
+样式：
+  ctx.fillStyle = '#3B82F6'
+  ctx.strokeStyle = '#60A5FA'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round' | 'butt' | 'square'
+  ctx.lineJoin = 'round' | 'miter' | 'bevel'
+  ctx.globalAlpha = 0.8
+  ctx.shadowBlur = 10
+  ctx.shadowColor = '#3B82F6'
+  ctx.shadowOffsetX = 5
+  ctx.shadowOffsetY = 5
 
-function setup(ctx) {{
-  const {{ width, height }} = ctx;
-  elements.title = ctx.createText('弹簧弹力与形变关系', width/2, 25, {{fontSize: 20, fontWeight: 'bold', color: '#ffffff', align: 'center'}});
-  // 坐标系区域
-  const ox = width * 0.15, oy = height * 0.78;
-  const axisW = width * 0.48, axisH = height * 0.55;
-  // X轴
-  elements.xAxis = ctx.createLine(ox, oy, ox + axisW, oy, {{color: '#e2e8f0', width: 2}});
-  elements.xLabel = ctx.createText('形变量 x (m)', ox + axisW / 2, oy + 30, {{fontSize: 12, color: '#e2e8f0', align: 'center'}});
-  // Y轴
-  elements.yAxis = ctx.createLine(ox, oy, ox, oy - axisH, {{color: '#e2e8f0', width: 2}});
-  elements.yLabel = ctx.createText('F / Ep', ox - 10, oy - axisH - 10, {{fontSize: 12, color: '#e2e8f0', align: 'center'}});
-  // X轴刻度（固定范围 0~10）
-  elements.xTicks = [];
-  const maxX = 10;
-  for (let i = 0; i <= 5; i++) {{
-    const tx = ox + axisW * i / 5;
-    elements.xTicks.push(ctx.createLine(tx, oy, tx, oy + 5, {{color: '#94a3b8', width: 1}}));
-    ctx.createText((maxX * i / 5).toFixed(0), tx, oy + 16, {{fontSize: 10, color: '#94a3b8', align: 'center'}});
-  }}
-  // Y轴刻度（固定范围 0~500）
-  elements.yTicks = [];
-  const maxY = 500;
-  for (let i = 0; i <= 5; i++) {{
-    const ty = oy - axisH * i / 5;
-    elements.yTicks.push(ctx.createLine(ox, ty, ox - 5, ty, {{color: '#94a3b8', width: 1}}));
-    ctx.createText((maxY * i / 5).toFixed(0), ox - 20, ty + 4, {{fontSize: 10, color: '#94a3b8', align: 'right'}});
-  }}
-  // 函数曲线：F = k*x（蓝色）
-  const initPts = [];
-  for (let i = 0; i <= 30; i++) initPts.push({{x: ox, y: oy}});
-  elements.curveF = ctx.createCurve(initPts, '#60a5fa', 2);
-  // 函数曲线：Ep = 0.5*k*x²（绿色）
-  elements.curveEp = ctx.createCurve(initPts, '#22c55e', 2);
-  // 当前值竖线
-  elements.vLine = ctx.createLine(ox, oy, ox, oy - axisH, {{color: '#f59e0b', width: 1}});
-  // 标注点
-  elements.dotF = ctx.createCircle(ox, oy, 5, '#60a5fa');
-  elements.dotEp = ctx.createCircle(ox, oy, 5, '#22c55e');
-  // 右侧数值面板
-  const px = width * 0.72, pw = width * 0.22;
-  elements.panelBg = ctx.createRect(px + pw/2, height * 0.38, pw, height * 0.4, '#6366f1', 8);
-  ctx.setAlpha(elements.panelBg, 0.15);
-  elements.panelTitle = ctx.createText('实时数据', px + pw/2, height * 0.22, {{fontSize: 14, fontWeight: 'bold', color: '#e2e8f0', align: 'center'}});
-  elements.kLabel = ctx.createText('k = 0', px + pw/2, height * 0.32, {{fontSize: 13, color: '#a855f7', align: 'center'}});
-  elements.xValLabel = ctx.createText('x = 0', px + pw/2, height * 0.40, {{fontSize: 13, color: '#f59e0b', align: 'center'}});
-  elements.fLabel = ctx.createText('F = 0 N', px + pw/2, height * 0.50, {{fontSize: 14, fontWeight: 'bold', color: '#60a5fa', align: 'center'}});
-  elements.epLabel = ctx.createText('Ep = 0 J', px + pw/2, height * 0.58, {{fontSize: 14, fontWeight: 'bold', color: '#22c55e', align: 'center'}});
-  // 图例
-  elements.legendF = ctx.createText('— F = kx', px + pw/2, height * 0.68, {{fontSize: 11, color: '#60a5fa', align: 'center'}});
-  elements.legendEp = ctx.createText('— Ep = ½kx²', px + pw/2, height * 0.74, {{fontSize: 11, color: '#22c55e', align: 'center'}});
-}}
+变换：
+  ctx.save()
+  ctx.restore()
+  ctx.translate(x, y)
+  ctx.rotate(angle)  // 弧度
+  ctx.scale(sx, sy)
 
-function update(ctx) {{
-  const {{ width, height, math }} = ctx;
-  const k = ctx.getVar('k');
-  const x = ctx.getVar('x');
-  const ox = width * 0.15, oy = height * 0.78;
-  const axisW = width * 0.48, axisH = height * 0.55;
-  const maxX = 10, maxY = 500;
-  // 更新F曲线
-  const ptsF = [];
-  const ptsEp = [];
-  const N = 30;
-  for (let i = 0; i <= N; i++) {{
-    const xi = maxX * i / N;
-    const px = ox + axisW * i / N;
-    const fVal = k * xi;
-    const epVal = 0.5 * k * xi * xi;
-    ptsF.push({{x: px, y: math.clamp(oy - (fVal / maxY) * axisH, 55, height - 35)}});
-    ptsEp.push({{x: px, y: math.clamp(oy - (epVal / maxY) * axisH, 55, height - 35)}});
-  }}
-  ctx.setCurvePoints(elements.curveF, ptsF);
-  ctx.setCurvePoints(elements.curveEp, ptsEp);
-  // 当前值竖线和标注点
-  const cx = ox + axisW * (x / maxX);
-  const curF = k * x;
-  const curEp = 0.5 * k * x * x;
-  const cyF = math.clamp(oy - (curF / maxY) * axisH, 55, height - 35);
-  const cyEp = math.clamp(oy - (curEp / maxY) * axisH, 55, height - 35);
-  ctx.setPosition(elements.vLine, cx, oy, cx, oy - axisH);
-  ctx.setPosition(elements.dotF, cx, cyF);
-  ctx.setPosition(elements.dotEp, cx, cyEp);
-  ctx.setGlow(elements.dotF, 0);
-  ctx.setGlow(elements.dotEp, 0);
-  // 数值面板
-  const px2 = width * 0.72, pw2 = width * 0.22;
-  ctx.setText(elements.kLabel, 'k = ' + k.toFixed(1) + ' N/m');
-  ctx.setText(elements.xValLabel, 'x = ' + x.toFixed(1) + ' m');
-  ctx.setText(elements.fLabel, 'F = ' + curF.toFixed(1) + ' N');
-  ctx.setText(elements.epLabel, 'Ep = ' + curEp.toFixed(2) + ' J');
-}}
+【推荐配色方案】
+主色调: '#3B82F6', '#60A5FA', '#93C5FD'
+次色调: '#8B5CF6', '#A78BFA', '#C4B5FD'
+强调色: '#F59E0B', '#FBBF24', '#FCD34D'
+成功色: '#10B981', '#34D399', '#6EE7B7'
+警告色: '#EF4444', '#F87171', '#FCA5A5'
+文本色: '#F1F5F9', '#E2E8F0', '#CBD5E1', '#94A3B8'
+背景色: '#0F172A', '#1E293B', '#334155'
 
-【要求】
-- 代码 80-180 行，视觉丰富精致
-- 必须有 function setup(ctx) 和 function update(ctx)
-- 只用 2-3 个变量，每个变量必须有明确的视觉反馈
-- 所有坐标必须用 width/height 比例计算，禁止硬编码绝对坐标
-- 必须以 // 或 let 开头
-- 不要 ``` 标记
+【核心要求】
+1. 完整HTML文档（DOCTYPE + head + body）
+2. 所有代码在单个文件中（self-contained）
+3. 使用Canvas 2D API绘制（不使用外部库）
+4. 使用requestAnimationFrame动画循环
+5. 至少2个input range控件
+6. 实时显示数值变化
+7. 画布尺寸：width="800" height="500"
+8. 配色协调美观
+9. 代码清晰注释适当
 
-【动态可视化要求 - 核心】
-1. 必须画坐标轴（X轴和Y轴，用createLine画轴线，带刻度线和刻度标签）
-2. 必须用 createCurve + setCurvePoints 创建函数曲线（至少1条，建议2条不同颜色）
-3. 必须有当前值标注（竖线标注当前滑块值位置，曲线上对应点用亮色圆点标注）
-4. 必须有数值面板（右侧区域，矩形背景+数值标签，实时显示计算结果）
-5. 用 setText 实时更新刻度标签和数值显示
-6. 用不同颜色区分不同曲线（曲线1=#60a5fa，曲线2=#22c55e，当前值=#f59e0b，辅助=#94a3b8）
-7. 禁止做具象图形（人物、小人、球体、弹簧、建筑、动物等），只画坐标系、曲线、标注点、数值面板
-8. 禁止用emoji或Unicode特殊字符，必须用ctx.create系列API绘制
-9. 禁止在坐标系外画任何示意图、图示、图标，整个画面只有坐标系+曲线+数值面板
+【禁止项】
+❌ 外部库（Three.js, D3.js等）
+❌ eval(), Function(), setTimeout
+❌ fetch(), XMLHttpRequest, localStorage
+❌ 不要markdown代码块标记（```html等）
+❌ 不要任何解释文字
 
-【视觉技巧】
-- 坐标轴画法：用createLine画X轴和Y轴，用for循环创建刻度线（短createLine）和刻度标签（createText），刻度值在setup中写死
-- 坐标轴固定：X轴和Y轴的范围、刻度线、刻度标签全部在setup中确定，update中绝对不能修改坐标轴和刻度
-- 曲线平滑：用30+个点计算函数值，createCurve自动平滑
-- 当前值标注：竖线(createLine) + 亮色圆点(createCircle) 标注当前滑块值，可自由选择合适的视觉强调方式（如更大半径、不同颜色、setAlpha变化等）
-- 多曲线对比：不同因变量用不同颜色的createCurve，图例用对应颜色的createText
-- 数值面板：右侧用createRect做半透明背景，createText显示实时计算结果
-- 禁止动态刻度：update中不要用setText更新刻度标签，坐标轴是固定参照系"""
+【质量标准】
+- 视觉吸引力：发光效果、渐变、阴影
+- 交互性：至少2个可调参数实时响应
+- 教育性：清晰展示概念计算准确
+- 代码质量：结构清晰注释适当
+
+【学习参考】
+系统已导入24个标准HTML模拟器模板（质量分75分）供学习：
+- 物理：圆周运动、抛体运动、弹簧振子
+- 生物：细胞分裂、DNA复制、酶活性
+- 化学：电子轨道、分子结构、化学平衡
+- 医学：血液循环、免疫应答、神经信号
+- 计算机：二叉树遍历、排序算法、图搜索
+- 数学：傅里叶变换、参数曲线、矩阵运算
+- 历史：事件因果、贸易路线、朝代时间轴
+- 地理：水循环、气候带、板块运动
+
+这些模板存储在 simulator_templates 表中，可作为实现参考。"""
 
         try:
             response = await self.claude_service.generate_raw_response(
@@ -871,37 +738,40 @@ function update(ctx) {{
         history: List[Dict],
         system_prompt: str
     ) -> str:
-        """生产者：根据历史问题决定重做还是修改"""
+        """生产者：根据历史问题决定重做还是修改（2026-02-11: 适配HTML格式）"""
         if not history:
             return 'regenerate'
 
         last = history[-1]
 
-        # 结构性问题 → 必须重做
-        structural_keywords = [
-            'function setup', 'function update',  # 缺少核心函数
-            '代码严重不足', '代码太短',              # 代码量不够
-            '元素太少',                             # 视觉元素不足
-            '缺少动画',                             # 无动画逻辑
-            '致命语法错误',                          # 重复声明、中文标点等
-            '括号错误',                              # 括号不匹配
-            '无条件的元素创建',                        # update中无保护的create
+        # HTML结构性问题 → 必须重做
+        html_structural_keywords = [
+            '缺少完整HTML结构',           # 没有DOCTYPE
+            '缺少canvas元素',             # 核心元素缺失
+            '缺少script脚本',             # 没有JS逻辑
+            '代码严重不足', '代码太短',    # 代码量不够
+            '元素太少',                   # 视觉元素不足
+            '缺少动画循环',               # 无requestAnimationFrame
+            '缺少交互控件',               # 没有input range
+            '致命语法错误',               # 重复声明、括号不匹配等
+            '括号错误',
         ]
         for issue in last['issues']:
-            if any(kw in issue for kw in structural_keywords):
+            if any(kw in issue for kw in html_structural_keywords):
                 return 'regenerate'
 
         # 分数太低 → 重做
         if last['score'] < 50:
             return 'regenerate'
 
-        # 连续两轮 fix 但分数没有提升 → 重做
+        # 连续两轮但分数没有提升 → 重做
         if len(history) >= 2:
             prev = history[-2]
             if last['score'] <= prev['score']:
                 return 'regenerate'
 
-        # 表面问题（颜色、缺少变量读取、缺少setText）→ 修改
+        # 表面问题（颜色、文本显示不足）→ 修改
+        return 'fix'
         return 'fix'
 
     async def _producer_fix_code(
@@ -909,14 +779,13 @@ function update(ctx) {{
         code: str,
         issues: List[str],
         simulator_name: str,
-        variable_names: List[str],
         system_prompt: str
     ) -> Optional[str]:
         """生产者：修复现有代码"""
         if not code:
             return None
 
-        prompt = f"""修复以下代码的问题。只输出修复后的完整代码。
+        prompt = f"""修复以下HTML代码的问题。只输出修复后的完整HTML代码。
 
 【原代码】
 {code}
@@ -925,36 +794,28 @@ function update(ctx) {{
 {chr(10).join([f"- {issue}" for issue in issues])}
 
 【模拟器】{simulator_name}
-【变量】{', '.join(variable_names)}
 
 【修复要求】
-1. 保持 function setup(ctx) 和 function update(ctx) 结构
-2. 只用白名单API:
-   创建: ctx.createText(text,x,y,opts), ctx.createRect(x,y,w,h,color), ctx.createCircle(x,y,r,color), ctx.createLine(x1,y1,x2,y2,{{color,width}}), ctx.createCurve(pts,color,w), ctx.createPolygon(pts,fill,stroke?)
-   操作: ctx.setText(id,text), ctx.setPosition(id,x,y) 或 ctx.setPosition(lineId,x1,y1,x2,y2), ctx.setColor(id,color), ctx.setScale(id,sx,sy), ctx.setRotation(id,deg), ctx.setAlpha(id,alpha), ctx.setVisible(id,bool), ctx.setGlow(id,blur,color?), ctx.setCurvePoints(id,pts,smooth?), ctx.setRadius(id,r), ctx.setSize(id,w,h), ctx.remove(id)
-   读取: ctx.getVar('name'), ctx.time, ctx.deltaTime
-   数学: ctx.math.sin/cos/tan/atan2/abs/floor/ceil/round/sqrt/pow/min/max/PI/lerp/clamp/smoothstep/wave/degToRad/radToDeg
-3. 只用亮色: '#ffffff', '#e2e8f0', '#60a5fa', '#6366f1', '#8b5cf6', '#a855f7', '#94a3b8', '#22c55e', '#f59e0b', '#ef4444'
-4. 读取所有变量: {', '.join([f"ctx.getVar('{n}')" for n in variable_names])}
-5. 变量读取后必须用于视觉更新（setText/setPosition/setScale等）
+1. 保持完整的HTML结构（<!DOCTYPE html>...）
+2. 使用Canvas 2D API绘制图形
+3. 只用亮色系（与深色背景形成对比）
+4. 保持交互控件的响应性
+5. 确保代码清晰注释适当
 
 【修复原则】
-- 保持原有元素的相对位置关系不变
-- 保持坐标系和函数曲线的布局
+- 保持原有布局和视觉元素的相对位置关系
 - 修复问题时不要打乱已有的空间布局
-- 所有坐标必须用 width/height 比例计算，不要硬编码绝对坐标
-- 数据面板和文字不要贴画布边缘，保持安全边距
-- 动态坐标用 math.clamp 限制在安全区域内
-- 保持函数图风格，不要画具体路径
-- 如果有"重复声明变量"错误，删除重复的 let/const 声明，改为赋值语句
+- 所有坐标使用响应式计算，避免硬编码
+- 保持动画的流畅性
+- 如果有语法错误，修正但保持原有逻辑
+- 如果有"重复声明变量"错误，删除重复的声明
 - 如果有"中文标点"错误，将代码中的中文标点替换为英文标点（字符串和注释中的中文可以保留）
-- 绝对不要在同一个函数中用 let/const 声明同名变量两次
 
 【严格要求】
-- 直接输出完整代码
+- 直接输出完整HTML代码
 - 不要 ``` 标记
 - 不要解释
-- 必须以 // 或 let 开头"""
+- 必须以 <!DOCTYPE html> 开头"""
 
         try:
             response = await self.claude_service.generate_raw_response(
@@ -967,15 +828,15 @@ function update(ctx) {{
             logger.error(f"[Producer] Fix error: {e}")
             return None
 
-    def _supervisor_review(self, code: str, variable_names: List[str]) -> tuple:
+    def _supervisor_review(self, code: str) -> tuple:
         """
         监督者：审核代码并打分
 
         评分标准（满分100）：
-        - 可运行性: 30分（函数结构、API正确）
-        - 内容完整: 30分（变量读取、视觉反馈）
+        - 可运行性: 30分（HTML结构、脚本正确）
+        - 内容完整: 30分（视觉元素、交互功能）
         - 表达深度: 20分（代码行数、元素丰富度）
-        - 渲染质量: 20分（颜色正确、动画逻辑）
+        - 渲染质量: 20分（颜色正确、动画效果）
 
         Returns:
             (score, issues)
@@ -984,19 +845,26 @@ function update(ctx) {{
         issues = []
 
         # === 可运行性 (30分) ===
-        has_setup = 'function setup' in code
-        has_update = 'function update' in code
-        if not has_setup:
-            score -= 20
-            issues.append("缺少 function setup(ctx)")
-        if not has_update:
-            score -= 10
-            issues.append("缺少 function update(ctx)")
+        # 检查HTML结构
+        has_html_tag = '<!DOCTYPE html>' in code and '<html' in code
+        has_canvas = '<canvas' in code
+        has_script = '<script>' in code or '<script ' in code
 
-        api_valid, _, invalid_apis = self._validate_api_usage(code)
-        if not api_valid:
-            score -= 15
-            issues.append(f"无效API: {', '.join(invalid_apis[:3])}")
+        if not has_html_tag:
+            score -= 20
+            issues.append("缺少完整HTML结构(<!DOCTYPE html>)")
+        if not has_canvas:
+            score -= 10
+            issues.append("缺少canvas元素")
+        if not has_script:
+            score -= 10
+            issues.append("缺少script脚本")
+
+        # 对于HTML格式，不检查ctx API，因为使用的是Canvas 2D原生API
+        # api_valid, _, invalid_apis = self._validate_api_usage(code)
+        # if not api_valid:
+        #     score -= 15
+        #     issues.append(f"无效API: {', '.join(invalid_apis[:3])}")
 
         # 语法验证（重复声明、中文标点等致命问题）
         syntax_valid, syntax_error = self._validate_js_syntax_detailed(code)
@@ -1010,70 +878,31 @@ function update(ctx) {{
 
         # 检查 API 参数格式是否正确
         import re
-        # createLine 应该用 (x1, y1, x2, y2, ...) 或 ([{x,y},...], ...)
-        # createCircle 应该用 (x, y, radius, color) 不是 (x, y, radius, {color:...})
-        # createRect 应该用 (x, y, w, h, color) 不是 (x, y, w, h, {color:...})
+        # HTML Canvas 2D API使用原生方法，不需要检查ctx.create*参数
         param_issues = []
 
-        # 检查是否使用了全局 Math 而非 ctx.math / math
-        global_math_calls = re.findall(r'(?<!\w)Math\.(floor|ceil|round|sin|cos|tan|abs|sqrt|pow|min|max|random|PI)\b', code)
-        if global_math_calls:
-            unique_calls = list(set(global_math_calls))[:3]
-            param_issues.append(f"使用了全局Math而非math: Math.{', Math.'.join(unique_calls)}")
+        # HTML使用原生Math对象，不需要检查
+        # global_math_calls = re.findall(r'(?<!\w)Math\.(floor|ceil|round|sin|cos|tan|abs|sqrt|pow|min|max|random|PI)\b', code)
+        # if global_math_calls:
+        #     unique_calls = list(set(global_math_calls))[:3]
+        #     param_issues.append(f"使用了全局Math而非math: Math.{', Math.'.join(unique_calls)}")
 
         if param_issues:
             score -= 10
             issues.extend(param_issues)
 
-        # --- 参数数量验证 ---
-        # createCircle: (x, y, radius, color) = 3-4 args
-        for match in re.finditer(r'ctx\.createCircle\(([^)]+)\)', code):
-            arg_count = self._count_top_level_args(match.group(1))
-            if arg_count < 3 or arg_count > 4:
-                score -= 10
-                issues.append(f"createCircle参数数量错误: {arg_count}个(需3-4)")
-                break
-
-        # createRect: (x, y, w, h, color, cornerRadius?) = 5-6 args
-        for match in re.finditer(r'ctx\.createRect\(([^)]+)\)', code):
-            arg_count = self._count_top_level_args(match.group(1))
-            if arg_count < 5 or arg_count > 6:
-                score -= 10
-                issues.append(f"createRect参数数量错误: {arg_count}个(需5-6)")
-                break
-
-        # createLine 非数组形式: (x1, y1, x2, y2, opts) = 5+ args
-        for match in re.finditer(r'ctx\.createLine\(([^)]+)\)', code):
-            args_str = match.group(1).strip()
-            if not args_str.startswith('['):
-                arg_count = self._count_top_level_args(args_str)
-                if arg_count < 4:
-                    score -= 10
-                    issues.append(f"createLine参数不足: {arg_count}个(需4+)")
-                    break
+        # HTML Canvas 2D API不需要检查ctx.create*的参数数量
+        # 因为使用的是原生Canvas API (fillRect, arc, etc.)
 
         # === 内容完整 (30分) ===
-        missing_vars = []
-        for var_name in variable_names:
-            if f"ctx.getVar('{var_name}')" not in code and f'ctx.getVar("{var_name}")' not in code:
-                missing_vars.append(var_name)
-        if missing_vars:
-            penalty = min(20, len(missing_vars) * 7)
-            score -= penalty
-            issues.append(f"未读取变量: {', '.join(missing_vars)}")
+        # HTML模拟器不需要检查变量读取，因为交互控件直接在HTML中实现
 
-        # 反向检查：代码中 getVar 引用的变量名是否都在 variable_names 中
-        code_getvar_names = set(re.findall(r"ctx\.getVar\(['\"](\w+)['\"]\)", code))
-        var_name_set = set(variable_names)
-        phantom_vars = code_getvar_names - var_name_set
-        if phantom_vars:
+        # 检查是否有文本显示元素
+        has_text_display = bool(re.search(r'<(span|div|p)[^>]*id=["\'][^"\']+["\'][^>]*>', code))
+        if not has_text_display:
             score -= 10
-            issues.append(f"代码引用了不存在的变量: {', '.join(phantom_vars)}（滑块中没有这些变量）")
+            issues.append("缺少文本显示元素")
 
-        # 检查是否有 setText 更新显示
-        if 'ctx.setText' not in code:
-            score -= 10
-            issues.append("缺少数值显示更新(ctx.setText)")
 
         # === 表达深度 (20分) ===
         code_lines = len([l for l in code.split('\n') if l.strip()])
@@ -1092,19 +921,18 @@ function update(ctx) {{
             score -= 10
             issues.append(f"代码过长: {code_lines}行(建议200行以内)")
 
-        # 检查元素丰富度
-        create_count = code.count('ctx.create')
-        if create_count < 5:
+        # 检查元素丰富度 (HTML中的Canvas绘图调用)
+        canvas_draw_count = len(re.findall(r'\b(fillRect|strokeRect|arc|fillText|beginPath|lineTo|moveTo)\b', code))
+        if canvas_draw_count < 5:
             score -= 10
-            issues.append(f"元素太少: {create_count}个(建议5+)")
+            issues.append(f"Canvas绘图元素太少: {canvas_draw_count}个(建议5+)")
 
-        # === 提取 setup/update 代码段（后续多处使用）===
-        setup_section = ''
-        update_section = code.split('function update')[1] if 'function update' in code else ''
-        if 'function setup' in code and 'function update' in code:
-            setup_start = code.index('function setup')
-            update_start = code.index('function update')
-            setup_section = code[setup_start:update_start]
+        # === 提取 script 代码段 ===
+        script_section = ''
+        if '<script>' in code:
+            script_matches = re.findall(r'<script[^>]*>(.*?)</script>', code, re.DOTALL)
+            if script_matches:
+                script_section = script_matches[0]
 
         # === 渲染质量 (20分) ===
         color_valid, _, dark_colors = self._validate_color_contrast(code)
@@ -1112,115 +940,28 @@ function update(ctx) {{
             score -= 5
             issues.append(f"深色: {', '.join(dark_colors[:3])}")
 
-        # 检查动画逻辑
-        has_animation = ('ctx.setPosition' in code or 'ctx.setScale' in code or
-                        'ctx.setRotation' in code)
-        has_math = ('math.sin' in code or 'math.cos' in code or
-                   'math.lerp' in code)
+        # 检查动画逻辑 (requestAnimationFrame)
+        has_animation = 'requestAnimationFrame' in code
+        has_math = bool(re.search(r'Math\.(sin|cos|PI|abs|sqrt|pow)', code))
+
         if not has_animation:
             score -= 5
-            issues.append("缺少动画(setPosition/setScale)")
+            issues.append("缺少动画循环(requestAnimationFrame)")
         if not has_math:
             score -= 3
-            issues.append("缺少数学运算(sin/cos/lerp)")
+            issues.append("缺少数学运算(Math.sin/cos等)")
 
-        # 检查图形元素丰富度（坐标轴+曲线+面板等应有足够元素）
-        create_calls_in_setup = re.findall(r'ctx\.create\w+', setup_section)
-        if len(create_calls_in_setup) < 8:
+        # 检查交互控件
+        has_controls = bool(re.search(r'<input[^>]*type=["\']range["\']', code))
+        if not has_controls:
             score -= 5
-            issues.append(f"setup中图形元素不足: {len(create_calls_in_setup)}个(建议8+，坐标轴+曲线+面板)")
-
-        # 检查坐标轴（用createLine画轴线）
-        has_axis_line = bool(re.search(r'(axis|Axis|xAxis|yAxis|axisLine)\w*\s*=\s*ctx\.createLine', code))
-        if not has_axis_line:
-            score -= 3
-            issues.append("缺少坐标轴(用createLine画X轴和Y轴)")
-
-        # 检查函数曲线（createCurve）
-        has_curve_create = 'createCurve' in code
-        has_curve_update = 'setCurvePoints' in code
-        if not has_curve_create:
-            score -= 3
-            issues.append("缺少函数曲线(用createCurve创建函数曲线)")
-        elif not has_curve_update:
-            score -= 1
-            issues.append("缺少曲线动态更新(用setCurvePoints更新曲线)")
-
-        # 检查当前值标注（竖线或标注点）
-        has_current_marker = bool(re.search(r'(vLine|currentLine|markerLine|dot[A-Z]|marker)\w*\s*=\s*ctx\.(createLine|createCircle)', code))
-        if not has_current_marker:
-            score -= 2
-            issues.append("缺少当前值标注(竖线+亮点标注当前滑块值)")
-
-        # 检查数据面板（背景框+标签）
-        has_panel_bg = bool(re.search(r'(panel|bg|background|Bar|Bg|keBg|peBg)\w*\s*=\s*ctx\.createRect', code, re.IGNORECASE))
-        if not has_panel_bg:
-            score -= 2
-            issues.append("缺少数据面板背景(用createRect创建面板背景框)")
-
-        # 检查硬编码绝对坐标（大数字直接作为坐标而非用 width/height 比例）
-        hardcoded_coords = re.findall(r'(?:createCircle|createRect|createText|createLine|setPosition)\([^)]*\b([89]\d{2}|1[0-9]{3})\b', code)
-        if hardcoded_coords:
-            unique_coords = list(set(hardcoded_coords))[:3]
-            score -= 8
-            issues.append(f"疑似硬编码绝对坐标: {', '.join(unique_coords)}（应使用width/height比例）")
+            issues.append("缺少交互控件(range input)")
 
         # 检查是否使用了 emoji 或 Unicode 特殊字符代替图形
         emoji_pattern = re.findall(r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0001FA00-\U0001FA6F]', code)
         if emoji_pattern:
             score -= 10
-            issues.append("使用了emoji/Unicode特殊字符，应使用ctx.create系列API组合绘制")
-
-        # === 变量-视觉映射检查 ===
-        visual_apis = ['setPosition', 'setScale', 'setRotation', 'setAlpha', 'setColor', 'setText']
-        vars_used_in_visuals = 0
-        for var_name in variable_names:
-            if f"ctx.getVar('{var_name}')" in code or f'ctx.getVar("{var_name}")' in code:
-                var_pattern = re.compile(rf'\b{re.escape(var_name)}\b')
-                for api in visual_apis:
-                    api_calls = re.findall(rf'ctx\.{api}\([^)]*\)', update_section)
-                    for call in api_calls:
-                        if var_pattern.search(call):
-                            vars_used_in_visuals += 1
-                            break
-                    else:
-                        continue
-                    break
-
-        if variable_names and vars_used_in_visuals == 0:
-            score -= 15
-            issues.append("变量读取后未用于视觉更新(setPosition/setText等)")
-        elif len(variable_names) >= 2 and vars_used_in_visuals < len(variable_names) / 2:
-            score -= 8
-            issues.append(f"仅{vars_used_in_visuals}/{len(variable_names)}个变量用于视觉更新")
-
-        # === setup/update 职责检查 ===
-        setup_creates = len(re.findall(r'ctx\.create\w+', setup_section))
-        update_creates = len(re.findall(r'ctx\.create\w+', update_section))
-        if update_creates > setup_creates and update_creates > 2:
-            score -= 10
-            issues.append(f"update中创建了{update_creates}个元素(应在setup中创建)")
-
-        # 检查 update 中无 if 保护的 ctx.create（每帧都会创建，导致内存泄漏）
-        if update_section:
-            update_lines = update_section.split('\n')
-            unguarded_creates = []
-            in_if_block = False
-            if_depth = 0
-            for uline in update_lines:
-                ustripped = uline.strip()
-                if ustripped.startswith('if') or ustripped.startswith('} else'):
-                    in_if_block = True
-                    if_depth = 0
-                if in_if_block:
-                    if_depth += ustripped.count('{') - ustripped.count('}')
-                    if if_depth <= 0:
-                        in_if_block = False
-                if not in_if_block and 'ctx.create' in ustripped and not ustripped.startswith('//'):
-                    unguarded_creates.append(ustripped[:60])
-            if unguarded_creates:
-                score -= 15
-                issues.append(f"update中有无条件的元素创建(每帧执行会内存泄漏): {unguarded_creates[0]}")
+            issues.append("使用了emoji/Unicode特殊字符，应使用Canvas 2D API绘制")
 
         return max(0, score), issues
 
@@ -1342,189 +1083,169 @@ function update(ctx) {{
 
         return code
 
-    def validate_code_quality(self, code: str, variables: List[Dict], threshold: int = 70) -> tuple:
+    def validate_html_quality(self, code: str, threshold: int = 70) -> tuple:
         """
-        验证代码质量评分
-        返回 (passed: bool, score: CodeQualityScore, report: str)
-        """
-        from .models import SimulatorSpec, SimulatorQualityStandards
+        验证HTML模拟器质量评分 (2026-02-11)
 
-        # 创建临时 SimulatorSpec 来计算评分
-        spec = SimulatorSpec(
+        Args:
+            code: HTML代码
+            threshold: 质量阈值 (默认70)
+
+        Returns:
+            (passed: bool, score: HTMLSimulatorQualityScore, report: str)
+        """
+        from .models import HTMLSimulatorSpec, HTMLSimulatorQualityStandards
+
+        # 创建HTMLSimulatorSpec来计算评分
+        spec = HTMLSimulatorSpec(
             name="temp",
             description="temp",
-            variables=variables,
-            custom_code=code
+            html_content=code
         )
 
-        standards = SimulatorQualityStandards()
+        try:
+            # 验证HTML结构
+            standards = HTMLSimulatorQualityStandards()
+            spec.validate(standards)
+        except ValueError as e:
+            # 结构验证失败
+            logger.warning(f"HTML structure validation failed: {e}")
+            # 返回0分
+            from .models import HTMLSimulatorQualityScore
+            failed_score = HTMLSimulatorQualityScore(
+                structure_score=0,
+                canvas_usage_score=0,
+                visual_quality_score=0,
+                interaction_score=0,
+                educational_value_score=0
+            )
+            failed_score.issues.append(f"Structure validation failed: {str(e)}")
+            return False, failed_score, failed_score.format_report()
+
+        # 计算质量评分
+        standards = HTMLSimulatorQualityStandards()
         score = spec.calculate_quality_score(standards)
         score.threshold = threshold
 
         report = score.format_report()
-        logger.info(f"Code quality score: {score.total_score}/100 (threshold: {threshold})")
+        logger.info(f"HTML quality score: {score.total_score}/100 (threshold: {threshold})")
 
         if not score.passed:
-            logger.warning(f"Code quality below threshold. Issues: {score.issues}")
+            logger.warning(f"HTML quality below threshold. Issues: {score.issues}")
 
         return score.passed, score, report
 
     def _clean_simulator_code(self, response: str) -> str:
         """
-        方案D：更强的代码清理
-        移除AI可能添加的解释文字、注释等非代码内容
-        """
-        code = response.strip()
-        original_response = response  # 保留原始响应用于fallback
+        清理AI响应，提取HTML代码（2026-02-11: 适配HTML格式）
 
-        # 0. 检测JSON包裹格式：AI可能返回 ```json\n{"code": "..."}\n```
+        支持的格式：
+        1. 直接的HTML代码（以<!DOCTYPE开头）
+        2. Markdown代码块包裹的HTML（```html ... ```）
+        3. JSON包裹的HTML（{"code": "..."}）
+        """
+        import re
         import json as _json
+
+        code = response.strip()
+        original_response = response
+
+        # 1. 检测JSON包裹格式：{"code": "<!DOCTYPE html>..."}
         try:
-            # 先尝试去掉markdown代码块标记
             json_str = code
+            # 移除markdown代码块标记
             if json_str.startswith('```'):
-                # 移除开头的 ```json 或 ``` 行
                 first_newline = json_str.index('\n')
                 json_str = json_str[first_newline + 1:]
             if json_str.rstrip().endswith('```'):
                 json_str = json_str.rstrip()[:-3].rstrip()
+
             # 尝试解析JSON
             parsed = _json.loads(json_str)
             if isinstance(parsed, dict) and 'code' in parsed:
                 extracted = parsed['code']
-                if isinstance(extracted, str) and 'function setup' in extracted and len(extracted) > 50:
-                    logger.info(f"[_clean_simulator_code] Extracted code from JSON 'code' field: {len(extracted.splitlines())} lines")
-                    code = extracted
-                    original_response = extracted
+                if isinstance(extracted, str) and len(extracted) > 100:
+                    # 检查是否是HTML
+                    if '<!DOCTYPE' in extracted.upper() or '<HTML' in extracted.upper():
+                        logger.info(f"[_clean_simulator_code] Extracted HTML from JSON 'code' field: {len(extracted.splitlines())} lines")
+                        return extracted.strip()
         except (ValueError, _json.JSONDecodeError, IndexError):
-            pass  # 不是JSON格式，继续正常流程
+            pass
 
-        # 1. 提取代码块 - 优先找包含 function setup 的代码块
-        import re
-        code_blocks = re.findall(r'```(?:javascript|js)?\s*\n(.*?)```', code, re.DOTALL)
+        # 2. 提取HTML代码块：```html ... ```
+        html_blocks = re.findall(r'```html\s*\n(.*?)```', code, re.DOTALL | re.IGNORECASE)
+        if html_blocks:
+            # 选择最长的HTML块
+            best_block = max(html_blocks, key=len)
+            logger.info(f"[_clean_simulator_code] Extracted from ```html block: {len(best_block.splitlines())} lines")
+            return best_block.strip()
 
+        # 3. 提取任意代码块：``` ... ```
+        code_blocks = re.findall(r'```[a-z]*\s*\n(.*?)```', code, re.DOTALL | re.IGNORECASE)
         if code_blocks:
-            # 优先选择包含 function setup 的代码块
-            best_block = None
+            # 优先选择包含DOCTYPE或<html>的块
             for block in code_blocks:
-                if 'function setup' in block and 'function update' in block:
-                    best_block = block
-                    break
-            if not best_block:
-                # 选择最长的代码块
-                best_block = max(code_blocks, key=len)
-            code = best_block
-        else:
-            # 没有代码块标记，尝试旧方法
-            if '```javascript' in code:
-                parts = code.split('```javascript')
-                if len(parts) > 1:
-                    code = parts[1].split('```')[0]
-            elif '```js' in code:
-                parts = code.split('```js')
-                if len(parts) > 1:
-                    code = parts[1].split('```')[0]
-            elif '```' in code:
-                parts = code.split('```')
-                if len(parts) > 1:
-                    code = parts[1].split('```')[0]
+                if '<!DOCTYPE' in block.upper() or '<HTML' in block.upper():
+                    logger.info(f"[_clean_simulator_code] Extracted HTML from generic code block: {len(block.splitlines())} lines")
+                    return block.strip()
+            # 如果没有找到HTML特征，选择最长的块
+            best_block = max(code_blocks, key=len)
+            if len(best_block) > 100:
+                logger.info(f"[_clean_simulator_code] Extracted longest code block: {len(best_block.splitlines())} lines")
+                return best_block.strip()
 
-        # 2. 移除开头的解释文字（找到第一个有效代码行）
+        # 4. 直接的HTML代码（没有markdown包裹）
+        # 查找<!DOCTYPE html>或<html的位置
+        doctype_match = re.search(r'<!DOCTYPE\s+html>', code, re.IGNORECASE)
+        html_match = re.search(r'<html[^>]*>', code, re.IGNORECASE)
+
+        start_pos = None
+        if doctype_match:
+            start_pos = doctype_match.start()
+        elif html_match:
+            start_pos = html_match.start()
+
+        if start_pos is not None:
+            # 找到</html>的结束位置
+            end_match = re.search(r'</html>', code[start_pos:], re.IGNORECASE)
+            if end_match:
+                end_pos = start_pos + end_match.end()
+                extracted = code[start_pos:end_pos]
+                logger.info(f"[_clean_simulator_code] Extracted raw HTML: {len(extracted.splitlines())} lines")
+                return extracted.strip()
+            else:
+                # 没有找到</html>，取到末尾
+                extracted = code[start_pos:]
+                logger.info(f"[_clean_simulator_code] Extracted HTML (no closing tag): {len(extracted.splitlines())} lines")
+                return extracted.strip()
+
+        # 5. 最后尝试：移除明显的解释文字，返回剩余内容
         lines = code.split('\n')
+        # 移除开头的纯文字解释行（不包含<或{的行）
         start_idx = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
-            # 有效代码行的特征
-            if (stripped.startswith('let ') or
-                stripped.startswith('const ') or
-                stripped.startswith('var ') or
-                stripped.startswith('function ') or
-                stripped.startswith('//') or
-                stripped.startswith('/*') or
-                stripped == ''):
+            if '<' in stripped or '{' in stripped or stripped.startswith('//') or stripped == '':
                 start_idx = i
                 break
 
-        # 3. 移除结尾的解释文字（找到最后一个 } 或有效代码行）
+        # 移除结尾的纯文字解释行
         end_idx = len(lines)
         for i in range(len(lines) - 1, -1, -1):
             stripped = lines[i].strip()
-            if stripped.endswith('}') or stripped.endswith(';') or stripped.startswith('//') or stripped == '':
+            if '>' in stripped or '}' in stripped or stripped.startswith('//') or stripped == '':
                 end_idx = i + 1
                 break
 
-        code = '\n'.join(lines[start_idx:end_idx])
-        code = code.strip()
+        if start_idx < end_idx:
+            result = '\n'.join(lines[start_idx:end_idx]).strip()
+            if len(result) > 100:
+                logger.info(f"[_clean_simulator_code] Extracted after removing explanations: {len(result.splitlines())} lines")
+                return result
 
-        # 4. 最终检查：如果清理后没有代码，尝试直接从原始响应中提取
-        if not code or len([l for l in code.split('\n') if l.strip()]) < 10:
-            # 用原始响应而不是已截断的code
-            raw_lines = original_response.split('\n')
-            setup_start = -1
-            last_brace = -1
-            for i, line in enumerate(raw_lines):
-                if 'function setup' in line and setup_start == -1:
-                    # 往前找 let elements 或注释
-                    setup_start = i
-                    for j in range(i - 1, max(i - 10, -1), -1):
-                        s = raw_lines[j].strip()
-                        if s.startswith('let ') or s.startswith('const ') or s.startswith('//') or s.startswith('/*'):
-                            setup_start = j
-                            break
-                # 匹配以 } 结尾的行（不只是独立的 }）
-                if line.strip().endswith('}'):
-                    last_brace = i
-
-            if setup_start >= 0 and last_brace > setup_start and (last_brace - setup_start) >= 10:
-                code = '\n'.join(raw_lines[setup_start:last_brace + 1])
-                code = code.strip()
-                logger.info(f"[_clean_simulator_code] Extracted code from raw response: {len(code.splitlines())} lines")
-            else:
-                # 最后尝试：移除所有 ``` 行后重新提取
-                stripped_lines = [l for l in raw_lines if not l.strip().startswith('```')]
-                setup_start2 = -1
-                last_brace2 = -1
-                for i, line in enumerate(stripped_lines):
-                    if 'function setup' in line and setup_start2 == -1:
-                        setup_start2 = i
-                        for j in range(i - 1, max(i - 10, -1), -1):
-                            s = stripped_lines[j].strip()
-                            if s.startswith('let ') or s.startswith('const ') or s.startswith('//') or s.startswith('/*'):
-                                setup_start2 = j
-                                break
-                    if line.strip().endswith('}'):
-                        last_brace2 = i
-
-                if setup_start2 >= 0 and last_brace2 > setup_start2 and (last_brace2 - setup_start2) >= 10:
-                    code = '\n'.join(stripped_lines[setup_start2:last_brace2 + 1])
-                    code = code.strip()
-                    logger.info(f"[_clean_simulator_code] Extracted after stripping markdown: {len(code.splitlines())} lines")
-                else:
-                    logger.warning(f"[_clean_simulator_code] Failed to extract code (setup_start={setup_start}, last_brace={last_brace}, stripped: setup={setup_start2}, brace={last_brace2})")
-
-        return code
-
-    def _ensure_code_structure(self, code: str, variables: List[Dict]) -> str:
-        """
-        方案B：代码结构检查
-        确保代码包含 setup 和 update 函数，缺少则抛出错误触发重试
-        """
-        has_setup = 'function setup' in code or 'setup(' in code
-        has_update = 'function update' in code or 'update(' in code
-
-        if has_setup and has_update:
-            return code
-
-        logger.warning(f"Code structure incomplete: has_setup={has_setup}, has_update={has_update}")
-
-        # 缺少必要函数，抛出错误触发重试
-        missing = []
-        if not has_setup:
-            missing.append('setup')
-        if not has_update:
-            missing.append('update')
-
-        raise ValueError(f"missing_function:{','.join(missing)}")
+        # 6. 完全失败，返回原始响应
+        logger.warning(f"[_clean_simulator_code] Failed to extract HTML, returning original response: {len(original_response)} chars")
+        return original_response.strip()
 
     def _get_line_context(self, lines: List[str], line_num: int, context_lines: int = 2) -> tuple:
         """获取指定行的上下文"""
@@ -1815,7 +1536,7 @@ function update(ctx) {{
                             context_before=before,
                             error_line=current,
                             context_after=after,
-                            suggestion=f"可用的 API: {', '.join(VALID_CREATE_APIS[:3])}... 请使用白名单内的 API"
+                            suggestion=f"可用的 Canvas 2D API: {', '.join(CANVAS_2D_DRAWING_APIS[:5])}... 请使用标准Canvas 2D API"
                         ))
 
         if errors:
@@ -2023,62 +1744,7 @@ function update(ctx) {{
 
         return code
 
-    def _get_fallback_code(self, name: str, variables: List[Dict]) -> str:
-        """生成教育性 fallback 模拟器代码 - 变量仪表盘"""
-        var_reads = "\n".join([
-            f"  const {v.get('name', f'var{i}')} = ctx.getVar('{v.get('name', f'var{i}')}');"
-            for i, v in enumerate(variables)
-        ])
-
-        gauge_setup_lines = []
-        gauge_update_lines = []
-        for i, v in enumerate(variables):
-            vname = v.get('name', f'var{i}')
-            vlabel = v.get('label', vname)
-            vmin = v.get('min', 0)
-            vmax = v.get('max', 100)
-            vdefault = v.get('default', 50)
-            vunit = v.get('unit', '')
-            y_offset = i * 80
-
-            gauge_setup_lines.append(
-                f"  elements.label{i} = ctx.createText('{vlabel}', 80, 140 + {y_offset}, {{fontSize: 14, color: '#94a3b8', align: 'left'}});\n"
-                f"  elements.val{i} = ctx.createText('{vdefault}{vunit}', width - 80, 140 + {y_offset}, {{fontSize: 14, color: '#60a5fa', align: 'right'}});\n"
-                f"  elements.barBg{i} = ctx.createRect(width/2, 165 + {y_offset}, width - 160, 16, '#1e293b', 8);\n"
-                f"  elements.bar{i} = ctx.createRect(width/2, 165 + {y_offset}, (width-180)/2, 12, '#6366f1', 6);"
-            )
-
-            gauge_update_lines.append(
-                f"  const norm{i} = ({vname} - {vmin}) / ({vmax - vmin if vmax != vmin else 1});\n"
-                f"  const barW{i} = math.clamp(norm{i}, 0, 1) * (width - 180);\n"
-                f"  ctx.setText(elements.val{i}, {vname}.toFixed(1) + '{vunit}');\n"
-                f"  ctx.setScale(elements.bar{i}, barW{i} / ((width-180)/2), 1);\n"
-                f"  ctx.setPosition(elements.bar{i}, 90 + barW{i}/2, 165 + {y_offset});"
-            )
-
-        gauge_setup = "\n".join(gauge_setup_lines)
-        gauge_update = "\n".join(gauge_update_lines)
-
-        return f'''// {name} - 变量仪表盘
-let elements = {{}};
-
-function setup(ctx) {{
-  const {{ width, height }} = ctx;
-  elements.title = ctx.createText('{name}', width/2, 35, {{
-    fontSize: 22, fontWeight: 'bold', color: '#ffffff', align: 'center'
-  }});
-  elements.desc = ctx.createText('拖动下方滑块观察变量变化', width/2, 70, {{
-    fontSize: 14, color: '#94a3b8', align: 'center'
-  }});
-  ctx.createLine(80, 100, width - 80, 100, {{color: '#334155', width: 1}});
-{gauge_setup}
-}}
-
-function update(ctx) {{
-  const {{ width, height, math, time }} = ctx;
-{var_reads}
-{gauge_update}
-}}'''
+    # _get_fallback_code 方法已删除（2026-02-11）- 不再使用ctx API fallback
 
     def _extract_json(self, response: str) -> str:
         """从响应中提取 JSON 字符串"""
@@ -2168,19 +1834,26 @@ function update(ctx) {{
                     title=step_data.get('title', ''),
                     content=step_data.get('content'),
                     diagram_spec=step_data.get('diagram_spec'),
-                    assessment_spec=step_data.get('assessment_spec')
+                    assessment_spec=step_data.get('assessment_spec'),
+                    ai_spec=step_data.get('ai_spec')
                 )
 
-                # 解析模拟器
+                # 解析HTML模拟器
                 if step.type == 'simulator' and 'simulator_spec' in step_data:
                     sim_data = step_data['simulator_spec']
-                    step.simulator_spec = SimulatorSpec(
+                    step.simulator_spec = HTMLSimulatorSpec(
                         name=sim_data.get('name', ''),
                         description=sim_data.get('description', ''),
-                        mode=sim_data.get('mode', 'custom'),
-                        variables=sim_data.get('variables', []),
-                        custom_code=sim_data.get('custom_code', '')
+                        html_content=sim_data.get('html_content', ''),
+                        mode=sim_data.get('mode', 'html')
                     )
+
+                # ai_tutor 默认值补全
+                if step.type == 'ai_tutor' and step.ai_spec:
+                    if 'max_turns' not in step.ai_spec:
+                        step.ai_spec['max_turns'] = 6
+                    if 'mode' not in step.ai_spec:
+                        step.ai_spec['mode'] = 'proactive_assessment'
 
                 script.append(step)
 
@@ -2400,15 +2073,14 @@ function update(ctx) {{
                 assessment_spec=data.get('assessment_spec')
             )
 
-            # 解析模拟器
+            # 解析HTML模拟器
             if step.type == 'simulator' and 'simulator_spec' in data:
                 sim_data = data['simulator_spec']
-                step.simulator_spec = SimulatorSpec(
+                step.simulator_spec = HTMLSimulatorSpec(
                     name=sim_data.get('name', ''),
                     description=sim_data.get('description', ''),
-                    mode=sim_data.get('mode', 'custom'),
-                    variables=sim_data.get('variables', []),
-                    custom_code=sim_data.get('custom_code', '')
+                    html_content=sim_data.get('html_content', ''),
+                    mode=sim_data.get('mode', 'html')
                 )
 
             return step
@@ -2428,7 +2100,7 @@ class GeneratorPromptBuilder:
 
 【你的职责】
 1. 严格按照指令生成章节内容
-2. 确保模拟器代码完整、可运行
+2. 确保模拟器代码完整、可运行、美观
 3. 确保内容深度足够、逻辑清晰
 4. 不要生成与已有内容重复的模拟器
 
@@ -2436,7 +2108,30 @@ class GeneratorPromptBuilder:
 - 必须有 setup(ctx) 和 update(ctx) 函数
 - 必须使用 ctx.getVar() 读取变量
 - 必须有动画效果和文字标签
-- 代码至少25行，逻辑完整
+- 代码至少80行，逻辑完整
+
+【美学设计要求 - 重要】
+1. 配色：使用监督者推荐的学科配色方案
+   - 主色、次色、强调色协调搭配
+   - 文字使用亮色（#ffffff, #e2e8f0），确保高对比度
+   - 禁止使用深色（#000000, #111111等），会与背景融合
+
+2. 构图：遵循视觉层次原则
+   - 必须有标题（大字号，居中）
+   - 必须有图例或状态面板（显示数值）
+   - 至少6个文字标签（说明关键元素）
+   - 主要元素突出，次要元素辅助
+
+3. 动画：使用缓动函数实现自然流畅
+   - 推荐使用 ctx.math.lerp() 实现平滑过渡
+   - 推荐使用 easeOutBack 实现弹性效果
+   - 避免突兀的跳变
+
+4. 精致度：注重细节品质
+   - 矩形使用圆角（cornerRadius: 4-8）
+   - 重点元素添加发光效果（setGlow）
+   - 代码有清晰注释和分段
+   - 变量命名语义化
 
 【输出要求】
 - 直接输出JSON格式

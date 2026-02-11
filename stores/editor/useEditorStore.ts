@@ -100,13 +100,16 @@ function convertStepToNodeConfig(step: LessonStep): NodeConfig {
 
     case 'simulator':
       baseConfig.simulatorConfig = step.simulator_spec ? {
-        type: step.simulator_spec.type || 'preset',
+        // 修复：使用 mode 字段，将 html 映射为 custom
+        type: (step.simulator_spec.mode === 'html' || step.simulator_spec.custom_code || step.simulator_spec.html_content)
+          ? 'custom'
+          : (step.simulator_spec.iframe_url ? 'iframe' : 'preset'),
         presetId: step.simulator_spec.preset_id,
         name: step.simulator_spec.name || step.title || '',
         description: step.simulator_spec.description || step.simulator_spec.scenario?.description || '',
         // 自定义代码模式
-        mode: step.simulator_spec.mode,
-        custom_code: step.simulator_spec.custom_code,
+        mode: step.simulator_spec.mode === 'html' ? 'custom' : step.simulator_spec.mode,
+        custom_code: step.simulator_spec.custom_code || step.simulator_spec.html_content || '',
         variables: step.simulator_spec.variables,
         inputs: step.simulator_spec.inputs?.map(input => ({
           id: input.id,

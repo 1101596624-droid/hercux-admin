@@ -2,38 +2,11 @@
  * 模拟引擎 - 导出
  */
 
-// 主渲染器
-export { SceneRenderer } from './SceneRenderer';
-export { default as SceneRendererDefault } from './SceneRenderer';
-
 // 渲染器
-export { PixiRenderer } from './renderers/PixiRenderer';
+export { default as HTMLSimulatorRenderer } from './HTMLSimulatorRenderer';
 export { ThreeRenderer } from './renderers/ThreeRenderer';
-export { CustomRenderer } from './CustomRenderer';
-export { HybridRenderer } from './HybridRenderer';
-export type { SimulatorMode, SimulatorData, VariableConfig } from './HybridRenderer';
 
 // 系统
-export {
-  AnimationController,
-  ManualAnimationController,
-  animationController,
-} from './systems/AnimationController';
-export type {
-  AnimationState,
-  AnimationEventType,
-  AnimationEventListener,
-  PropertyUpdateCallback,
-} from './systems/AnimationController';
-
-export {
-  InteractionManager,
-  interactionManager,
-} from './systems/InteractionManager';
-export type {
-  InteractionContext,
-} from './systems/InteractionManager';
-
 export {
   PhysicsEngine,
   physicsEngine,
@@ -41,15 +14,6 @@ export {
 export type {
   CollisionCallback,
 } from './systems/PhysicsEngine';
-
-export {
-  ParticleSystem,
-  particleSystem,
-  FIRE_EMITTER_CONFIG,
-  SMOKE_EMITTER_CONFIG,
-  SPARKLE_EMITTER_CONFIG,
-  EXPLOSION_EMITTER_CONFIG,
-} from './systems/ParticleSystem';
 
 export {
   SkeletonSystem,
@@ -100,8 +64,6 @@ export type {
 } from './systems/StageIndicator';
 
 // 工具
-export { SDLValidator, validateScene, isValidScene } from './utils/SDLValidator';
-export type { ValidationResult, ValidationError } from './utils/SDLValidator';
 export {
   getEasingFunction,
   interpolate,
@@ -113,35 +75,6 @@ export type { EasingFunction } from './utils/EasingFunctions';
 
 // 重新导出类型
 export type {
-  // 场景
-  SceneDefinition,
-  SceneState,
-  CanvasConfig,
-  AssetManifest,
-  SceneVariable,
-  EvaluationConfig,
-  AIControlInterface,
-  // 元素
-  SceneElement,
-  ElementType,
-  SpriteElement,
-  ShapeElement,
-  TextElement,
-  ConnectorElement,
-  GroupElement,
-  ParticleEmitterElement,
-  PhysicsBodyElement,
-  DragConstraint,
-  // 动画
-  AnimationTimeline,
-  AnimationTrack,
-  Keyframe,
-  EasingType,
-  // 交互
-  InteractionRule,
-  InteractionAction,
-  InteractionTrigger,
-  TriggerType,
   // 物理
   PhysicsWorldConfig,
   PhysicsBodyConfig,

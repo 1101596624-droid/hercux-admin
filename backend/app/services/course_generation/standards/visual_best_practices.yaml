@@ -1,0 +1,665 @@
+# HERCU 视觉元素最佳实践
+# 版本: 1.0.0
+# 更新: 2026-02-10
+
+version: "1.0.0"
+
+# 视觉元素绘制最佳实践
+visual_best_practices:
+  # ==== 物理学元素 ====
+  - category: "物理学"
+    elements:
+      - name: "原子"
+        description: "带电子轨道的原子模型"
+        difficulty: "中等"
+
+        good_example:
+          description: "完整的原子结构，包含原子核、电子轨道、电子、标签和发光效果"
+          code: |
+            // 绘制原子（正确示例）
+            function drawAtom(x, y, electronCount) {
+              // 原子核（带发光）
+              const nucleus = ctx.createCircle(x, y, 15, '#DC2626', 0);
+              ctx.setGlow(nucleus, {color: '#DC2626', blur: 10});
+
+              // 原子核标签
+              const label = ctx.createText(
+                '+', x, y,
+                {fontSize: 16, color: '#fff', fontWeight: 'bold', align: 'center'}
+              );
+
+              // 电子轨道（3层）
+              const orbitRadii = [50, 80, 110];
+              orbitRadii.forEach(radius => {
+                const orbit = ctx.createCircle(
+                  x, y, radius,
+                  'transparent', 2, '#4B5563'
+                );
+              });
+
+              // 电子（分布在不同轨道上）
+              for (let i = 0; i < electronCount; i++) {
+                const orbitIndex = Math.floor(i / 4);  // 每层最多4个
+                const radius = orbitRadii[orbitIndex];
+                const angle = (i % 4) * Math.PI / 2 + ctx.getTime() * 0.001;
+
+                const ex = x + Math.cos(angle) * radius;
+                const ey = y + Math.sin(angle) * radius;
+
+                const electron = ctx.createCircle(ex, ey, 6, '#3B82F6', 0);
+                ctx.setGlow(electron, {color: '#3B82F6', blur: 8});
+              }
+            }
+
+            // 使用
+            const atomCount = ctx.getVar('electrons');
+            drawAtom(width * 0.5, height * 0.5, atomCount);
+
+          key_points:
+            - "原子核使用红色 + 发光效果"
+            - "电子轨道使用透明填充 + 灰色描边"
+            - "电子使用蓝色 + 发光 + 圆周运动"
+            - "标签清晰标注电荷"
+            - "使用比例坐标，不硬编码"
+
+        bad_example:
+          description: "缺少关键元素，视觉效果差"
+          code: |
+            // 错误示例 - 不要这样做
+            const atom = ctx.createCircle(500, 300, 20, '#ff0000', 0);
+            const orbit = ctx.createCircle(500, 300, 60, 'transparent', 1, '#999');
+
+          problems:
+            - "硬编码坐标 (500, 300)"
+            - "缺少电子"
+            - "缺少标签"
+            - "无发光效果"
+            - "无动画"
+            - "结构过于简单"
+
+      - name: "力矢量"
+        description: "带箭头和数值标注的力矢量"
+        difficulty: "简单"
+
+        good_example:
+          description: "完整的力矢量，包含线段、箭头、数值标签"
+          code: |
+            // 绘制力矢量（正确示例）
+            function drawForceVector(startX, startY, magnitude, angle, label) {
+              // 计算终点
+              const scale = 80;  // 缩放因子
+              const endX = startX + Math.cos(angle) * magnitude * scale;
+              const endY = startY + Math.sin(angle) * magnitude * scale;
+
+              // 矢量线段（粗线）
+              const line = ctx.createLine(
+                startX, startY, endX, endY,
+                '#F59E0B', 4
+              );
+
+              // 箭头头部（三角形）
+              const arrowSize = 12;
+              const arrowAngle = Math.atan2(endY - startY, endX - startX);
+
+              const tip = [endX, endY];
+              const left = [
+                endX - arrowSize * Math.cos(arrowAngle - Math.PI / 6),
+                endY - arrowSize * Math.sin(arrowAngle - Math.PI / 6)
+              ];
+              const right = [
+                endX - arrowSize * Math.cos(arrowAngle + Math.PI / 6),
+                endY - arrowSize * Math.sin(arrowAngle + Math.PI / 6)
+              ];
+
+              const arrow = ctx.createPolygon([tip, left, right], '#F59E0B', 0);
+
+              // 数值标签（放在矢量中点上方）
+              const midX = (startX + endX) / 2;
+              const midY = (startY + endY) / 2 - 20;
+
+              const valueLabel = ctx.createText(
+                `${label} = ${magnitude.toFixed(1)} N`,
+                midX, midY,
+                {fontSize: 14, color: '#F59E0B', fontWeight: 'bold', align: 'center'}
+              );
+            }
+
+            // 使用
+            const force = ctx.getVar('force');
+            drawForceVector(width * 0.3, height * 0.5, force, 0, 'F');
+
+          key_points:
+            - "使用粗线绘制矢量主体"
+            - "箭头使用三角形多边形"
+            - "标签显示数值 + 单位"
+            - "颜色统一（橙色代表力）"
+            - "标签放在合适位置不遮挡"
+
+        bad_example:
+          description: "矢量不完整，缺少箭头或标签"
+          code: |
+            // 错误示例
+            const line = ctx.createLine(100, 100, 200, 100, '#ff0000', 2);
+
+          problems:
+            - "缺少箭头"
+            - "缺少数值标签"
+            - "线条太细"
+            - "硬编码坐标"
+            - "无法表达力的大小"
+
+      - name: "自由落体"
+        description: "物体下落轨迹动画"
+        difficulty: "简单"
+
+        good_example:
+          description: "带轨迹线的物体下落动画"
+          code: |
+            // 自由落体动画（正确示例）
+            const g = ctx.getVar('gravity');
+            const t = ctx.getTime() % 3000 / 1000;  // 3秒循环
+
+            // 计算位置 y = y0 + 0.5 * g * t^2
+            const startY = height * 0.2;
+            const y = startY + 0.5 * g * t * t * 100;
+            const clampedY = ctx.math.clamp(y, height * 0.2, height * 0.8);
+
+            // 物体
+            const ball = ctx.createCircle(width * 0.5, clampedY, 20, '#3B82F6', 0);
+            ctx.setGlow(ball, {color: '#3B82F6', blur: 8});
+
+            // 轨迹线（淡化）
+            const trail = ctx.createLine(
+              width * 0.5, startY,
+              width * 0.5, clampedY,
+              'rgba(59,130,246,0.3)', 2
+            );
+
+            // 速度显示
+            const velocity = g * t;
+            const speedLabel = ctx.createText(
+              `v = ${velocity.toFixed(1)} m/s`,
+              width * 0.6, clampedY,
+              {fontSize: 14, color: '#F59E0B'}
+            );
+
+          key_points:
+            - "使用物理公式计算位置"
+            - "使用 clamp 限制边界"
+            - "轨迹线使用半透明"
+            - "实时显示速度数值"
+            - "发光效果增强视觉"
+
+        bad_example:
+          code: |
+            // 错误示例
+            const y = 100 + ctx.getTime() * 0.1;
+            const ball = ctx.createCircle(500, y, 15, '#0000ff', 0);
+
+          problems:
+            - "未使用物理公式"
+            - "无边界限制"
+            - "缺少轨迹线"
+            - "缺少数值显示"
+            - "硬编码坐标"
+
+  # ==== 化学元素 ====
+  - category: "化学"
+    elements:
+      - name: "化学键"
+        description: "原子间的化学键连接"
+        difficulty: "简单"
+
+        good_example:
+          description: "不同类型的化学键（单键/双键/三键）"
+          code: |
+            // 绘制化学键（正确示例）
+            function drawBond(x1, y1, x2, y2, bondType) {
+              const dx = x2 - x1;
+              const dy = y2 - y1;
+              const length = Math.sqrt(dx * dx + dy * dy);
+              const angle = Math.atan2(dy, dx);
+
+              if (bondType === 'single') {
+                // 单键
+                const bond = ctx.createLine(x1, y1, x2, y2, '#6B7280', 3);
+              } else if (bondType === 'double') {
+                // 双键（两条平行线）
+                const offset = 4;
+                const perpX = -Math.sin(angle) * offset;
+                const perpY = Math.cos(angle) * offset;
+
+                ctx.createLine(
+                  x1 + perpX, y1 + perpY,
+                  x2 + perpX, y2 + perpY,
+                  '#6B7280', 3
+                );
+                ctx.createLine(
+                  x1 - perpX, y1 - perpY,
+                  x2 - perpX, y2 - perpY,
+                  '#6B7280', 3
+                );
+              } else if (bondType === 'triple') {
+                // 三键
+                ctx.createLine(x1, y1, x2, y2, '#6B7280', 3);
+                const offset = 5;
+                const perpX = -Math.sin(angle) * offset;
+                const perpY = Math.cos(angle) * offset;
+
+                ctx.createLine(
+                  x1 + perpX, y1 + perpY,
+                  x2 + perpX, y2 + perpY,
+                  '#6B7280', 2
+                );
+                ctx.createLine(
+                  x1 - perpX, y1 - perpY,
+                  x2 - perpX, y2 - perpY,
+                  '#6B7280', 2
+                );
+              }
+            }
+
+            // 使用 - 绘制H2O分子
+            // 氧原子
+            const oX = width * 0.5, oY = height * 0.5;
+            const oxygen = ctx.createCircle(oX, oY, 20, '#DC2626', 0);
+            ctx.createText('O', oX, oY, {fontSize: 16, color: '#fff', align: 'center'});
+
+            // 氢原子
+            const h1X = oX - 60, h1Y = oY - 40;
+            const h2X = oX + 60, h2Y = oY - 40;
+
+            const h1 = ctx.createCircle(h1X, h1Y, 12, '#3B82F6', 0);
+            const h2 = ctx.createCircle(h2X, h2Y, 12, '#3B82F6', 0);
+
+            ctx.createText('H', h1X, h1Y, {fontSize: 12, color: '#fff', align: 'center'});
+            ctx.createText('H', h2X, h2Y, {fontSize: 12, color: '#fff', align: 'center'});
+
+            // 化学键
+            drawBond(oX, oY, h1X, h1Y, 'single');
+            drawBond(oX, oY, h2X, h2Y, 'single');
+
+          key_points:
+            - "区分单键/双键/三键"
+            - "使用几何计算绘制平行线"
+            - "原子大小区分元素"
+            - "标注元素符号"
+            - "灰色表示化学键"
+
+        bad_example:
+          code: |
+            // 错误示例
+            const bond = ctx.createLine(100, 100, 200, 100, '#000', 1);
+
+          problems:
+            - "无法区分键的类型"
+            - "线条太细不明显"
+            - "缺少原子结构"
+            - "硬编码坐标"
+
+  # ==== 生物学元素 ====
+  - category: "生物学"
+    elements:
+      - name: "细胞结构"
+        description: "真核细胞的基本结构"
+        difficulty: "复杂"
+
+        good_example:
+          description: "完整的细胞结构，包含细胞膜、细胞核、细胞器"
+          code: |
+            // 绘制细胞（正确示例）
+            function drawCell(centerX, centerY, radius) {
+              // 细胞膜（双层）
+              const membrane = ctx.createCircle(
+                centerX, centerY, radius,
+                'transparent', 3, '#EC4899'
+              );
+              const membrane2 = ctx.createCircle(
+                centerX, centerY, radius - 5,
+                'transparent', 2, '#EC4899'
+              );
+
+              // 细胞质（半透明填充）
+              const cytoplasm = ctx.createCircle(
+                centerX, centerY, radius - 8,
+                'rgba(34,197,94,0.15)', 0
+              );
+
+              // 细胞核（大圆）
+              const nucleus = ctx.createCircle(
+                centerX + radius * 0.2, centerY,
+                radius * 0.4,
+                'rgba(139,92,246,0.3)', 2, '#8B5CF6'
+              );
+              const nucleusLabel = ctx.createText(
+                '核', centerX + radius * 0.2, centerY,
+                {fontSize: 14, color: '#8B5CF6', align: 'center'}
+              );
+
+              // 线粒体（小椭圆）
+              const mitoCount = 6;
+              for (let i = 0; i < mitoCount; i++) {
+                const angle = (i / mitoCount) * Math.PI * 2;
+                const dist = radius * 0.6;
+                const mx = centerX + Math.cos(angle) * dist;
+                const my = centerY + Math.sin(angle) * dist;
+
+                const mito = ctx.createCircle(mx, my, 8, '#F59E0B', 0);
+              }
+
+              // 标注引线
+              const labelX = centerX + radius + 30;
+              ctx.createLine(
+                centerX + radius, centerY,
+                labelX, centerY,
+                '#6B7280', 1
+              );
+              ctx.createText(
+                '细胞膜', labelX + 5, centerY,
+                {fontSize: 12, color: '#6B7280'}
+              );
+            }
+
+            // 使用
+            const cellSize = ctx.getVar('size');
+            drawCell(width * 0.5, height * 0.5, cellSize);
+
+          key_points:
+            - "细胞膜使用双层圆形"
+            - "细胞质使用半透明填充"
+            - "细胞核位置偏心"
+            - "线粒体均匀分布"
+            - "使用标注引线"
+
+        bad_example:
+          code: |
+            // 错误示例
+            const cell = ctx.createCircle(400, 300, 100, '#00ff00', 2, '#000');
+            const nucleus = ctx.createCircle(400, 300, 30, '#0000ff', 0);
+
+          problems:
+            - "过于简单，缺少细胞器"
+            - "颜色不符合生物学语义"
+            - "细胞核应偏心"
+            - "缺少标注"
+            - "无细胞质"
+
+  # ==== 数学元素 ====
+  - category: "数学"
+    elements:
+      - name: "函数图像"
+        description: "坐标系中的函数曲线"
+        difficulty: "中等"
+
+        good_example:
+          description: "完整的函数图像，包含坐标轴、网格、曲线、标注"
+          code: |
+            // 绘制函数图像（正确示例）
+            function drawFunctionGraph() {
+              const originX = width * 0.15;
+              const originY = height * 0.75;
+              const axisWidth = width * 0.75;
+              const axisHeight = height * 0.6;
+
+              // 坐标轴
+              ctx.createLine(
+                originX, originY,
+                originX + axisWidth, originY,
+                '#6B7280', 2
+              );  // X轴
+              ctx.createLine(
+                originX, originY,
+                originX, originY - axisHeight,
+                '#6B7280', 2
+              );  // Y轴
+
+              // 网格线
+              for (let i = 0; i <= 10; i++) {
+                const x = originX + (axisWidth / 10) * i;
+                const y = originY - (axisHeight / 10) * i;
+
+                // 竖线
+                ctx.createLine(
+                  x, originY,
+                  x, originY - axisHeight,
+                  'rgba(107,114,128,0.2)', 1
+                );
+
+                // 横线
+                ctx.createLine(
+                  originX, y,
+                  originX + axisWidth, y,
+                  'rgba(107,114,128,0.2)', 1
+                );
+              }
+
+              // 函数曲线 y = sin(x)
+              const a = ctx.getVar('amplitude');
+              const points = [];
+              for (let i = 0; i <= 100; i++) {
+                const t = (i / 100) * Math.PI * 2;
+                const x = originX + (t / (Math.PI * 2)) * axisWidth;
+                const y = originY - Math.sin(t) * a * (axisHeight / 4);
+                points.push([x, y]);
+              }
+
+              const curve = ctx.createCurve(points, '#1E40AF', 3);
+
+              // 坐标轴标签
+              ctx.createText('x', originX + axisWidth + 10, originY, {fontSize: 14, color: '#6B7280'});
+              ctx.createText('y', originX, originY - axisHeight - 10, {fontSize: 14, color: '#6B7280'});
+
+              // 函数名称
+              ctx.createText(
+                'y = sin(x)',
+                originX + axisWidth * 0.5, originY - axisHeight - 30,
+                {fontSize: 16, color: '#1E40AF', align: 'center', fontWeight: 'bold'}
+              );
+            }
+
+            drawFunctionGraph();
+
+          key_points:
+            - "坐标轴使用灰色，线宽适中"
+            - "网格线使用半透明"
+            - "至少100个采样点保证平滑"
+            - "使用比例坐标"
+            - "标注坐标轴和函数名"
+
+        bad_example:
+          code: |
+            // 错误示例
+            ctx.createLine(50, 250, 750, 250, '#000', 1);  // X轴
+            ctx.createLine(50, 50, 50, 450, '#000', 1);    // Y轴
+
+            const points = [];
+            for (let i = 0; i < 10; i++) {  // 只有10个点
+              points.push([50 + i * 70, 250 - Math.sin(i) * 50]);
+            }
+            ctx.createCurve(points, '#ff0000', 2);
+
+          problems:
+            - "硬编码坐标"
+            - "采样点太少（10个），曲线不平滑"
+            - "缺少网格"
+            - "缺少标注"
+            - "无刻度"
+
+  # ==== 历史元素 ====
+  - category: "历史"
+    elements:
+      - name: "时间轴"
+        description: "历史事件时间线"
+        difficulty: "简单"
+
+        good_example:
+          description: "完整的时间轴，包含主轴、事件节点、标签"
+          code: |
+            // 绘制时间轴（正确示例）
+            function drawTimeline(events) {
+              const startX = width * 0.1;
+              const endX = width * 0.9;
+              const y = height * 0.5;
+
+              // 主时间轴
+              const mainLine = ctx.createLine(
+                startX, y, endX, y,
+                '#92400E', 4
+              );
+
+              // 箭头
+              const arrow = ctx.createPolygon([
+                [endX, y],
+                [endX - 12, y - 6],
+                [endX - 12, y + 6]
+              ], '#92400E', 0);
+
+              // 事件节点
+              events.forEach((event, i) => {
+                const x = startX + (endX - startX) * (i / (events.length - 1));
+
+                // 节点圆圈
+                const node = ctx.createCircle(x, y, 12, event.color, 2, '#92400E');
+
+                // 垂直引线
+                const lineY = (i % 2 === 0) ? y - 60 : y + 60;
+                ctx.createLine(x, y, x, lineY, '#6B7280', 1);
+
+                // 事件标签
+                const label = ctx.createText(
+                  event.year, x, lineY + (i % 2 === 0 ? -10 : 20),
+                  {fontSize: 12, color: '#92400E', align: 'center', fontWeight: 'bold'}
+                );
+
+                const desc = ctx.createText(
+                  event.name, x, lineY + (i % 2 === 0 ? 10 : 40),
+                  {fontSize: 11, color: '#6B7280', align: 'center'}
+                );
+              });
+
+              // 时间轴标题
+              ctx.createText(
+                '历史进程', width * 0.5, y - 120,
+                {fontSize: 18, color: '#92400E', align: 'center', fontWeight: 'bold'}
+              );
+            }
+
+            // 使用
+            const events = [
+              {year: '1840', name: '鸦片战争', color: '#991B1B'},
+              {year: '1911', name: '辛亥革命', color: '#DC2626'},
+              {year: '1949', name: '新中国成立', color: '#DC2626'},
+              {year: '1978', name: '改革开放', color: '#10B981'}
+            ];
+
+            drawTimeline(events);
+
+          key_points:
+            - "主轴使用棕色历史色"
+            - "节点交错排列避免重叠"
+            - "用颜色区分事件性质"
+            - "标注年份和事件名"
+            - "末端箭头指示时间方向"
+
+        bad_example:
+          code: |
+            // 错误示例
+            ctx.createLine(100, 300, 700, 300, '#000', 2);
+            ctx.createCircle(200, 300, 10, '#ff0000', 0);
+            ctx.createCircle(400, 300, 10, '#00ff00', 0);
+
+          problems:
+            - "节点无标注"
+            - "缺少年份"
+            - "节点排列无层次"
+            - "硬编码坐标"
+            - "颜色无语义"
+
+# 通用绘制原则
+general_principles:
+  composition:
+    - principle: "层次分明"
+      description: "背景 < 网格 < 主体 < 标注 < 高亮"
+
+    - principle: "视觉平衡"
+      description: "元素均匀分布，避免局部过密或过疏"
+
+    - principle: "语义清晰"
+      description: "颜色、形状、大小都要有明确含义"
+
+    - principle: "留白充足"
+      description: "元素间距至少10px，避免拥挤"
+
+  colors:
+    - principle: "对比度充足"
+      min_ratio: 4.5
+      description: "前景与背景对比度 >= 4.5:1"
+
+    - principle: "颜色一致性"
+      description: "同类元素使用相同颜色系"
+
+    - principle: "避免纯黑"
+      forbidden: ["#000000", "#111111"]
+      use_instead: "#1E293B"
+
+  animation:
+    - principle: "平滑过渡"
+      description: "使用缓动函数，避免突变"
+
+    - principle: "适度动画"
+      description: "不要过度使用，避免眼花缭乱"
+
+    - principle: "物理真实"
+      description: "遵循物理规律（加速度、惯性）"
+
+  labels:
+    - principle: "可读性"
+      min_font_size: 12
+      recommended_size: 14
+      description: "字体大小适中，易于阅读"
+
+    - principle: "不遮挡"
+      description: "标签避免遮挡主要元素"
+
+    - principle: "对齐整齐"
+      description: "使用 align: 'center'/'left'/'right' 统一对齐"
+
+  coordinates:
+    - principle: "比例坐标"
+      description: "使用 width * 0.5 而非硬编码"
+
+    - principle: "安全区域"
+      description: "元素绘制在安全区域内"
+      x_range: [0.1, 0.95]
+      y_range: [60, "height - 40"]
+
+    - principle: "边界限制"
+      description: "动态坐标使用 ctx.math.clamp() 限制"
+
+# 调试检查清单
+quality_checklist:
+  structure:
+    - "是否使用了辅助函数？"
+    - "是否有清晰的注释？"
+    - "代码是否可读易懂？"
+
+  visual:
+    - "是否至少5种视觉元素？"
+    - "是否有标题和标签？"
+    - "颜色是否有语义？"
+    - "是否有发光/动画效果？"
+
+  interaction:
+    - "变量是否影响视觉？"
+    - "是否显示实时数值？"
+    - "动画是否平滑？"
+
+  coordinates:
+    - "是否使用比例坐标？"
+    - "是否使用 clamp 限制边界？"
+    - "是否避免了硬编码？"
+
+  education:
+    - "是否清晰展示概念？"
+    - "是否有因果关系？"
+    - "是否便于理解？"

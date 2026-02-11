@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Sidebar } from '@/components/layout';
+import { Sidebar, PageTransition, RouteLoadingBar } from '@/components/layout';
 import { useAdminAuthStore } from '@/stores/admin/useAdminAuthStore';
 
 interface AdminLayoutProps {
@@ -118,15 +118,21 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
 
   // 全屏页面（编辑器等）- 不显示侧边栏
   if (fullscreenPages) {
-    return <>{children}</>;
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <RouteLoadingBar />
+        <PageTransition>{children}</PageTransition>
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <RouteLoadingBar />
       <Sidebar />
-      <main className="ml-[240px] min-h-screen">
+      <main className="ml-[240px] min-h-screen bg-slate-50">
         <div className="p-8">
-          {children}
+          <PageTransition>{children}</PageTransition>
         </div>
       </main>
     </div>

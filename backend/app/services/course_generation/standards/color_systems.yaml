@@ -1,0 +1,322 @@
+# HERCU 学科配色系统
+# 版本: 1.0.0
+# 更新: 2026-02-10
+
+version: "1.0.0"
+
+# 8套学科配色方案
+color_systems:
+  # ==== 物理学配色 ====
+  physics:
+    name: "物理学配色"
+    philosophy: "理性、精确、能量感。使用蓝色代表冷静理性，橙色代表能量和运动，紫色代表波动和场。整体色调偏冷，体现物理学的严谨性。"
+
+    primary: "#3B82F6"              # 蓝色 - 主色调（力、速度、理性）
+    secondary: "#F59E0B"            # 橙色 - 能量、热量、运动
+    accent: "#8B5CF6"               # 紫色 - 波动、电磁场
+    success: "#10B981"              # 绿色 - 正确、增加
+    danger: "#EF4444"               # 红色 - 警告、减少
+    neutral: "#6B7280"              # 灰色 - 背景、辅助
+    highlight: "#FBBF24"            # 黄色 - 高亮、重点
+    background: "#F3F4F6"           # 浅灰 - 背景
+
+    use_cases:
+      force: "#F59E0B"              # 力矢量
+      velocity: "#3B82F6"           # 速度
+      acceleration: "#8B5CF6"       # 加速度
+      energy: "#FBBF24"             # 能量
+      positive: "#10B981"           # 正电荷
+      negative: "#EF4444"           # 负电荷
+      neutral_particle: "#6B7280"   # 中性粒子
+      trajectory: "rgba(59,130,246,0.3)"  # 运动轨迹
+
+  # ==== 化学配色 ====
+  chemistry:
+    name: "化学配色"
+    philosophy: "活跃、变化、反应感。使用红色代表反应活性，蓝色代表稳定态，绿色代表生成物。整体色彩鲜明，体现化学反应的动态性。"
+
+    primary: "#DC2626"              # 红色 - 反应、活性
+    secondary: "#2563EB"            # 深蓝 - 稳定、催化
+    accent: "#10B981"               # 绿色 - 生成、平衡
+    success: "#22C55E"              # 亮绿 - 反应完成
+    danger: "#F97316"               # 橙红 - 爆炸、危险
+    neutral: "#9CA3AF"              # 中灰 - 惰性元素
+    highlight: "#FBBF24"            # 黄色 - 反应中心
+    background: "#FEF2F2"           # 淡红背景
+
+    use_cases:
+      reactant: "#DC2626"           # 反应物
+      product: "#10B981"            # 生成物
+      catalyst: "#2563EB"           # 催化剂
+      bond: "#6B7280"               # 化学键
+      electron_transfer: "#F59E0B"  # 电子转移
+      endothermic: "#3B82F6"        # 吸热
+      exothermic: "#EF4444"         # 放热
+      pH_acid: "#DC2626"            # 酸性
+      pH_base: "#2563EB"            # 碱性
+      pH_neutral: "#10B981"         # 中性
+
+  # ==== 生物学配色 ====
+  biology:
+    name: "生物学配色"
+    philosophy: "生命、有机、自然感。使用绿色代表生命和生长，粉色代表细胞和组织，棕色代表土壤和营养。整体温暖自然，体现生命的多样性。"
+
+    primary: "#22C55E"              # 绿色 - 生命、植物
+    secondary: "#EC4899"            # 粉色 - 细胞、组织
+    accent: "#F59E0B"               # 橙色 - 能量、代谢
+    success: "#10B981"              # 深绿 - 健康、生长
+    danger: "#DC2626"               # 红色 - 病变、死亡
+    neutral: "#78716C"              # 棕灰 - 土壤、营养
+    highlight: "#FBBF24"            # 黄色 - ATP、能量
+    background: "#F0FDF4"           # 淡绿背景
+
+    use_cases:
+      cell_membrane: "#EC4899"      # 细胞膜
+      cytoplasm: "rgba(34,197,94,0.2)"  # 细胞质
+      nucleus: "#8B5CF6"            # 细胞核
+      mitochondria: "#F59E0B"       # 线粒体
+      chloroplast: "#22C55E"        # 叶绿体
+      DNA: "#3B82F6"                # DNA
+      RNA: "#8B5CF6"                # RNA
+      protein: "#EC4899"            # 蛋白质
+      healthy: "#10B981"            # 健康组织
+      diseased: "#DC2626"           # 病变组织
+
+  # ==== 数学配色 ====
+  mathematics:
+    name: "数学配色"
+    philosophy: "抽象、逻辑、优雅。使用深蓝代表严谨性，紫色代表抽象概念，灰色代表辅助线。整体简洁专业，体现数学的纯粹美感。"
+
+    primary: "#1E40AF"              # 深蓝 - 主要概念
+    secondary: "#7C3AED"            # 紫色 - 抽象概念
+    accent: "#F59E0B"               # 橙色 - 重点标注
+    success: "#10B981"              # 绿色 - 正确解
+    danger: "#EF4444"               # 红色 - 错误
+    neutral: "#6B7280"              # 灰色 - 辅助线
+    highlight: "#FBBF24"            # 黄色 - 关键点
+    background: "#F9FAFB"           # 极浅灰背景
+
+    use_cases:
+      function_line: "#1E40AF"      # 函数曲线
+      coordinate_axis: "#6B7280"    # 坐标轴
+      grid: "rgba(107,114,128,0.2)" # 网格
+      point: "#F59E0B"              # 关键点
+      area: "rgba(126,58,237,0.2)"  # 面积填充
+      tangent: "#10B981"            # 切线
+      asymptote: "rgba(239,68,68,0.5)"  # 渐近线
+      positive: "#10B981"           # 正数
+      negative: "#EF4444"           # 负数
+      zero: "#6B7280"               # 零
+
+  # ==== 历史配色 ====
+  history:
+    name: "历史配色"
+    philosophy: "厚重、经典、时间感。使用棕色代表历史沉淀，金色代表重要事件，深红代表战争冲突。整体复古典雅，体现历史的厚重感。"
+
+    primary: "#92400E"              # 深棕 - 历史、传统
+    secondary: "#B45309"            # 琥珀棕 - 文明、文化
+    accent: "#D97706"               # 金棕 - 重要事件
+    success: "#10B981"              # 绿色 - 和平、发展
+    danger: "#991B1B"               # 深红 - 战争、冲突
+    neutral: "#78716C"              # 石灰灰 - 背景
+    highlight: "#F59E0B"            # 橙金 - 转折点
+    background: "#FFFBEB"           # 米黄背景
+
+    use_cases:
+      ancient: "#92400E"            # 古代
+      medieval: "#B45309"           # 中世纪
+      modern: "#D97706"             # 近现代
+      war: "#991B1B"                # 战争
+      peace: "#10B981"              # 和平
+      revolution: "#DC2626"         # 革命
+      culture: "#8B5CF6"            # 文化
+      economy: "#F59E0B"            # 经济
+      technology: "#3B82F6"         # 技术
+      timeline_main: "#92400E"      # 时间轴主线
+
+  # ==== 地理配色 ====
+  geography:
+    name: "地理配色"
+    philosophy: "自然、地域、层次感。使用蓝色代表水体，绿色代表植被，棕色代表地形。整体贴近自然色彩，体现地理的真实感。"
+
+    primary: "#0EA5E9"              # 天蓝 - 水体、海洋
+    secondary: "#16A34A"            # 绿色 - 陆地、植被
+    accent: "#A16207"               # 土黄 - 山地、沙漠
+    success: "#10B981"              # 深绿 - 森林
+    danger: "#DC2626"               # 红色 - 火山、高温
+    neutral: "#78716C"              # 石灰 - 岩石
+    highlight: "#FBBF24"            # 黄色 - 城市、重点
+    background: "#F0F9FF"           # 极浅蓝背景
+
+    use_cases:
+      ocean: "#0EA5E9"              # 海洋
+      river: "#3B82F6"              # 河流
+      lake: "#60A5FA"               # 湖泊
+      plain: "#84CC16"              # 平原
+      forest: "#16A34A"             # 森林
+      mountain: "#78716C"           # 山地
+      desert: "#F59E0B"             # 沙漠
+      glacier: "#E0F2FE"            # 冰川
+      city: "#FBBF24"               # 城市
+      volcano: "#DC2626"            # 火山
+      tectonic_plate: "rgba(120,113,108,0.3)"  # 板块边界
+
+  # ==== 计算机科学配色 ====
+  computer_science:
+    name: "计算机科学配色"
+    philosophy: "科技、精确、数字化。使用青色代表数据流，紫色代表算法，绿色代表运行状态。整体现代感强，体现数字时代特征。"
+
+    primary: "#06B6D4"              # 青色 - 数据、信息
+    secondary: "#8B5CF6"            # 紫色 - 算法、逻辑
+    accent: "#10B981"               # 绿色 - 运行、执行
+    success: "#22C55E"              # 亮绿 - 成功、通过
+    danger: "#EF4444"               # 红色 - 错误、异常
+    neutral: "#6B7280"              # 灰色 - 未激活
+    highlight: "#F59E0B"            # 橙色 - 当前执行
+    background: "#F8FAFC"           # 极浅蓝灰背景
+
+    use_cases:
+      data_node: "#06B6D4"          # 数据节点
+      algorithm: "#8B5CF6"          # 算法流程
+      running: "#10B981"            # 运行中
+      waiting: "#FBBF24"            # 等待
+      error: "#EF4444"              # 错误
+      completed: "#22C55E"          # 完成
+      input: "#3B82F6"              # 输入
+      output: "#F59E0B"             # 输出
+      memory: "#EC4899"             # 内存
+      cpu: "#8B5CF6"                # CPU
+      network: "#06B6D4"            # 网络
+
+  # ==== 医学配色 ====
+  medicine:
+    name: "医学配色"
+    philosophy: "生命、健康、专业感。使用红色代表血液循环，蓝色代表静脉系统，白色代表医疗环境。整体清洁专业，体现医学的严肃性。"
+
+    primary: "#DC2626"              # 红色 - 动脉、血液
+    secondary: "#2563EB"            # 蓝色 - 静脉、冷静
+    accent: "#10B981"               # 绿色 - 健康、治愈
+    success: "#22C55E"              # 亮绿 - 康复、正常
+    danger: "#EF4444"               # 亮红 - 危险、病变
+    neutral: "#9CA3AF"              # 灰色 - 中性组织
+    highlight: "#FBBF24"            # 黄色 - 警示、关注
+    background: "#FFFFFF"           # 纯白背景
+
+    use_cases:
+      artery: "#DC2626"             # 动脉
+      vein: "#2563EB"               # 静脉
+      capillary: "#EC4899"          # 毛细血管
+      nerve: "#FBBF24"              # 神经
+      bone: "#F5F5F5"               # 骨骼
+      muscle: "#DC2626"             # 肌肉
+      organ_healthy: "#10B981"      # 健康器官
+      organ_diseased: "#EF4444"     # 病变器官
+      lymph: "#60A5FA"              # 淋巴
+      infection: "#F59E0B"          # 感染
+      inflammation: "#DC2626"       # 炎症
+
+# 配色使用规范
+usage_guidelines:
+  contrast:
+    min_ratio: 4.5                  # WCAG AA 标准
+    description: "前景与背景对比度必须 >= 4.5:1"
+
+  semantic_meaning:
+    required: true
+    description: "颜色必须有明确的语义，不能随意使用"
+    examples:
+      - "红色用于危险、减少、负面"
+      - "绿色用于安全、增加、正面"
+      - "黄色用于警告、关注"
+      - "蓝色用于信息、冷静"
+
+  consistency:
+    rule: "同一学科内颜色语义必须一致"
+    example: "物理学中蓝色始终代表冷静/理性，不能混用"
+
+  accessibility:
+    color_blind_safe: true
+    description: "不能仅依赖颜色区分信息，要配合形状/文字"
+    techniques:
+      - "颜色 + 形状（圆形/方形）"
+      - "颜色 + 文字标签"
+      - "颜色 + 图案填充"
+
+  background_compatibility:
+    dark_background: "#1E293B"      # 深色背景
+    light_background: "#F9FAFB"     # 浅色背景
+    rule: "所有颜色在深色背景下必须可见"
+    forbidden_on_dark:
+      - "#000000"
+      - "#1a1a1a"
+      - "#0f172a"
+
+# 跨学科通用颜色
+universal_colors:
+  increase: "#10B981"               # 增加、上升
+  decrease: "#EF4444"               # 减少、下降
+  highlight: "#FBBF24"              # 高亮、关注点
+  neutral: "#6B7280"                # 中性、背景
+  active: "#3B82F6"                 # 激活、当前
+  inactive: "#D1D5DB"               # 未激活、禁用
+
+# 配色组合推荐
+recommended_palettes:
+  contrast_pair:
+    - ["#3B82F6", "#F59E0B"]        # 蓝橙 - 高对比
+    - ["#DC2626", "#10B981"]        # 红绿 - 对立
+    - ["#8B5CF6", "#FBBF24"]        # 紫黄 - 互补
+
+  harmonious_triple:
+    - ["#3B82F6", "#8B5CF6", "#EC4899"]  # 蓝紫粉 - 冷色系
+    - ["#DC2626", "#F59E0B", "#FBBF24"]  # 红橙黄 - 暖色系
+    - ["#10B981", "#22C55E", "#84CC16"]  # 深绿到亮绿 - 渐变
+
+  analogous:
+    - ["#3B82F6", "#06B6D4", "#10B981"]  # 蓝青绿
+    - ["#DC2626", "#F59E0B", "#FBBF24"]  # 红橙黄
+
+# 特殊效果颜色
+special_effects:
+  glow:
+    energy: "#FBBF24"               # 能量发光（黄）
+    danger: "#EF4444"               # 危险发光（红）
+    active: "#3B82F6"               # 激活发光（蓝）
+    success: "#10B981"              # 成功发光（绿）
+
+  gradient:
+    temperature:
+      cold: "#3B82F6"               # 冷端（蓝）
+      hot: "#EF4444"                # 热端（红）
+
+    concentration:
+      low: "rgba(59,130,246,0.2)"   # 低浓度（淡蓝）
+      high: "#1E40AF"               # 高浓度（深蓝）
+
+    progress:
+      start: "#9CA3AF"              # 起始（灰）
+      end: "#10B981"                # 完成（绿）
+
+  transparency:
+    background_overlay: "rgba(0,0,0,0.3)"     # 遮罩层
+    trajectory: "rgba(59,130,246,0.3)"        # 轨迹线
+    area_fill: "rgba(126,58,237,0.2)"         # 面积填充
+    hover_highlight: "rgba(251,191,36,0.2)"   # 悬停高亮
+
+# 调试工具
+debug_palette_generator:
+  description: "生成学科配色预览代码"
+  example_code: |
+    // 显示配色方案预览
+    const colors = ['#3B82F6', '#F59E0B', '#8B5CF6', '#10B981'];
+    colors.forEach((color, i) => {
+      const box = ctx.createRect(
+        width * 0.2 + i * 100, height * 0.3,
+        80, 80,
+        color, 0
+      );
+      const label = ctx.createText(
+        color, width * 0.2 + i * 100 + 40, height * 0.45,
+        {fontSize: 10, color: '#fff', align: 'center'}
+      );
+    });

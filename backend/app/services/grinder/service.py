@@ -4,6 +4,7 @@
 
 import logging
 from typing import Dict, Any, List, Optional
+from sqlalchemy.orm import Session
 
 from .supervisor import get_grinder_supervisor
 
@@ -13,8 +14,9 @@ logger = logging.getLogger(__name__)
 class GrinderService:
     """小课堂服务"""
 
-    def __init__(self):
-        self.supervisor = get_grinder_supervisor()
+    def __init__(self, db: Session = None):
+        self.db = db
+        self.supervisor = get_grinder_supervisor(db)
 
     async def generate_exam(
         self,
@@ -23,7 +25,7 @@ class GrinderService:
         focus_categories: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        生成考试题目（带监督）
+        生成考试题目（带监督和学习集成）
 
         Args:
             topic: 考试主题
@@ -31,7 +33,7 @@ class GrinderService:
             focus_categories: 重点知识分类
 
         Returns:
-            包含考试数据和审核结果的字典
+            包含考试数据、审核结果和质量评分的字典
         """
         return await self.supervisor.generate_exam_with_supervision(
             topic=topic,
@@ -40,13 +42,6 @@ class GrinderService:
         )
 
 
-# 单例
-_grinder_service = None
-
-def get_grinder_service() -> GrinderService:
-    global _grinder_service
-    if _grinder_service is None:
-        _grinder_service = GrinderService()
-    return _grinder_service
-
-grinder_service = GrinderService()
+def get_grinder_service(db: Session = None) -> GrinderService:
+    """获取GrinderService实例"""
+    return GrinderService(db)

@@ -127,7 +127,6 @@ export function SimulatorConfigEditor({ config, onChange }: SimulatorConfigEdito
   );
 }
 
-/** 自定义模拟器编辑器 */
 function CustomSimulatorEditor({
   config,
   onChange,
