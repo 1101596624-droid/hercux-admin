@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Float, Boolean
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
@@ -95,8 +96,8 @@ class CourseNode(Base):
     sequence = Column(Integer, default=0)  # Order within same parent
 
     # Content and config for V2 course packages
-    content = Column(JSON)  # Lesson content with steps
-    config = Column(JSON)  # Lesson configuration
+    content = Column(JSONB)  # Lesson content with steps (统一使用jsonb)
+    config = Column(JSONB)  # Lesson configuration
 
     # Timeline configuration - stores steps for video/simulator/quiz sequence
     timeline_config = Column(JSON)  # {"steps": [...]}
