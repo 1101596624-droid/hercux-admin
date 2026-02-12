@@ -36,21 +36,8 @@ export function SimulatorStep({ simulator_spec }: SimulatorStepProps) {
 
   const spec = simulator_spec as any;
 
-  // 调试：打印 simulator_spec 结构
-  console.log('[SimulatorStep] Received spec:', {
-    keys: Object.keys(spec || {}),
-    mode: spec?.mode,
-    name: spec?.name,
-    hasHtmlContent: !!spec?.html_content,
-    hasCustomCode: !!spec?.custom_code,
-    htmlContentLength: spec?.html_content?.length || 0,
-    customCodeLength: spec?.custom_code?.length || 0,
-  });
-
   // 获取HTML内容（支持多种字段名）
   const htmlContent = spec?.html_content || spec?.htmlContent || spec?.code || spec?.custom_code || '';
-
-  console.log('[SimulatorStep] HTML content length:', htmlContent.length);
 
   const handleStart = () => {
     setIsStarted(true);

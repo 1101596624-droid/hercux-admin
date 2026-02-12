@@ -147,14 +147,7 @@ export function StepRenderer({ step, stepIndex, showRegenerate = false, onRegene
       )}
 
       {step.type === 'simulator' && 'simulator_spec' in step && step.simulator_spec && (
-        <>
-          {console.log('[StepRenderer] Rendering simulator:', {
-            hasSpec: !!step.simulator_spec,
-            specKeys: step.simulator_spec ? Object.keys(step.simulator_spec) : [],
-            spec: step.simulator_spec
-          })}
-          <SimulatorStep simulator_spec={step.simulator_spec} />
-        </>
+        <SimulatorStep simulator_spec={step.simulator_spec} />
       )}
     </div>
   );
