@@ -1,0 +1,64 @@
+
+> hercu-admin@1.0.0 build
+> next build && node scripts/copy-static.js
+
+  ▲ Next.js 14.2.35
+  - Environments: .env.local, .env.production
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Skipping validation of types
+   Skipping linting
+   Collecting page data ...
+   Generating static pages (0/25) ...
+   Generating static pages (6/25) 
+   Generating static pages (12/25) 
+   Generating static pages (18/25) 
+ ✓ Generating static pages (25/25)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                        Size     First Load JS
+┌ ○ /                                              537 B           301 kB
+├ ○ /_not-found                                    187 B           301 kB
+├ ○ /admin                                         2.52 kB         306 kB
+├ ○ /admin/achievement-center                      12.3 kB         313 kB
+├ ○ /admin/agent-monitor                           3.39 kB         306 kB
+├ ○ /admin/ai-monitor                              4.87 kB         305 kB
+├ ○ /admin/ai-monitor/alerts                       3.92 kB         304 kB
+├ ○ /admin/ai-monitor/logs                         4.1 kB          304 kB
+├ ○ /admin/analytics                               4.32 kB         307 kB
+├ ○ /admin/analytics/learning                      4.22 kB         307 kB
+├ ○ /admin/analytics/retention                     4.43 kB         307 kB
+├ ○ /admin/api-config                              6.61 kB         310 kB
+├ ○ /admin/courses                                 7 kB            310 kB
+├ ƒ /admin/courses/[courseId]                      3.21 kB         304 kB
+├ ƒ /admin/courses/[courseId]/edit                 3.08 kB         303 kB
+├ ƒ /admin/courses/[courseId]/nodes                3.12 kB         303 kB
+├ ƒ /admin/courses/[courseId]/nodes/[nodeId]/edit  3.06 kB         303 kB
+├ ƒ /admin/courses/[courseId]/nodes/create         3.08 kB         303 kB
+├ ○ /admin/courses/create                          3.12 kB         303 kB
+├ ○ /admin/dashboard                               8.92 kB         312 kB
+├ ƒ /admin/editor/[courseId]                       20.5 kB         328 kB
+├ ○ /admin/login                                   4.15 kB         308 kB
+├ ○ /admin/permissions                             6.28 kB         310 kB
+├ ○ /admin/processors                              6.6 kB          307 kB
+├ ○ /admin/progress                                3.35 kB         304 kB
+├ ○ /admin/settings                                6.18 kB         307 kB
+├ ○ /admin/studio                                  17.4 kB         325 kB
+├ ○ /admin/users                                   3.5 kB          304 kB
+├ ƒ /admin/users/[userId]                          3.81 kB         304 kB
+└ ƒ /api/ai/simulator-config                       0 B                0 B
++ First Load JS shared by all                      300 kB
+  └ chunks/vendors-a5be16c423a183e1.js             298 kB
+  └ other shared chunks (total)                    1.99 kB
+
+
+ƒ Middleware                                       26.6 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+Copying static files...
+Copying public files...
+Done!

@@ -1056,3 +1056,41 @@ async def generate_node_quiz_bank(
         "node_id": node_id,
         "node_title": node.title
     }
+
+
+@router.put("/nodes/{node_id}/content")
+async def update_node_content(
+    node_id: int,
+    content_data: dict,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update node content field directly
+
+    Admin only - Allows updating the full content JSON
+    """
+    import json
+
+    # Get node
+    result = await db.execute(
+        select(CourseNode).where(CourseNode.id == node_id)
+    )
+    node = result.scalar_one_or_none()
+
+    if not node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Node {node_id} not found"
+        )
+
+    # Update content
+    node.content = json.dumps(content_data, ensure_ascii=False)
+
+    await db.commit()
+    await db.refresh(node)
+
+    return {
+        "id": node.id,
+        "message": "Content updated successfully"
+    }

@@ -266,7 +266,7 @@ export const useEditorStore = create<EditorStore>()(
       loadFromPackage: (pkg) => {
         // 将 CoursePackageV2 转换为编辑器格式
         const chapters: EditorChapter[] = pkg.lessons.map((lesson, lessonIndex) => {
-          const sections: EditorSection[] = lesson.script.map((step, stepIndex) => {
+          const sections: EditorSection[] = lesson.steps.map((step, stepIndex) => {
             // 将 TeachingFormType 映射到 ComponentType
             const componentType = mapStepTypeToComponentType(step.type);
             const config = convertStepToNodeConfig(step);

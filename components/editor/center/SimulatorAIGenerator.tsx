@@ -164,7 +164,7 @@ export function SimulatorAIGenerator({
           <div className="bg-slate-900 rounded-lg overflow-hidden border-2 border-slate-700">
             <HTMLSimulatorRenderer
               htmlContent={generatedSimulator.html_content || generatedSimulator.custom_code}
-              height={500}
+              height={900}
               showBorder={false}
             />
           </div>

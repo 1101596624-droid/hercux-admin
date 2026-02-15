@@ -161,7 +161,7 @@ def calculate_statistics(lessons: List[Lesson]) -> PackageStatistics:
             complexity_dist.comprehensive += 1
 
         # 教学形式分布和资源统计
-        for step in lesson.script:
+        for step in lesson.steps:
             if step.type == TeachingFormType.TEXT_CONTENT.value:
                 form_dist.text_content += 1
             elif step.type == TeachingFormType.ILLUSTRATED_CONTENT.value:

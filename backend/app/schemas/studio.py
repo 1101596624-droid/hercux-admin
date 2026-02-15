@@ -106,17 +106,15 @@ class EmbeddedInteraction(BaseModel):
 
 
 class SimulatorSpec(BaseModel):
-    """Simulator specification"""
+    """HTML Simulator specification (统一使用HTML模拟器)"""
+    mode: str = "html"  # 固定为 "html"
+    name: str
+    description: str
+    html_content: Optional[str] = None  # HTML/CSS/JS 代码
+    # 保留旧字段以兼容数据库已有数据
+    custom_code: Optional[str] = None  # 兼容字段，映射到 html_content
     simulator_id: Optional[str] = None
     type: Optional[str] = None
-    scenario: Optional[Dict[str, Any]] = None
-    interface_spec: Optional[Dict[str, Any]] = None
-    evaluation_logic: Optional[Dict[str, Any]] = None
-    # 自定义代码模式字段
-    mode: Optional[str] = None  # "custom" for custom code mode
-    name: Optional[str] = None
-    description: Optional[str] = None
-    custom_code: Optional[str] = None
     variables: Optional[List[Dict[str, Any]]] = None
     inputs: Optional[List[Dict[str, Any]]] = None
     outputs: Optional[List[Dict[str, Any]]] = None

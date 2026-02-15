@@ -1,19 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter, Noto_Sans_SC, Poppins } from 'next/font/google'
 import './globals.css'
-
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
-const notoSansSC = Noto_Sans_SC({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-noto-sans-sc'
-})
-const poppins = Poppins({
-  subsets: ['latin'],
-  weight: ['400', '600', '700'],
-  style: ['normal', 'italic'],
-  variable: '--font-poppins'
-})
 
 export const metadata: Metadata = {
   title: 'HERCU Manager - 后台管理系统',
@@ -27,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body className={`${inter.variable} ${notoSansSC.variable} ${poppins.variable} font-sans antialiased bg-slate-50`}>
+      <body className="font-sans antialiased bg-slate-50" style={{ fontFamily: "'Inter', 'Noto Sans SC', 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
         {children}
       </body>
     </html>

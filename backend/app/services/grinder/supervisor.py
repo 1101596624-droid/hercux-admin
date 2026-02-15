@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-from app.services.claude_service import ClaudeService
+from app.services.llm_factory import get_llm_service
 from app.services.learning.quality_scorers import QuizScorer, QuizQualityScore
 from app.services.learning.template_service import UnifiedTemplateService
 
@@ -28,7 +28,7 @@ class GrinderSupervisor:
     """
 
     def __init__(self, db: Session = None):
-        self.claude_service = ClaudeService()
+        self.claude_service = get_llm_service()
         self._search_service = None
         self.db = db
         self.quiz_scorer = QuizScorer()

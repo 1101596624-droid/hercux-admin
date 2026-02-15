@@ -99,6 +99,7 @@ interface StudioActions {
   setTotalLessons: (total: number) => void;
   setLessonsOutline: (outline: LessonOutline[]) => void;
   addCompletedLesson: (index: number, lessonData?: any) => void;
+  setCompletedLessonsData: (lessonsData: any[]) => void; // 修复Bug #3：直接设置完整章节列表
   setGenerationMeta: (meta: any) => void;
   setGenerationError: (error: string | null) => void;
   setCurrentProcessor: (processor: ProcessorWithConfig | null) => void;
@@ -200,6 +201,11 @@ export const useStudioStore = create<StudioStore>()(
             ? [...state.completedLessonsData, lessonData]
             : state.completedLessonsData,
         })),
+      setCompletedLessonsData: (lessonsData) =>
+        set(() => ({
+          completedLessonsData: lessonsData,
+          completedLessons: lessonsData.map((_: any, idx: number) => idx),
+        })),  // 修复Bug #3：直接设置完整章节列表
       setGenerationMeta: (meta) => set({ generationMeta: meta }),
       setGenerationError: (error) => set({ generationError: error }),
       setCurrentProcessor: (processor) => set({ currentProcessor: processor }),
@@ -318,7 +324,7 @@ export const getCurrentLesson = (state: StudioStore): Lesson | null => {
 export const getCurrentStep = (state: StudioStore) => {
   const lesson = getCurrentLesson(state);
   if (!lesson) return null;
-  return lesson.script[state.selectedStepIndex] || lesson.script[0] || null;
+  return lesson.steps[state.selectedStepIndex] || lesson.steps[0] || null;
 };
 
 /**

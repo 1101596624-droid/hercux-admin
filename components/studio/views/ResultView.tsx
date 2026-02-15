@@ -98,7 +98,7 @@ export function ResultView({
                     {lesson.title}
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {lesson.total_steps || lesson.script.length} 步骤 · 约 {lesson.estimated_minutes} 分钟
+                    {lesson.total_steps || lesson.steps.length} 步骤 · 约 {lesson.estimated_minutes} 分钟
                   </p>
                 </div>
                 <ChevronRight
@@ -185,7 +185,7 @@ export function ResultView({
               )}
 
               {/* Steps - Use StepRenderer */}
-              {selectedLesson.script.map((step, stepIndex) => (
+              {selectedLesson.steps.map((step, stepIndex) => (
                 <StepRenderer key={step.step_id} step={step} stepIndex={stepIndex} />
               ))}
             </div>

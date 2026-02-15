@@ -416,7 +416,7 @@ export interface Lesson {
   learning_objectives: string[];
   complexity_level: ComplexityLevel;
   prerequisites?: string[];
-  script: LessonStep[];
+  steps: LessonStep[];  // 课程标准统一使用steps字段
 }
 
 // ============================================

@@ -44,7 +44,7 @@ class Lesson:
     order: int = 0
     total_steps: int = 0
     rationale: str = ""  # 为什么选择这些教学形式
-    script: List[LessonStep] = field(default_factory=list)
+    steps: List[LessonStep] = field(default_factory=list)  # 统一使用steps字段
 
     # 元数据
     estimated_minutes: int = 30

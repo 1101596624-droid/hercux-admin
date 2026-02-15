@@ -12,7 +12,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from app.services.claude_service import get_claude_service, Message
+from app.services.llm_factory import get_llm_service, Message
 from app.db.sync_manager import get_sync_db_manager
 
 router = APIRouter(tags=["AI Tutor"])
@@ -171,7 +171,7 @@ async def chat_with_tutor(request: ChatRequest):
         ]
 
         # 调用 Claude 服务
-        claude = get_claude_service()
+        claude = get_llm_service()
         response_message = await claude.generate_tutor_response(
             user_message=request.message,
             context=context,
@@ -208,7 +208,7 @@ async def get_hint(request: HintRequest):
         }
 
         # 调用 Claude 服务
-        claude = get_claude_service()
+        claude = get_llm_service()
         hint_message = await claude.generate_hint(
             question=request.question,
             user_answer=request.user_answer,
@@ -401,7 +401,7 @@ async def generate_batch_quiz(request: QuizGenerateRequest):
 注意：correct_option 只能是 A、B、C、D 中的一个字母。"""
 
         # 调用 Claude 服务
-        claude = get_claude_service()
+        claude = get_llm_service()
         response = await claude.generate_raw_response(prompt, temperature=0.7, max_tokens=4000)
 
         # 解析响应

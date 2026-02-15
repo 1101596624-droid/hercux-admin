@@ -1,9 +1,34 @@
+import os
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Float, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
 import enum
+
+# Conditionally import Vector type for PostgreSQL
+# In test environment (SQLite), use Text type instead
+try:
+    from pgvector.sqlalchemy import Vector
+    USE_VECTOR = True
+except ImportError:
+    USE_VECTOR = False
+
+# Detect database type from environment
+db_url = os.getenv('DATABASE_URL', '')
+IS_POSTGRESQL = 'postgresql' in db_url or 'postgres' in db_url
+
+# Choose appropriate types
+if IS_POSTGRESQL:
+    JSONType = JSONB
+else:
+    JSONType = JSON
+
+def get_vector_type(dim):
+    """Return Vector for PostgreSQL, Text for SQLite"""
+    if USE_VECTOR and IS_POSTGRESQL:
+        return Vector(dim)
+    return Text  # Fallback to Text for testing/SQLite
 
 
 class DifficultyLevel(str, enum.Enum):
@@ -96,8 +121,8 @@ class CourseNode(Base):
     sequence = Column(Integer, default=0)  # Order within same parent
 
     # Content and config for V2 course packages
-    content = Column(JSONB)  # Lesson content with steps (统一使用jsonb)
-    config = Column(JSONB)  # Lesson configuration
+    content = Column(JSONType)  # Lesson content with steps (统一使用jsonb)
+    config = Column(JSONType)  # Lesson configuration
 
     # Timeline configuration - stores steps for video/simulator/quiz sequence
     timeline_config = Column(JSON)  # {"steps": [...]}
@@ -273,6 +298,18 @@ class StudioProcessor(Base):
     color = Column(String(50), default="#3B82F6")
     icon = Column(String(50), default="Sparkles")
     system_prompt = Column(Text)  # AI system prompt for generation
+
+    # 【新增】课程结构约束 - 优先级最高,覆盖默认标准
+    structure_constraints = Column(JSON)  # {
+    #   "min_chapters": 4,
+    #   "max_chapters": 8,
+    #   "min_steps_per_chapter": 7,
+    #   "max_steps_per_chapter": 12,
+    #   "required_step_types": ["text_content", "simulator", "assessment"],
+    #   "min_simulators_per_chapter": 1,
+    #   "min_assessments_per_chapter": 1
+    # }
+
     enabled = Column(Integer, default=1)
     display_order = Column(Integer, default=0)
     is_official = Column(Integer, default=0)
@@ -719,6 +756,9 @@ class ContentTemplate(Base):
     difficulty_level = Column(String(50))  # For quiz/chapter: "entry", "beginner", etc.
     content_hash = Column(String(64), index=True)  # For deduplication
 
+    # Vector embedding for similarity search (384-dimensional)
+    embedding = Column(get_vector_type(384))  # Sentence-transformers embedding
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     usage_count = Column(Integer, default=0)  # Track how many times this template was used
 
@@ -739,3 +779,64 @@ class QualityEvaluation(Base):
     saved_as_template = Column(Integer, default=0)  # Whether this was saved as a template
     evaluated_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
+
+# ============================================
+# Learning Patterns System (经验蒸馏系统)
+# ============================================
+
+class GenerationPattern(Base):
+    """Generation pattern model for experience distillation (2026-02-13)
+
+    Stores distilled patterns from successful content generations to guide
+    future generation strategies and improve quality over time.
+    """
+    __tablename__ = "generation_patterns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pattern_type = Column(String(50), nullable=False, index=True)  # 'failure_recovery', 'optimization', 'best_practice'
+    step_type = Column(String(50), nullable=False, index=True)  # 'text_content', 'illustrated_content', 'assessment', 'ai_tutor'
+    subject = Column(String(100), nullable=False, index=True)  # e.g., "physics", "mathematics"
+
+    # Pattern details
+    pattern_name = Column(String(255), nullable=False)  # Human-readable pattern name
+    pattern_description = Column(Text, nullable=False)  # Detailed description of the pattern
+    trigger_conditions = Column(JSONType, nullable=False)  # Conditions that trigger this pattern
+    solution_strategy = Column(Text, nullable=False)  # Strategy to apply when pattern is triggered
+
+    # Pattern metrics
+    confidence = Column(Float, nullable=False, default=0.8)  # Confidence score (0-1)
+    use_count = Column(Integer, nullable=False, default=0)  # Number of times pattern was applied
+    success_count = Column(Integer, nullable=False, default=0)  # Number of successful applications
+
+    # Vector embedding for similarity search (384-dimensional)
+    embedding = Column(get_vector_type(384), nullable=False)  # Sentence-transformers embedding
+
+    # Source tracking
+    source_templates = Column(JSONType)  # List of template IDs this pattern was distilled from
+    created_from_count = Column(Integer, nullable=False, default=1)  # Number of templates used in distillation
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PatternApplication(Base):
+    """Pattern application record (2026-02-13)
+
+    Tracks when and how patterns are applied during content generation,
+    including success metrics for continuous learning.
+    """
+    __tablename__ = "pattern_applications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pattern_id = Column(Integer, ForeignKey("generation_patterns.id", ondelete="CASCADE"), nullable=False, index=True)
+    step_type = Column(String(50), nullable=False, index=True)  # 'text_content', 'illustrated_content', 'assessment', 'ai_tutor'
+    subject = Column(String(100), nullable=False, index=True)
+    topic = Column(String(255), nullable=False, index=True)
+
+    # Application details
+    original_input = Column(JSONType, nullable=False)  # Original generation request
+    applied_strategy = Column(Text, nullable=False)  # Strategy text that was applied
+    result_quality = Column(Float)  # Quality score of the result (if evaluated)
+    success = Column(Boolean, nullable=False, default=True)  # Whether application was successful
+
+    applied_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

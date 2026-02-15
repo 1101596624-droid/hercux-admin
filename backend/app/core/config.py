@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-chat"  # DeepSeek 模型名称
 
+    # Qwen (千问) AI
+    QWEN_API_KEY: str = ""
+    QWEN_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    QWEN_MODEL: str = "qwen-plus"  # Qwen 模型名称
+
+    # LLM Provider Selection
+    LLM_PROVIDER: str = "deepseek"  # 可选: "deepseek" 或 "qwen"
+
     # Gemini AI (图片生成)
     GEMINI_API_KEY: str = ""
     GEMINI_BASE_URL: str = "https://hiapi.online/v1"
@@ -77,6 +85,14 @@ class Settings(BaseSettings):
         "http://localhost:23001",  # Electron 管理后台内置服务器
         "app://.",  # Electron 应用
     ]
+
+    # Agent Learning System - Phase 3 (2026-02-13)
+    # 智能学习系统配置
+    ENABLE_AGENT_LEARNING: bool = True  # 启用Agent学习系统
+    AGENT_EVAL_PROBABILITY_THRESHOLD: float = 0.5  # Agent评估触发概率阈值（0-1）
+    DISTILLATION_TRIGGER_COUNT: int = 50  # 自动蒸馏触发阈值（轨迹数量）
+    PATTERN_CONFIDENCE_THRESHOLD: float = 0.7  # 模式识别置信度阈值
+    VECTOR_SIMILARITY_TOP_K: int = 3  # 向量检索返回的相似模板数量
 
     model_config = SettingsConfigDict(
         env_file="/www/wwwroot/hercu-backend/.env" if __import__('os').path.exists("/www/wwwroot/hercu-backend/.env") else ".env",

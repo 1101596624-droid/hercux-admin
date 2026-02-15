@@ -654,7 +654,7 @@ export function GeneratingView({
               )}
 
               {/* Steps */}
-              {previewLesson.script && previewLesson.script.map((step, stepIndex) => (
+              {previewLesson.steps && previewLesson.steps.map((step, stepIndex) => (
                 <StepRenderer
                   key={step.step_id || stepIndex}
                   step={step}

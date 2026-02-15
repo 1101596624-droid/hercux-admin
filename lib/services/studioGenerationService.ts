@@ -75,14 +75,12 @@ class StudioGenerationService {
   private createV3Callbacks(): V3StreamCallbacks {
     return {
       onPhase: (phase, message, processorInfo) => {
-        console.log('[GenerationService V3] onPhase:', { phase, message });
         const s = useStudioStore.getState();
         s.setStreamStatus(message);
         s.setGenerationPhase(phase);
       },
 
       onOutline: (outline: V3CourseOutline) => {
-        console.log('[GenerationService V3] onOutline:', outline);
         const s = useStudioStore.getState();
         s.setTotalLessons(outline.total_chapters);
         // 转换为 lessonsOutline 格式
@@ -158,7 +156,15 @@ class StudioGenerationService {
           attempts
         });
         const s = useStudioStore.getState();
-        s.addCompletedLesson(index, chapter);
+
+        // 修复：使用all_completed_chapters恢复完整章节列表（Bug #3修复）
+        if (chapter.all_completed_chapters && Array.isArray(chapter.all_completed_chapters)) {
+          s.setCompletedLessonsData(chapter.all_completed_chapters);
+        } else {
+          // 兼容旧版本：如果没有all_completed_chapters，则append
+          s.addCompletedLesson(index, chapter);
+        }
+
         s.clearStreamingSteps();
 
         const attemptText = attempts > 1 ? ` (${attempts}次尝试后通过)` : '';

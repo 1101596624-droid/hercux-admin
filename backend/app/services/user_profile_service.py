@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.models.models import User, ChatHistory, UserProfile, LearningProgress, CourseNode
-from app.services.claude_service import get_claude_service, Message
+from app.services.llm_factory import get_llm_service, Message
 
 
 class UserProfileService:
@@ -18,7 +18,7 @@ class UserProfileService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.claude = get_claude_service()
+        self.claude = get_llm_service()
 
     async def analyze_user_profile(self, user_id: int, force_update: bool = False) -> Optional[Dict]:
         """

@@ -7,7 +7,7 @@ import os
 import json
 import ssl
 import certifi
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, AsyncGenerator
 import httpx
 from pydantic import BaseModel
 from app.core.config import settings
@@ -218,25 +218,128 @@ class DeepSeekService:
 
         return response["choices"][0]["message"]["content"]
 
-    async def generate_raw_response(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000) -> str:
+    async def generate_raw_response(
+        self,
+        messages: List[Dict] = None,
+        prompt: str = None,
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4000
+    ) -> str:
         """
-        生成原始响应（用于结构化输出如JSON）
+        生成原始响应（兼容 ClaudeService 接口）
 
         Args:
-            prompt: 提示词
+            messages: 消息列表（优先使用）
+            prompt: 提示词（如果没有messages）
+            system_prompt: 系统提示词
             temperature: 温度参数
             max_tokens: 最大token数
 
         Returns:
             原始响应文本
         """
-        messages = [
-            Message(role="user", content=prompt)
-        ]
+        msg_list = []
 
-        response = await self.chat_completion(messages, temperature=temperature, max_tokens=max_tokens)
+        # 添加系统提示词
+        if system_prompt:
+            msg_list.append(Message(role="system", content=system_prompt))
+
+        # 处理消息列表或单个提示词
+        if messages:
+            for msg in messages:
+                msg_list.append(Message(role=msg.get("role", "user"), content=msg.get("content", "")))
+        elif prompt:
+            msg_list.append(Message(role="user", content=prompt))
+        else:
+            raise ValueError("Either messages or prompt must be provided")
+
+        response = await self.chat_completion(msg_list, temperature=temperature, max_tokens=max_tokens)
 
         return response["choices"][0]["message"]["content"]
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4000
+    ):
+        """
+        流式生成响应（兼容 ClaudeService 接口）
+
+        Args:
+            prompt: 用户提示词
+            system_prompt: 系统提示词
+            temperature: 温度参数
+            max_tokens: 最大token数
+
+        Yields:
+            生成的文本块
+        """
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        api_messages = []
+        if system_prompt:
+            api_messages.append({"role": "system", "content": system_prompt})
+        api_messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            "model": self.model,
+            "messages": api_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True
+        }
+
+        async with httpx.AsyncClient(timeout=300.0, verify=get_ssl_context()) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload
+            ) as response:
+                response.raise_for_status()
+
+                async for line in response.aiter_lines():
+                    if not line or not line.strip():
+                        continue
+
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+
+                        try:
+                            data = json.loads(data_str)
+                            # OpenAI 流式响应格式
+                            if "choices" in data and len(data["choices"]) > 0:
+                                delta = data["choices"][0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                        except json.JSONDecodeError:
+                            continue
+
+    async def generate_with_json_mode(
+        self,
+        messages: List[Dict],
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4000
+    ) -> str:
+        """
+        生成 JSON 格式响应（兼容 ClaudeService 接口）
+        """
+        return await self.generate_raw_response(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
 
 
 # 全局实例

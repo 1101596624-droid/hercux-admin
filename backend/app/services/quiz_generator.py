@@ -12,7 +12,7 @@ from typing import List, Dict, Optional
 import sqlite3
 from pathlib import Path
 
-from app.services.claude_service import get_claude_service, Message
+from app.services.llm_factory import get_llm_service, Message
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class QuizGeneratorService:
     """题库生成服务"""
 
     def __init__(self):
-        self.claude = get_claude_service()
+        self.claude = get_llm_service()
 
     async def generate_quiz_bank_by_difficulty(
         self,

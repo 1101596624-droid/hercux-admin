@@ -52,9 +52,9 @@ export function IllustratedContentStep({ content, diagram_spec }: IllustratedCon
     <div className="space-y-4">
       {/* 图片区域 */}
       {diagram_spec && (
-        <div className="relative">
+        <div className="relative" style={{ aspectRatio: '16/9' }}>
           {imageUrl && !imageError ? (
-            <div className="relative rounded-lg overflow-hidden bg-slate-100">
+            <div className="relative rounded-lg overflow-hidden bg-slate-100" style={{ aspectRatio: '16/9' }}>
               {imageLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-100">
                   <div className="animate-pulse flex flex-col items-center gap-2">
@@ -66,8 +66,8 @@ export function IllustratedContentStep({ content, diagram_spec }: IllustratedCon
               <img
                 src={imageUrl}
                 alt={diagram_spec.description || '图表'}
-                className={`w-full h-auto object-contain ${imageLoading ? 'opacity-0' : 'opacity-100'}`}
-                style={{ minHeight: '300px', maxHeight: '600px' }}
+                className={`w-full h-full object-fill ${imageLoading ? 'opacity-0' : 'opacity-100'}`}
+                style={{ aspectRatio: '16/9' }}
                 onLoad={() => setImageLoading(false)}
                 onError={() => {
                   setImageError(true);
@@ -76,7 +76,7 @@ export function IllustratedContentStep({ content, diagram_spec }: IllustratedCon
               />
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-8 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200">
+            <div className="flex flex-col items-center justify-center py-8 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200" style={{ aspectRatio: '16/9' }}>
               {imageError ? (
                 <>
                   <AlertCircle size={32} className="text-amber-500 mb-2" />

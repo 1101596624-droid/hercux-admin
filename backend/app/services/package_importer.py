@@ -112,7 +112,7 @@ class Lesson(BaseModel):
     order: int = 0
     total_steps: int = 0
     rationale: str = ""
-    script: List[LessonStep] = Field(default_factory=list)
+    steps: List[LessonStep] = Field(default_factory=list)
     estimated_minutes: int = 30
     prerequisites: List[str] = Field(default_factory=list)
     learning_objectives: List[str] = Field(default_factory=list)
@@ -326,7 +326,7 @@ class PackageImporterV2:
         """
         steps = []
 
-        for step in lesson.script:
+        for step in lesson.steps:
             step_data = {
                 "step_id": step.step_id,
                 "type": step.type,

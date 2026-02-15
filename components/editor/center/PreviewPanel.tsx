@@ -17,12 +17,15 @@ interface PreviewPanelProps {
 }
 
 export function PreviewPanel({ type, config }: PreviewPanelProps) {
+  // 模拟器类型需要更大的空间
+  const isSimulator = type === 'simulator';
+
   return (
     <div className="border border-dark-200 rounded-lg overflow-hidden">
       <div className="px-4 py-2 bg-dark-50 border-b border-dark-200">
         <span className="text-sm font-medium text-dark-700">预览</span>
       </div>
-      <div className="p-4 min-h-[200px] bg-white">
+      <div className={`p-4 bg-white ${isSimulator ? 'min-h-[600px]' : 'min-h-[200px]'}`}>
         <PreviewContent type={type} config={config} />
       </div>
     </div>

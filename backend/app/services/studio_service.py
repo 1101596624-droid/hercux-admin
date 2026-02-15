@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional, AsyncGenerator
 from datetime import datetime
 
 from app.core.config import settings
-from app.services.claude_service import ClaudeService, Message
+from app.services.llm_factory import get_llm_service, Message
 from app.services.gemini_service import gemini_service
 from app.services.storage_service import storage_service
 from app.services.studio.templates import get_template, ALL_TEMPLATES
@@ -101,7 +101,7 @@ class StudioGenerationService:
     """Studio course generation service"""
 
     def __init__(self):
-        self.claude_service = ClaudeService()
+        self.claude_service = get_llm_service()
 
     async def generate_course_stream(
         self,

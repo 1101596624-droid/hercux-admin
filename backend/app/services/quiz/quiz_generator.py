@@ -24,7 +24,7 @@ import logging
 from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 
-from app.services.claude_service import get_claude_service
+from app.services.llm_factory import get_llm_service
 from app.services.learning.template_service import UnifiedTemplateService
 from app.services.learning.quality_scorers import QuizScorer, QuizQualityScore
 
@@ -42,7 +42,7 @@ class EnhancedQuizGenerator:
             db: SQLAlchemy database session
         """
         self.db = db
-        self.claude = get_claude_service()
+        self.claude = get_llm_service()
         self.template_service = UnifiedTemplateService(db)
         self.scorer = QuizScorer()
 

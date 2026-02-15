@@ -107,7 +107,7 @@ export const realEditorAPI = {
     // 按节点创建章节（每个 lesson 节点作为一个章节）
     if (nodesData.nodes && nodesData.nodes.length > 0) {
       nodesData.nodes.forEach((node: any, index: number) => {
-        // 解析节点内容
+        // 解析节点内容（数据库已统一为jsonb类型，不再需要双重解析）
         let content = {};
         try {
           if (typeof node.content === 'string') {
@@ -119,7 +119,7 @@ export const realEditorAPI = {
           console.error('Failed to parse node content:', e);
         }
 
-        // 解析节点配置
+        // 解析节点配置（数据库已统一为jsonb类型，不再需要双重解析）
         let config = {};
         try {
           if (typeof node.config === 'string') {

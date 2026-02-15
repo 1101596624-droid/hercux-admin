@@ -14,8 +14,13 @@ export default function AdminLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await login(email, password);
-    // 登录成功后跳转由 layout 处理
-    router.replace('/admin/dashboard');
+
+    // 只有登录成功后才跳转（检查 store 状态）
+    const authState = useAdminAuthStore.getState();
+    if (authState.isAuthenticated && !authState.error) {
+      router.replace('/admin/dashboard');
+    }
+    // 如果登录失败，错误信息会显示在页面上，不跳转
   };
 
   return (

@@ -34,8 +34,14 @@ interface SimulatorRendererProps {
 
 export function SimulatorRenderer({ config, readOnly = false, compact = false }: SimulatorRendererProps) {
   const [key, setKey] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+
+  const handleStart = useCallback(() => {
+    setIsRunning(true);
+  }, []);
 
   const handleReset = useCallback(() => {
+    setIsRunning(false);
     setKey(k => k + 1);
   }, []);
 
@@ -64,28 +70,57 @@ export function SimulatorRenderer({ config, readOnly = false, compact = false }:
 
     return (
       <div className="space-y-4">
-        {/* 控制按钮 */}
-        {!readOnly && (
-          <div className="flex gap-2">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-200 text-dark-700 rounded-lg hover:bg-dark-300 transition-colors"
-            >
-              <RotateCcw size={16} />
-              重置
-            </button>
+        {/* 未开始时的提示和按钮 */}
+        {!isRunning && (
+          <div className="flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl text-white p-6 space-y-6" style={{ aspectRatio: '16/9' }}>
+            <div className="text-center">
+              <div className="text-6xl mb-4">🎮</div>
+              <h3 className="text-lg font-medium mb-2">准备就绪</h3>
+              <p className="text-sm text-slate-400 mb-6">
+                点击下方按钮启动模拟器
+              </p>
+            </div>
+
+            {/* 开始按钮 */}
+            {!readOnly && (
+              <button
+                onClick={handleStart}
+                className="flex items-center gap-2 px-6 py-3 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors shadow-lg"
+              >
+                <Play size={20} />
+                <span className="font-medium">开始运行</span>
+              </button>
+            )}
           </div>
         )}
 
-        {/* HTML模拟器画布 */}
-        <div className="relative">
-          <HTMLSimulatorRenderer
-            key={key}
-            htmlContent={htmlContent}
-            height={500}
-            showBorder={true}
-          />
-        </div>
+        {/* HTML模拟器画布 - 运行时显示 */}
+        {isRunning && (
+          <>
+            {/* 重置按钮 */}
+            {!readOnly && (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleReset}
+                  className="flex items-center gap-2 px-4 py-2 bg-dark-200 text-dark-700 rounded-lg hover:bg-dark-300 transition-colors"
+                >
+                  <RotateCcw size={16} />
+                  重置
+                </button>
+              </div>
+            )}
+
+            {/* 模拟器画布 */}
+            <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: '16/9' }}>
+              <HTMLSimulatorRenderer
+                key={key}
+                htmlContent={htmlContent}
+                height={900}
+                showBorder={true}
+              />
+            </div>
+          </>
+        )}
       </div>
     );
   }

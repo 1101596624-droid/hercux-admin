@@ -88,7 +88,7 @@ export function SimulatorStep({ simulator_spec }: SimulatorStepProps) {
       {!isStarted && (
         <div
           className="flex items-center justify-center"
-          style={{ height: 500, backgroundColor: '#1e293b' }}
+          style={{ aspectRatio: '16/9', backgroundColor: '#1e293b' }}
         >
           <div className="text-center">
             <p className="text-slate-400 text-lg mb-2">点击左上角"开始"按钮</p>
@@ -102,9 +102,9 @@ export function SimulatorStep({ simulator_spec }: SimulatorStepProps) {
         <HTMLSimulatorRenderer
           key={key}
           htmlContent={htmlContent}
-          height={500}
-          onReady={() => console.log('HTML Simulator ready')}
-          onError={(err) => console.error('HTML Simulator error:', err)}
+          height={900}
+          onReady={() => {}}
+          onError={(err) => {}}
         />
       )}
     </div>
