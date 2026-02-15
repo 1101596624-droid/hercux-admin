@@ -77,6 +77,12 @@ export default function AIMonitorPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
+            href="/admin/ai-monitor/templates"
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-xl hover:bg-blue-700 transition-colors"
+          >
+            模板库
+          </Link>
+          <Link
             href="/admin/ai-monitor/logs"
             className="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
           >

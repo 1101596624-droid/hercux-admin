@@ -271,3 +271,123 @@ async def analyze_course(course_id: int):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"课程分析失败: {str(e)}")
+
+
+# ============================================
+# 模拟器模板管理 API
+# ============================================
+
+@router.get("/templates")
+async def list_templates(
+    subject: str = None,
+    min_score: float = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取模拟器模板列表"""
+    try:
+        conditions = []
+        params = {}
+        if subject:
+            conditions.append("subject = :subject")
+            params["subject"] = subject
+        if min_score is not None:
+            conditions.append("quality_score >= :min_score")
+            params["min_score"] = min_score
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        offset = (page - 1) * page_size
+        params["limit"] = page_size
+        params["offset"] = offset
+
+        count_result = await db.execute(text(
+            f"SELECT COUNT(*) as total FROM simulator_templates {where}"
+        ), params)
+        total = count_result.scalar() or 0
+
+        result = await db.execute(text(f"""
+            SELECT id, subject, topic, quality_score, line_count,
+                   visual_elements, created_at, updated_at
+            FROM simulator_templates
+            {where}
+            ORDER BY quality_score DESC, id DESC
+            LIMIT :limit OFFSET :offset
+        """), params)
+
+        templates = [
+            {
+                "id": row.id,
+                "subject": row.subject,
+                "topic": row.topic,
+                "qualityScore": float(row.quality_score or 0),
+                "lineCount": row.line_count,
+                "visualElements": row.visual_elements,
+                "createdAt": str(row.created_at) if row.created_at else None,
+            }
+            for row in result.fetchall()
+        ]
+
+        return {"templates": templates, "total": total, "page": page, "pageSize": page_size}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取模板列表失败: {str(e)}")
+
+
+@router.get("/templates/{template_id}")
+async def get_template(template_id: int, db: AsyncSession = Depends(get_db)):
+    """获取单个模板详情（含完整HTML代码）"""
+    try:
+        result = await db.execute(text(
+            "SELECT * FROM simulator_templates WHERE id = :id"
+        ), {"id": template_id})
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="模板不存在")
+        return {
+            "id": row.id,
+            "subject": row.subject,
+            "topic": row.topic,
+            "code": row.code,
+            "qualityScore": float(row.quality_score or 0),
+            "lineCount": row.line_count,
+            "visualElements": row.visual_elements,
+            "createdAt": str(row.created_at) if row.created_at else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取模板失败: {str(e)}")
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(template_id: int, db: AsyncSession = Depends(get_db)):
+    """删除模拟器模板"""
+    try:
+        result = await db.execute(text(
+            "SELECT id FROM simulator_templates WHERE id = :id"
+        ), {"id": template_id})
+        if not result.first():
+            raise HTTPException(status_code=404, detail="模板不存在")
+
+        await db.execute(text(
+            "DELETE FROM simulator_templates WHERE id = :id"
+        ), {"id": template_id})
+        await db.commit()
+        return {"success": True, "message": f"模板 {template_id} 已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"删除模板失败: {str(e)}")
+
+
+@router.get("/templates/subjects/list")
+async def list_subjects(db: AsyncSession = Depends(get_db)):
+    """获取所有学科分类"""
+    try:
+        result = await db.execute(text(
+            "SELECT DISTINCT subject, COUNT(*) as count FROM simulator_templates GROUP BY subject ORDER BY count DESC"
+        ))
+        return [{"subject": row.subject, "count": row.count} for row in result.fetchall()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取学科列表失败: {str(e)}")
