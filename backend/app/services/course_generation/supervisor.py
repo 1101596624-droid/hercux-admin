@@ -8,7 +8,7 @@ import logging
 from typing import AsyncGenerator, Dict, Any, Optional, List
 from datetime import datetime
 
-from app.services.claude_service import ClaudeService
+from app.services.llm_factory import get_llm_service
 from .models import (
     GenerationState, CourseOutline, ChapterOutline, ChapterResult,
     ReviewResult, ReviewStatus, ChapterType, ChapterQualityStandards,
@@ -34,7 +34,7 @@ class CourseSupervisor:
     """
 
     def __init__(self):
-        self.claude_service = ClaudeService()
+        self.claude_service = get_llm_service()
         self.quality_standards = ChapterQualityStandards()
         self.conversation_messages: List[Dict[str, str]] = []
         self._search_service = None
@@ -78,9 +78,16 @@ class CourseSupervisor:
     async def generate_outline(
         self,
         state: GenerationState,
-        system_prompt: str
+        system_prompt: str,
+        processor_constraints: Optional[Dict[str, Any]] = None
     ) -> CourseOutline:
-        """生成课程大纲"""
+        """生成课程大纲
+
+        Args:
+            state: 生成状态
+            system_prompt: 系统提示
+            processor_constraints: 处理器结构约束(优先级最高)
+        """
 
         # 搜索最新信息
         search_context = await self.search_latest_info(state.course_title)
@@ -111,6 +118,34 @@ class CourseSupervisor:
 - 在课程中适当引用最新数据和案例
 
 """
+
+        # 【新增】处理器结构约束 - 最高优先级
+        if processor_constraints:
+            prompt += """
+【课程风格结构约束 - 最高优先级,必须严格遵守】
+以下约束来自课程风格配置,优先级高于所有其他建议和标准:
+"""
+            if 'min_chapters' in processor_constraints or 'max_chapters' in processor_constraints:
+                min_ch = processor_constraints.get('min_chapters', '不限')
+                max_ch = processor_constraints.get('max_chapters', '不限')
+                prompt += f"- 章节数量: 最少{min_ch}章, 最多{max_ch}章 (硬性要求)\n"
+
+            if 'min_steps_per_chapter' in processor_constraints or 'max_steps_per_chapter' in processor_constraints:
+                min_st = processor_constraints.get('min_steps_per_chapter', '不限')
+                max_st = processor_constraints.get('max_steps_per_chapter', '不限')
+                prompt += f"- 每章步骤数: 最少{min_st}步, 最多{max_st}步 (硬性要求)\n"
+
+            if 'required_step_types' in processor_constraints:
+                types = ', '.join(processor_constraints['required_step_types'])
+                prompt += f"- 必须包含的步骤类型: {types} (硬性要求)\n"
+
+            if 'min_simulators_per_chapter' in processor_constraints:
+                prompt += f"- 每章最少模拟器数: {processor_constraints['min_simulators_per_chapter']} (硬性要求)\n"
+
+            if 'min_assessments_per_chapter' in processor_constraints:
+                prompt += f"- 每章最少测验数: {processor_constraints['min_assessments_per_chapter']} (硬性要求)\n"
+
+            prompt += "\n⚠️ 这些约束的优先级高于监督者建议、Agent评价和默认标准,必须无条件遵守!\n\n"
 
         # 课程风格描述
         style_descriptions = {
@@ -508,7 +543,7 @@ class CourseSupervisor:
     "order": {chapter_index},
     "total_steps": 步骤数量,
     "rationale": "",
-    "script": [
+    "steps": [
         {{
             "step_id": "step_1",
             "type": "text_content",
@@ -629,8 +664,8 @@ class CourseSupervisor:
             content_score -= 15
 
         # === 2. 检查模拟器质量（使用统一评分系统）===
-        simulators = [s for s in chapter.script if s.type == 'simulator']
-        for i, step in enumerate(chapter.script):
+        simulators = [s for s in chapter.steps if s.type == 'simulator']
+        for i, step in enumerate(chapter.steps):
             if step.type == 'simulator' and step.simulator_spec:
                 # 使用统一的质量评分系统
                 quality_score = step.simulator_spec.calculate_quality_score(self.quality_standards.simulator_standards)
@@ -648,7 +683,7 @@ class CourseSupervisor:
                     simulator_score -= 30
 
         # === 4. 检查内容质量 ===
-        for i, step in enumerate(chapter.script):
+        for i, step in enumerate(chapter.steps):
             if step.type in ['text_content', 'illustrated_content']:
                 if step.content:
                     body = step.content.get('body', '')
@@ -669,7 +704,7 @@ class CourseSupervisor:
                             content_score -= 15
 
         # === 4. 检查测验质量（不强制必须有，但有的话检查基本质量） ===
-        assessments = [s for s in chapter.script if s.type == 'assessment']
+        assessments = [s for s in chapter.steps if s.type == 'assessment']
         if assessments:
             # 检查测验是否有题目
             total_questions = sum(
@@ -681,7 +716,7 @@ class CourseSupervisor:
                 content_score -= 10
 
         # === 5. 检查图文区别性（不限数量，但要有区别） ===
-        illustrated = [s for s in chapter.script if s.type == 'illustrated_content']
+        illustrated = [s for s in chapter.steps if s.type == 'illustrated_content']
         if len(illustrated) > 1:
             # 检查图文步骤之间是否有明显区别
             diagram_descs = []
@@ -699,7 +734,7 @@ class CourseSupervisor:
 
         # === 8. 生成每个步骤的详细审核结果（用于单步重做）===
         step_reviews = []
-        for i, step in enumerate(chapter.script):
+        for i, step in enumerate(chapter.steps):
             step_review = await self.review_single_step(state, chapter, i)
             step_reviews.append(step_review)
 
@@ -779,7 +814,7 @@ class CourseSupervisor:
 
 步骤内容：
 """
-        for i, step in enumerate(chapter.script):
+        for i, step in enumerate(chapter.steps):
             prompt += f"\n{i+1}. [{step.type}] {step.title}"
             if step.type == 'simulator' and step.simulator_spec:
                 prompt += f"\n   模拟器：{step.simulator_spec.name}"
@@ -941,7 +976,7 @@ class CourseSupervisor:
         Returns:
             包含重做所需上下文的字典
         """
-        step = chapter.script[step_index]
+        step = chapter.steps[step_index]
 
         # 构建上下文
         context = {
@@ -984,7 +1019,7 @@ class CourseSupervisor:
         """
         from .models import StepReviewResult
 
-        step = chapter.script[step_index]
+        step = chapter.steps[step_index]
         issues = []
         suggestions = []
         score = 100
@@ -1117,18 +1152,18 @@ class CourseSupervisor:
 
         # 2. 检查步骤类型分布
         type_counts = {}
-        for step in chapter.script:
+        for step in chapter.steps:
             type_counts[step.type] = type_counts.get(step.type, 0) + 1
 
         # 2. 检查步骤类型（不限数量，仅检查区别性）
         # 检查模拟器之间是否有区别
-        sim_names = [s.simulator_spec.name for s in chapter.script
+        sim_names = [s.simulator_spec.name for s in chapter.steps
                      if s.type == 'simulator' and s.simulator_spec]
         if len(sim_names) > 1 and len(set(sim_names)) < len(sim_names):
             issues.append("同一章节内有重复的模拟器主题，需要有明显区别")
 
         # 检查图文之间是否有区别
-        ill_titles = [s.title for s in chapter.script if s.type == 'illustrated_content']
+        ill_titles = [s.title for s in chapter.steps if s.type == 'illustrated_content']
         if len(ill_titles) > 1 and len(set(ill_titles)) < len(ill_titles):
             issues.append("同一章节内有重复的图文标题，需要有明显区别")
 
@@ -1207,7 +1242,7 @@ class CourseSupervisor:
                 'error_type': str  # 错误类型分类
             }
         """
-        step = chapter.script[step_index]
+        step = chapter.steps[step_index]
         issues = []
         error_type = None
 
@@ -1720,7 +1755,7 @@ ctx.setPosition(elementId, safeX, safeY);
                 'revision_plan': str  # 如果选择修改，提供修改计划
             }
         """
-        step = chapter.script[step_index]
+        step = chapter.steps[step_index]
         issues = check_result.get('issues', [])
 
         prompt = f"""作为课程生成监督者，你需要决定如何处理以下问题。
@@ -1836,18 +1871,42 @@ ctx.setPosition(elementId, safeX, safeY);
                 recommendation += "- 使用圆形、矩形、线条等基础图形\n- 添加文字标签和数据显示\n- 实现交互控制和动画效果\n"
 
             recommendation += """
-=== 画布约束（重要）===
-- 画布尺寸由 ctx.width 和 ctx.height 动态获取，不同端尺寸不同
-- 所有坐标必须使用比例计算，如: x = width * 0.5, y = height * 0.3
-- 安全绘制区域: x在[width*0.12, width*0.95], y在[55, height-35]
-- 动态坐标必须用 ctx.math.clamp() 限制范围
-- 禁止硬编码绝对坐标（如 x=500），否则在不同端会超出边界
+=== 画布约束（严格遵守）===
+- 画布尺寸: 统一1600×900px (16:9标准比例,绝对不可超出)
+- Canvas元素: <canvas id="canvas" width="1600" height="900"></canvas>
+- 所有坐标必须在画布范围内: x在[0, 1600], y在[0, 900]
+- 使用比例计算: x = 1600 * 0.5, y = 900 * 0.5
+- 安全绘制区域: x在[50, 1550], y在[50, 850]
+- 禁止硬编码超出范围的坐标
 
-=== 视觉质量要求 ===
-- 颜色对比度 >= 4.5:1（背景是深色#1e293b，元素必须使用亮色）
-- 禁止使用深色（#000000, #111111, #1e293b等），否则元素不可见
-- 使用缓动函数实现平滑动画（推荐 easeOutBack, easeInOutElastic）
-- 每个视觉元素要有明确的教学意义
+=== 视觉质量要求（教学适用性）===
+✅ 必须遵守:
+- 背景与前景对比度充足（≥4.5:1，文字清晰可读）
+- 网格线/辅助线清晰可见（使用中灰色 #64748B、#94A3B8，不要浅灰 #E2E8F0）
+- 交互元素视觉明显（拖动手柄≥20px，按钮清晰，高对比度）
+- 整体协调专业，适合长时间学习
+
+✅ 推荐做法:
+- 根据学科选择合适配色（物理-蓝，生物-绿，化学-多彩，数学-对比色）
+- 使用2-3种主色，避免过多颜色
+- 重点元素用对比色突出
+- 背景建议浅色（白色或浅灰）
+
+❌ 禁止:
+- 极低对比度（浅灰on白色）
+- 刺眼的高饱和度渐变
+- 过暗的背景（除非特殊需要）
+- 外部CSS/JS文件（必须内联）
+
+=== 交互要求（必须满足）===
+- 至少2个交互元素（滑块/按钮/拖动）
+- 交互元素必须视觉明显:
+  * 滑块手柄≥20px
+  * 按钮清晰可见，有hover效果
+  * 拖动手柄用圆形标识，直径≥24px
+- 交互必须实时响应并更新画面
+- 每个交互都要有明确的教学意义
+
 
 """
             return recommendation
@@ -1858,15 +1917,20 @@ ctx.setPosition(elementId, safeX, safeY);
             return """
 【可视化设计推荐】
 
-=== 基础配色 ===
-主色：#3B82F6（蓝色）
-次色：#10B981（绿色）
-强调色：#F59E0B（橙色）
+=== 基础配色（教学适用性）===
+✅ 必须: 对比度充足（≥4.5:1）、网格线清晰（中灰色）、交互元素明显
+✅ 推荐: 根据学科选择配色（物理-蓝，生物-绿，化学-多彩）
+❌ 禁止: 极低对比度、刺眼渐变、外部CSS/JS文件
 
 === 推荐元素 ===
 - 使用圆形、矩形、线条等基础图形组合
 - 添加文字标签说明
 - 实现平滑动画效果
+
+=== 交互要求 ===
+- 至少2个交互元素（滑块/按钮/拖动）
+- 交互元素视觉明显（滑块手柄≥20px，拖动手柄≥24px）
+- 交互必须实时响应并更新画面
 
 """
 
@@ -2202,3 +2266,18 @@ ctx.setPosition(elementId, safeX, safeY);
                 'issues': [str(e)],
                 'suggestions': []
             }
+
+    # 2026-02-15: 布局修复功能已删除
+    # 原因：布局修复会破坏代码结构（删除DOCTYPE等必要元素）
+    # 改为在生成提示词中要求AI直接生成符合规范的布局
+    #
+    # async def review_and_fix_layout(
+    #     self,
+    #     simulator_code: str,
+    #     simulator_name: str,
+    #     simulator_description: str
+    # ) -> Dict[str, Any]:
+    #     """
+    #     审查模拟器布局并直接修改（已废弃）
+    #     """
+    #     pass

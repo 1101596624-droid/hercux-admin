@@ -84,7 +84,23 @@ class CourseGenerationService:
                 }
             }
 
-            outline = await self.supervisor.generate_outline(state, system_prompt)
+            # 【新增】加载处理器结构约束
+            processor_constraints = None
+            try:
+                from app.models.models import StudioProcessor
+                from sqlalchemy import select
+                result = await self.db.execute(
+                    select(StudioProcessor).where(StudioProcessor.id == processor_id)
+                )
+                processor = result.scalar_one_or_none()
+                if processor and processor.structure_constraints:
+                    processor_constraints = processor.structure_constraints
+                    logger.info(f"Loaded processor constraints: {processor_constraints}")
+            except Exception as e:
+                logger.error(f"Failed to load processor constraints: {e}")
+                raise
+
+            outline = await self.supervisor.generate_outline(state, system_prompt, processor_constraints)
 
             # === 新增：自动识别学科并记录到状态 ===
             classification = self.detect_course_subject(course_title, outline)
@@ -382,7 +398,7 @@ class CourseGenerationService:
             "order": chapter.order,
             "total_steps": chapter.total_steps,
             "rationale": chapter.rationale,
-            "script": [
+            "steps": [
                 {
                     "step_id": step.step_id,
                     "type": step.type,
@@ -404,7 +420,7 @@ class CourseGenerationService:
                     "diagram_spec": step.diagram_spec,
                     "ai_spec": step.ai_spec
                 }
-                for step in chapter.script
+                for step in chapter.steps
             ],
             "estimated_minutes": chapter.estimated_minutes,
             "learning_objectives": chapter.learning_objectives,
@@ -586,7 +602,7 @@ class CourseGenerationService:
         """处理章节中的所有图片"""
         lesson_title = chapter_dict.get("title", "")
 
-        for step in chapter_dict.get("script", []):
+        for step in chapter_dict.get("steps", []):
             step_type = step.get("type", "")
             if step_type == "illustrated_content":
                 await self._process_illustrated_content(step, course_title, lesson_title)
@@ -649,7 +665,7 @@ class CourseGenerationService:
                     logger.warning(f"[Step Check] Rationale too short ({len(chapter.rationale)} chars), retrying...")
 
         # 2. 生成每个步骤的内容
-        for i, step in enumerate(chapter.script):
+        for i, step in enumerate(chapter.steps):
             step_passed = False
             max_step_retries = 2
 
@@ -883,7 +899,7 @@ class CourseGenerationService:
         max_length: int
     ) -> str:
         """生成单个文本内容（增强版：注入学习上下文）"""
-        from app.services.claude_service import ClaudeService
+        from app.services.llm_factory import get_llm_service
         from app.services.learning import UnifiedTemplateService
 
         # === 学习上下文注入 (2026-02-11: Phase 3 Learning Integration) ===
@@ -1011,7 +1027,7 @@ class CourseGenerationService:
         prompt = prompts.get(content_type, prompts["step_body"])
 
         try:
-            claude_service = ClaudeService()
+            claude_service = get_llm_service()
             response = await claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
@@ -1029,7 +1045,7 @@ class CourseGenerationService:
         system_prompt: str
     ) -> Dict[str, Any]:
         """生成AI导师步骤内容"""
-        from app.services.claude_service import ClaudeService
+        from app.services.llm_factory import get_llm_service
         import json
 
         course_title = context.get('course_title', '')
@@ -1079,7 +1095,7 @@ class CourseGenerationService:
 - 请直接输出JSON，不要有其他内容"""
 
         try:
-            claude_service = ClaudeService()
+            claude_service = get_llm_service()
             response = await claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
@@ -1185,7 +1201,7 @@ class CourseGenerationService:
         # 是否使用递进式生成（新策略）
         use_progressive = True
 
-        for step_idx, step in enumerate(chapter.script):
+        for step_idx, step in enumerate(chapter.steps):
             if step.type == 'simulator' and step.simulator_spec:
                 code = step.simulator_spec.html_content or ""
                 code_lines = len([l for l in code.split('\n') if l.strip()])
@@ -1272,8 +1288,9 @@ class CourseGenerationService:
                                             f"{dynamic_save_threshold:.1f}, not saved as template"
                                         )
                                 else:
+                                    # 质量不合格，但保留代码
+                                    # 0分检查已移到generator规则检查中，这里只记录
                                     logger.warning(f"Simulator '{step.simulator_spec.name}' quality score: {quality_score.total_score}/100 - FAILED")
-                                    # 注意：质量不合格时，保留当前生成的代码（不使用fallback）
                                     logger.info(f"Using generated code despite low quality score")
 
                         except Exception as e:
@@ -1426,7 +1443,7 @@ class CourseGenerationService:
         # 检查是否已有 ai_tutor 步骤
         has_ai_tutor = False
         for chapter in state.completed_chapters:
-            for step in chapter.script:
+            for step in chapter.steps:
                 if step.type == 'ai_tutor':
                     has_ai_tutor = True
                     break
@@ -1444,7 +1461,7 @@ class CourseGenerationService:
         insert_index = None
 
         for chapter in state.completed_chapters:
-            for i, step in enumerate(chapter.script):
+            for i, step in enumerate(chapter.steps):
                 if step.type == 'assessment':
                     target_chapter = chapter
                     insert_index = i
@@ -1456,7 +1473,7 @@ class CourseGenerationService:
         if not target_chapter:
             target_chapter = state.completed_chapters[-1] if state.completed_chapters else None
             if target_chapter:
-                insert_index = len(target_chapter.script)
+                insert_index = len(target_chapter.steps)
 
         if not target_chapter:
             logger.warning("[PostProcess] No chapters available for ai_tutor injection")
@@ -1482,8 +1499,8 @@ class CourseGenerationService:
         )
 
         # 注入步骤
-        target_chapter.script.insert(insert_index, ai_tutor_step)
-        target_chapter.total_steps = len(target_chapter.script)
+        target_chapter.steps.insert(insert_index, ai_tutor_step)
+        target_chapter.total_steps = len(target_chapter.steps)
 
         logger.info(f"[PostProcess] Injected ai_tutor step into chapter '{target_chapter.title}' at position {insert_index}")
 
@@ -1639,7 +1656,7 @@ class CourseGenerationService:
                         # ... (旧代码已删除)
 
                 # 替换原步骤
-                chapter.script[step_index] = new_step
+                chapter.steps[step_index] = new_step
                 state.increment_step_retry(step_index)
                 fixed_steps.append(step_index)
 

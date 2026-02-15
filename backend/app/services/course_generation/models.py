@@ -35,7 +35,7 @@ class HTMLSimulatorQualityStandards:
 
     # === 代码质量标准 ===
     min_code_lines: int = 100                   # 最少代码行数（HTML格式较长）
-    max_code_lines: int = 1200                  # 最多代码行数
+    # max_code_lines 已移除 - 不限制代码上限,鼓励生成丰富内容
     must_have_html_structure: bool = True       # 必须有完整HTML结构
     must_have_doctype: bool = True              # 必须有 <!DOCTYPE html>
     must_have_canvas: bool = True               # 必须有 <canvas> 元素
@@ -243,8 +243,7 @@ class HTMLSimulatorSpec:
         code_lines = len([l for l in code.split('\n') if l.strip()])
         if code_lines < standards.min_code_lines:
             issues.append(f"代码太短，只有{code_lines}行，至少需要{standards.min_code_lines}行")
-        if code_lines > standards.max_code_lines:
-            issues.append(f"代码过长，有{code_lines}行，最多{standards.max_code_lines}行")
+        # 不再检查代码上限 - 鼓励生成丰富内容
 
         # 检查Canvas API使用
         canvas_api_count = code.count('ctx.')
@@ -299,6 +298,8 @@ class HTMLSimulatorSpec:
         - 教学分 (0-15): 概念演示、注释
 
         75分标准: 24个基础模板
+
+        ⚠️ 必要元素检查：缺少任何必要元素直接判0分
         """
         if standards is None:
             standards = HTMLSimulatorQualityStandards()
@@ -307,6 +308,32 @@ class HTMLSimulatorSpec:
         code = self.html_content
         lines = code.split('\n')
         non_empty_lines = [l for l in lines if l.strip()]
+
+        # ========== 必要元素检查 (2026-02-15) ==========
+        # 缺少任何必要元素直接判0分，强制重做
+        required_elements = {
+            'DOCTYPE声明': '<!DOCTYPE html>' in code.upper(),
+            'html标签': '<html' in code.lower(),
+            'head标签': '<head>' in code.lower(),
+            'body标签': '<body>' in code.lower(),
+            'canvas标签': '<canvas' in code.lower(),
+            'script标签': '<script>' in code.lower(),
+        }
+
+        missing_elements = [name for name, exists in required_elements.items() if not exists]
+
+        if missing_elements:
+            # 缺少必要元素，直接判0分
+            score.structure_score = 0
+            score.canvas_score = 0
+            score.visual_quality_score = 0
+            score.interaction_score = 0
+            score.educational_value_score = 0
+            score.total_score = 0
+            score.passed = False
+            score.issues.append(f"❌ 致命错误：缺少必要元素 {', '.join(missing_elements)}")
+            score.issues.append("⚠️ 必要元素缺失导致结构不完整，必须重新生成")
+            return score
 
         # ========== 结构分 (0-20) ==========
         structure = 0
@@ -342,13 +369,10 @@ class HTMLSimulatorSpec:
             'style': has_style, 'script': has_script, 'controls': has_controls
         }
 
-        # 4. 代码行数 (3分): 100-1200行
+        # 4. 代码行数 (3分): 最少100行,不限上限
         line_count = len(non_empty_lines)
         if line_count >= standards.min_code_lines:
-            if line_count <= standards.max_code_lines:
-                structure += 3
-            else:
-                structure += 2
+            structure += 3  # 满足最低要求即得满分
         structure_details['line_count'] = line_count
 
         score.structure_score = min(20, structure)
@@ -822,7 +846,7 @@ class ChapterResult:
     order: int
     total_steps: int
     rationale: str
-    script: List[ChapterStep]
+    steps: List[ChapterStep]  # 统一使用steps字段（课程标准2026-02-13）
     estimated_minutes: int
     learning_objectives: List[str]
     complexity_level: str
@@ -992,7 +1016,7 @@ class GenerationState:
 
         lines = []
         for ch in self.completed_chapters:
-            sim_count = sum(1 for s in ch.script if s.type == 'simulator')
+            sim_count = sum(1 for s in ch.steps if s.type == 'simulator')
             lines.append(f"  - 第{ch.order + 1}章：{ch.title}（{ch.total_steps}步，{sim_count}个模拟器）")
         return "\n".join(lines)
 
@@ -1002,7 +1026,7 @@ class GenerationState:
         self.covered_topics.append(chapter.title)
 
         # 提取模拟器
-        for step in chapter.script:
+        for step in chapter.steps:
             if step.type == 'simulator' and step.simulator_spec:
                 self.used_simulators.append(step.simulator_spec.name)
 

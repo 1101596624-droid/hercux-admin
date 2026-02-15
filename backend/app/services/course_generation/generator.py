@@ -8,7 +8,7 @@ import logging
 import re
 from typing import AsyncGenerator, Dict, Any, Optional, List
 
-from app.services.claude_service import ClaudeService
+from app.services.llm_factory import get_llm_service
 from .models import (
     GenerationState, ChapterResult, ChapterStep,
     ChapterOutline, CodeSyntaxError, SyntaxErrorType,
@@ -51,16 +51,7 @@ CANVAS_2D_PROPERTIES = [
 
 ANIMATION_APIS = ['requestAnimationFrame', 'cancelAnimationFrame']
 
-# 旧的ctx API白名单 (已废弃，仅用于检测和警告)
-DEPRECATED_CTX_APIS = [
-    'createCircle', 'createRect', 'createText', 'createLine',
-    'createCurve', 'createPolygon', 'setPosition', 'setScale',
-    'setRotation', 'setAlpha', 'setColor', 'setText', 'setVisible',
-    'remove', 'clear', 'setGlow', 'setCurvePoints', 'setRadius',
-    'setSize', 'getVar', 'setVar'
-]
-
-# 所有有效的API（新的Canvas 2D API）
+# 所有有效的API（Canvas 2D API）
 ALL_VALID_APIS = CANVAS_2D_DRAWING_APIS + CANVAS_2D_PROPERTIES + ANIMATION_APIS
 
 # 禁止使用的API（常见错误写法）
@@ -304,7 +295,7 @@ class ChapterGenerator:
     """
 
     def __init__(self, db=None):
-        self.claude_service = ClaudeService()
+        self.claude_service = get_llm_service()
         self.json_repair = JSONRepairTool()
         self.standards_loader = get_standards_loader()  # 新增：标准加载器
         self.db = db  # 数据库会话，用于模板学习
@@ -409,26 +400,71 @@ class ChapterGenerator:
             # ========== 监督者审核打分 ==========
             yield {"type": "progress", "round": round_num, "max_rounds": max_rounds,
                    "stage": "reviewing", "message": f"审核HTML模拟器代码 (第{round_num}轮)..."}
-            score, issues = self._supervisor_review(code)
-            logger.info(f"[Supervisor] Score: {score}/100, Issues: {len(issues)}")
+
+            # 1. 规则打分（80分）
+            rule_score, rule_issues = self._supervisor_review(code)
+
+            # 2. Agent打分（20分）
+            yield {"type": "progress", "round": round_num, "max_rounds": max_rounds,
+                   "stage": "agent_scoring", "message": f"Agent评估模拟器质量..."}
+            agent_score, agent_feedback = await self._agent_review(code, simulator_name, simulator_description)
+
+            # 3. 合并评分
+            total_score = rule_score + agent_score
+
+            # 4. AI监督者决策
+            yield {"type": "progress", "round": round_num, "max_rounds": max_rounds,
+                   "stage": "supervisor_decision", "message": f"AI监督者决策中..."}
+            decision, reason = await self._supervisor_decision(
+                code=code,
+                simulator_name=simulator_name,
+                rule_score=rule_score,
+                agent_score=agent_score,
+                agent_feedback=agent_feedback,
+                rule_issues=rule_issues,
+                round_num=round_num
+            )
+
+            logger.info(f"[Supervisor] Rule={rule_score}/60, Agent={agent_score}/40, Total={total_score}/100")
+            logger.info(f"[Supervisor] Decision={decision}, Reason={reason}")
 
             history.append({
                 'round': round_num,
-                'score': score,
-                'issues': issues,
+                'rule_score': rule_score,
+                'agent_score': agent_score,
+                'total_score': total_score,
+                'agent_feedback': agent_feedback,
+                'issues': rule_issues,
+                'decision': decision,
+                'decision_reason': reason,
                 'code_lines': len([l for l in code.split('\n') if l.strip()])
             })
 
-            if score > best_score:
-                best_score = score
+            if total_score > best_score:
+                best_score = total_score
                 best_code = code
 
-            if score >= 74:
-                logger.info(f"[Simulator Gen] Passed with score {score}/100")
-                yield {"type": "result", "code": self._auto_fix_colors(code), "score": score, "source": "generated"}
-                return
+            # AI监督者决策
+            if decision == 'accept':
+                logger.info(f"[Simulator Gen] Supervisor accepted with score {total_score}/100")
 
-            logger.warning(f"[Round {round_num}] Score {score}/100 < 74, issues: {issues}")
+                # 布局修复功能已删除（2026-02-15）
+                # 原因：布局修复会破坏代码结构（删除DOCTYPE等必要元素）
+                # 改为在生成提示词中要求AI直接生成符合规范的布局
+
+                yield {"type": "result", "code": self._auto_fix_colors(code), "score": total_score, "source": "generated"}
+                return
+            elif decision == 'reject' and round_num < max_rounds:
+                logger.warning(f"[Round {round_num}] Supervisor rejected (完全重做), reason: {reason}")
+                continue
+            elif decision == 'fix' and round_num < max_rounds:
+                logger.info(f"[Round {round_num}] Supervisor requested fix (在当前基础上修复), reason: {reason}")
+                # TODO: 实现基于当前代码的修复逻辑
+                # 当前先继续生成，后续可以添加修复提示词
+                continue
+            else:
+                # 最后一轮或其他情况
+                logger.warning(f"[Round {round_num}] Score {total_score}/100, decision={decision}")
 
         # 所有轮次结束
         if best_code and best_score >= 40:
@@ -516,13 +552,89 @@ class ChapterGenerator:
         if history:
             history_hint = "\n【之前的问题 - 必须避免】\n"
             for h in history:
-                history_hint += f"- 第{h['round']}轮 ({h['score']}分): {', '.join(h['issues'][:3])}\n"
+                history_hint += f"- 第{h['round']}轮 ({h['total_score']}分): {', '.join(h['issues'][:3])}\n"
 
         prompt = f"""生成完整HTML模拟器。只输出完整的HTML代码，不要任何markdown标记或解释。
 
 【模拟器】{simulator_name}
 【描述】{simulator_description}
-【画布尺寸】800×500（管理端预览），运行时CSS自适应
+【画布尺寸限制 - 严格遵守】
+- Canvas元素: <canvas id="canvas" width="1600" height="900"></canvas>
+- 画布总尺寸: 1600×900 (16:9标准比例)
+- 画布总面积: 1,440,000 平方像素
+
+【绘制安全区域 - 极其重要,必须严格遵守】
+
+⚠️ 图形元素安全区域 (圆形、矩形、线条、路径等):
+- X坐标范围: [300, 1300]  (左右各留300px边距)
+- Y坐标范围: [300, 600]   (上下各留300px边距)
+- 安全区域尺寸: 1000×300
+- 适用于: ctx.arc(), ctx.fillRect(), ctx.strokeRect(), ctx.lineTo(), ctx.moveTo(), ctx.bezierCurveTo() 等所有绘图操作
+
+⚠️ UI元素安全区域 (文字框、按钮、滑块、数值显示等):
+- X坐标范围: [100, 1500]  (左右各留100px边距)
+- Y坐标范围: [100, 800]   (上下各留100px边距)
+- 安全区域尺寸: 1400×700
+- 适用于: ctx.fillText(), ctx.strokeText(), HTML控件的绝对定位等
+
+⚠️ 推荐使用画布中心作为参考点:
+- 中心点: (800, 450)
+- 示例: 绘制中心圆形 → ctx.arc(800, 450, 150, 0, Math.PI*2)  // 半径150,在300px边距内
+- 示例: 右上角文字框 → position: absolute; top: 120px; right: 120px;  // 距离边缘至少100px
+
+【图形尺寸与布局约束 - 精致设计原则】
+
+⚠️ 单个图形元素尺寸限制 (极其重要):
+- 任何单个图形元素(圆形、矩形、多边形等)不得占据超过安全区域的40%
+- 图形安全区域: 1000×300 = 300,000 平方像素
+- 单个图形最大面积: 120,000 平方像素 (40%)
+- 示例限制:
+  * 圆形最大半径: √(120000/π) ≈ 195px
+  * 矩形最大尺寸: 400×300px 或 600×200px (面积≤120,000)
+  * 如果绘制单位圆等教学图形,半径建议≤180px,确保周围有足够空间放置标注和其他元素
+
+⚠️ 【新增】所有元素总面积限制 (2026-02-15):
+- 模拟器内所有可见元素(图形+UI控件+文字框)的面积总和不得超过画布面积的3/4
+- 画布面积: 1600×900 = 1,440,000 平方像素
+- 最大允许总面积: 1,080,000 平方像素 (75%)
+- 计算方法:
+  * 圆形面积 = π × r²
+  * 矩形面积 = 宽 × 高
+  * 文字框面积 = 宽 × 高 (估算)
+  * 控件面板面积 = 宽 × 高
+- 设计建议: 保持布局简洁,避免过度拥挤,留白空间有助于视觉清晰度
+
+⚠️ 布局与排版原则:
+- 主图形应居中或偏左,右侧留出空间放置信息面板/说明文字
+- 多个图形元素应合理分布,避免拥挤
+- 图形与文字标注之间保持至少30px间距
+- 坐标轴、网格线等辅助元素应清晰但不抢眼(线宽1-2px,中灰色)
+
+⚠️ 精致设计要求:
+- 图形边缘平滑,线条粗细适中(2-3px为主要元素,1px为辅助线)
+- 使用适当的阴影和渐变增强立体感(可选,不要过度)
+- 文字标注字号适中(14-18px),位置精确,不与图形重叠
+- 交互元素(拖动点、按钮)视觉明显,尺寸≥20px
+- 整体视觉平衡,留白充足,不要填满整个画布
+
+
+【配色原则 - 教学适用性】
+✅ 必须遵守:
+- 背景与前景对比度充足（文字清晰可读，对比度≥4.5:1）
+- 网格线/辅助线清晰可见（使用中灰色如 #64748B、#94A3B8，不要用浅灰 #E2E8F0）
+- 交互元素视觉明显（拖动手柄≥20px，按钮清晰，高对比度）
+- 整体协调专业，适合长时间学习
+
+✅ 推荐做法:
+- 根据学科选择合适配色（物理-蓝色，生物-绿色，化学-多彩，数学-对比色）
+- 使用2-3种主色，避免过多颜色造成混乱
+- 重点元素用对比色突出（如红色标注关键点）
+- 背景建议浅色（白色 #FFFFFF 或浅灰 #F8FAFC）
+
+❌ 禁止:
+- 极低对比度（浅灰on白色，如 #E2E8F0 on #FFFFFF）
+- 刺眼的高饱和度渐变（如紫红渐变）
+- 过暗的背景（深色背景影响阅读，除非特殊需要）
 {history_hint}
 {learning_context}
 
@@ -541,8 +653,8 @@ class ChapterGenerator:
         }}
         body {{
             font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
-            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
-            color: #F1F5F9;
+            background: #F8FAFC;
+            color: #334155;
             overflow: hidden;
             height: 100vh;
             display: flex;
@@ -552,16 +664,17 @@ class ChapterGenerator:
         }}
         #canvas {{
             display: block;
-            background: #0F172A;
+            background: #FFFFFF;
             border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }}
         .controls {{
             margin-top: 20px;
-            background: rgba(30, 41, 59, 0.95);
+            background: #FFFFFF;
             padding: 15px 25px;
             border-radius: 12px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(100, 116, 139, 0.3);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid #E2E8F0;
             display: flex;
             gap: 20px;
             align-items: center;
@@ -573,14 +686,14 @@ class ChapterGenerator:
         }}
         .control-group label {{
             font-size: 12px;
-            color: #CBD5E1;
+            color: #64748B;
             display: flex;
             justify-content: space-between;
             align-items: center;
             gap: 8px;
         }}
         .value-display {{
-            color: #60A5FA;
+            color: #2563EB;
             font-weight: 600;
             font-size: 14px;
         }}
@@ -594,16 +707,36 @@ class ChapterGenerator:
         }}
         input[type="range"]::-webkit-slider-thumb {{
             appearance: none;
-            width: 16px;
-            height: 16px;
-            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            width: 20px;
+            height: 20px;
+            background: #2563EB;
             border-radius: 50%%;
             cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }}
+        button {{
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #2563EB;
+            color: #FFFFFF;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s;
+        }}
+        button:hover {{
+            background: #1D4ED8;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }}
+        button:active {{
+            transform: translateY(1px);
         }}
     </style>
 </head>
 <body>
-    <canvas id="canvas" width="800" height="500"></canvas>
+    <canvas id="canvas" width="1600" height="900"></canvas>
     <div class="controls">
         <!-- 变量控制HTML将在这里生成 -->
     </div>
@@ -615,7 +748,8 @@ class ChapterGenerator:
         // 变量监听器将在这里生成
 
         function animate() {{
-            ctx.fillStyle = '#0F172A';
+            // 清屏 - 使用浅色背景
+            ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // 在这里实现可视化逻辑
@@ -670,38 +804,114 @@ class ChapterGenerator:
   ctx.rotate(angle)  // 弧度
   ctx.scale(sx, sy)
 
-【推荐配色方案】
-主色调: '#3B82F6', '#60A5FA', '#93C5FD'
-次色调: '#8B5CF6', '#A78BFA', '#C4B5FD'
-强调色: '#F59E0B', '#FBBF24', '#FCD34D'
-成功色: '#10B981', '#34D399', '#6EE7B7'
-警告色: '#EF4444', '#F87171', '#FCA5A5'
-文本色: '#F1F5F9', '#E2E8F0', '#CBD5E1', '#94A3B8'
-背景色: '#0F172A', '#1E293B', '#334155'
+【推荐配色方案 - 灵活选择】
+根据学科特点选择合适配色:
+
+物理/数学（理性学科）:
+  主色: '#2563EB', '#3B82F6', '#60A5FA' (蓝色系)
+  辅助: '#334155', '#64748B' (深灰)
+  强调: '#EF4444' (红色)
+
+生物/医学（生命学科）:
+  主色: '#10B981', '#34D399', '#6EE7B7' (绿色系)
+  辅助: '#334155', '#64748B' (深灰)
+  强调: '#EF4444' (红色)
+
+化学（多元素）:
+  多彩配色: '#3B82F6'(蓝), '#10B981'(绿), '#F59E0B'(橙), '#EF4444'(红)
+  用不同颜色区分不同元素/状态
+
+历史/地理（人文学科）:
+  主色: '#F59E0B', '#FBBF24' (橙黄色系)
+  辅助: '#334155', '#64748B' (深灰)
+  强调: '#EF4444' (红色)
+
+通用颜色:
+  文本色: '#0F172A', '#334155', '#64748B' (深色文字)
+  背景色: '#FFFFFF', '#F8FAFC', '#F1F5F9' (浅色背景)
+  网格/辅助线: '#94A3B8', '#64748B' (中灰色，清晰可见）
+  成功: '#10B981' | 警告: '#F59E0B' | 错误: '#EF4444'
 
 【核心要求】
 1. 完整HTML文档（DOCTYPE + head + body）
 2. 所有代码在单个文件中（self-contained）
 3. 使用Canvas 2D API绘制（不使用外部库）
 4. 使用requestAnimationFrame动画循环
-5. 至少2个input range控件
+5. 至少2个交互元素（滑块/按钮/拖动），必须视觉明显:
+   - 滑块手柄≥20px
+   - 按钮清晰可见，有hover效果
+   - 拖动手柄用圆形标识，直径≥24px
+   - 所有交互元素必须有清晰的视觉反馈
 6. 实时显示数值变化
-7. 画布尺寸：width="800" height="500"
-8. 配色协调美观
+7. 画布尺寸：width="1600" height="900" (16:9标准比例,严格遵守,不可超出)
+8. 配色协调美观，对比度充足
 9. 代码清晰注释适当
 
 【禁止项】
 ❌ 外部库（Three.js, D3.js等）
+❌ 外部CSS文件（<link rel="stylesheet">标签）
+❌ 外部字体文件（Google Fonts, fonts.font.im等,禁止<link>加载字体）
+❌ 外部JavaScript文件（<script src="">标签）
+❌ 所有CSS必须在<style>标签内，所有JS必须在<script>标签内
+❌ 只使用系统字体: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif
 ❌ eval(), Function(), setTimeout
 ❌ fetch(), XMLHttpRequest, localStorage
 ❌ 不要markdown代码块标记（```html等）
 ❌ 不要任何解释文字
 
 【质量标准】
-- 视觉吸引力：发光效果、渐变、阴影
-- 交互性：至少2个可调参数实时响应
-- 教育性：清晰展示概念计算准确
-- 代码质量：结构清晰注释适当
+- 视觉清晰：配色协调、对比度充足（≥4.5:1）、网格线清晰可见
+- 交互性：至少2个交互元素，视觉明显（大尺寸、高对比），实时响应
+- 教育性：清晰展示概念，计算准确
+- 代码质量：结构清晰，注释适当
+
+【严格输出格式要求】（任务#7增强）
+❌ 禁止：
+- 不要输出 ``` 或 ```html 标记
+- 不要输出任何解释文字
+- 不要输出"这是一个HTML模拟器"等说明
+- 不要输出JSON格式
+- 不要输出多个HTML文件选项
+
+✅ 必须：
+- 直接以 <!DOCTYPE html> 开头
+- 以 </html> 结尾
+- 完整的单个HTML文件
+- 所有CSS在<style>标签中
+- 所有JavaScript在<script>标签中
+
+【输出格式示例】
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{simulator_name}</title>
+    <style>
+        /* CSS样式 */
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="1600" height="900"></canvas>
+    <div class="controls">
+        <!-- 交互控件 -->
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        function animate() {{
+            // 清屏
+            ctx.fillStyle = '#0F172A';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 绘制内容
+
+            requestAnimationFrame(animate);
+        }}
+        animate();
+    </script>
+</body>
+</html>
 
 【学习参考】
 系统已导入24个标准HTML模拟器模板（质量分75分）供学习：
@@ -761,13 +971,13 @@ class ChapterGenerator:
                 return 'regenerate'
 
         # 分数太低 → 重做
-        if last['score'] < 50:
+        if last['total_score'] < 50:
             return 'regenerate'
 
         # 连续两轮但分数没有提升 → 重做
         if len(history) >= 2:
             prev = history[-2]
-            if last['score'] <= prev['score']:
+            if last['total_score'] <= prev['total_score']:
                 return 'regenerate'
 
         # 表面问题（颜色、文本显示不足）→ 修改
@@ -779,21 +989,126 @@ class ChapterGenerator:
         code: str,
         issues: List[str],
         simulator_name: str,
-        system_prompt: str
+        system_prompt: str,
+        similar_failures: Optional[List[Dict]] = None
     ) -> Optional[str]:
-        """生产者：修复现有代码"""
+        """
+        生产者：修复现有代码（任务#7增强）
+
+        增强功能：
+        - 问题分类（critical/major/minor）
+        - 检索相似失败案例
+        - 定制化修复prompt
+        - Agent反馈集成
+        """
         if not code:
             return None
 
-        prompt = f"""修复以下HTML代码的问题。只输出修复后的完整HTML代码。
+        # 1. 问题分类
+        issue_category = self._classify_issues(issues)
 
-【原代码】
-{code}
+        # 2. 检索相似失败案例（如果提供）
+        pattern_solutions = []
+        if similar_failures:
+            pattern_solutions = self._extract_pattern_solutions(similar_failures)
 
-【需要修复的问题】
-{chr(10).join([f"- {issue}" for issue in issues])}
+        # 3. 构建定制化修复prompt
+        prompt = self._build_fix_prompt(
+            code=code,
+            issues=issues,
+            issue_category=issue_category,
+            simulator_name=simulator_name,
+            pattern_solutions=pattern_solutions
+        )
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=6000
+            )
+            return self._clean_simulator_code(response)
+        except Exception as e:
+            logger.error(f"[Producer] Fix error: {e}")
+            return None
+
+    def _classify_issues(self, issues: List[str]) -> str:
+        """
+        问题分类（任务#7新增）
+
+        Returns:
+            'critical' | 'major' | 'minor'
+        """
+        critical_keywords = ['缺少完整HTML结构', '缺少canvas元素', '缺少script脚本',
+                            '致命语法错误', '代码严重不足', '括号错误']
+
+        major_keywords = ['缺少Canvas绘图调用', '缺少动画循环', '缺少交互控件',
+                         '代码太短', '缺少事件监听器']
+
+        critical_count = sum(1 for issue in issues if any(kw in issue for kw in critical_keywords))
+        major_count = sum(1 for issue in issues if any(kw in issue for kw in major_keywords))
+
+        if critical_count > 0:
+            return 'critical'
+        elif major_count >= 2:
+            return 'major'
+        else:
+            return 'minor'
+
+    def _extract_pattern_solutions(self, similar_failures: List[Dict]) -> List[str]:
+        """
+        从相似失败案例中提取解决方案（任务#7新增）
+
+        Args:
+            similar_failures: [{'issue': str, 'solution': str, 'success_rate': float}]
+
+        Returns:
+            解决方案列表
+        """
+        solutions = []
+        for failure in similar_failures:
+            if failure.get('success_rate', 0) >= 0.7:  # 只使用成功率>=70%的方案
+                solutions.append(failure.get('solution', ''))
+
+        return solutions[:3]  # 最多返回3个方案
+
+    def _build_fix_prompt(
+        self,
+        code: str,
+        issues: List[str],
+        issue_category: str,
+        simulator_name: str,
+        pattern_solutions: List[str]
+    ) -> str:
+        """
+        构建定制化修复prompt（任务#7新增）
+
+        根据问题严重程度和已知解决方案构建不同的prompt
+        """
+        # 格式化问题列表
+        issues_text = self._format_issues(issues)
+
+        # 格式化解决方案
+        solutions_text = self._format_pattern_solutions(pattern_solutions)
+
+        # 根据问题严重程度选择修复策略
+        fix_strategy = self._suggest_fix_strategy(issue_category)
+
+        # 增强：严格输出要求和格式示例（任务#7缺陷4）
+        prompt = f"""修复以下HTML模拟器代码。只输出修复后的完整HTML代码，不要任何解释。
 
 【模拟器】{simulator_name}
+
+【原代码】
+{code[:2000]}{"..." if len(code) > 2000 else ""}
+
+【需要修复的问题】（严重程度：{issue_category}）
+{issues_text}
+
+{solutions_text}
+
+【修复策略】
+{fix_strategy}
 
 【修复要求】
 1. 保持完整的HTML结构（<!DOCTYPE html>...）
@@ -809,161 +1124,710 @@ class ChapterGenerator:
 - 保持动画的流畅性
 - 如果有语法错误，修正但保持原有逻辑
 - 如果有"重复声明变量"错误，删除重复的声明
-- 如果有"中文标点"错误，将代码中的中文标点替换为英文标点（字符串和注释中的中文可以保留）
+- 如果有"中文标点"错误，将代码中的中文标点替换为英文标点
 
-【严格要求】
-- 直接输出完整HTML代码
-- 不要 ``` 标记
-- 不要解释
-- 必须以 <!DOCTYPE html> 开头"""
+【严格输出格式要求】
+❌ 禁止：
+- 不要输出 ``` 或 ```html 标记
+- 不要输出任何解释文字
+- 不要输出"这是修复后的代码"等说明
+
+✅ 必须：
+- 直接以 <!DOCTYPE html> 开头
+- 以 </html> 结尾
+- 完整的单个HTML文件
+
+【输出示例格式】
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{simulator_name}</title>
+    <style>
+        /* CSS样式 */
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="1600" height="900"></canvas>
+    <script>
+        // JavaScript代码
+    </script>
+</body>
+</html>
+
+现在请直接输出修复后的完整HTML代码："""
+
+        return prompt
+
+    def _format_issues(self, issues: List[str]) -> str:
+        """格式化问题列表"""
+        if not issues:
+            return "  无"
+        return '\n'.join([f"  - {issue}" for issue in issues])
+
+    def _format_pattern_solutions(self, pattern_solutions: List[str]) -> str:
+        """格式化解决方案"""
+        if not pattern_solutions:
+            return ""
+
+        solutions_text = "\n【已知有效解决方案】\n"
+        for i, solution in enumerate(pattern_solutions, 1):
+            solutions_text += f"{i}. {solution}\n"
+
+        return solutions_text
+
+    def _suggest_fix_strategy(self, issue_category: str) -> str:
+        """根据问题严重程度建议修复策略"""
+        strategies = {
+            'critical': """
+【关键修复策略】
+- 问题严重，需要重点检查代码结构
+- 确保HTML文档结构完整（DOCTYPE, html, head, body）
+- 确保canvas元素和script标签存在
+- 修复所有致命语法错误（括号匹配、变量声明等）
+- 代码至少40行以上
+            """,
+            'major': """
+【主要修复策略】
+- 问题较多，需要增强功能完整性
+- 添加足够的Canvas绘图调用（至少8个）
+- 实现requestAnimationFrame动画循环
+- 添加交互控件（input range）和事件监听
+- 增加代码量到60行以上
+            """,
+            'minor': """
+【次要修复策略】
+- 问题较少，进行细节优化
+- 优化颜色对比度（使用亮色）
+- 完善数学运算逻辑
+- 优化动画清屏操作
+- 改进代码注释和格式
+            """
+        }
+
+        return strategies.get(issue_category, strategies['major'])
+
+    async def generate_step_with_learning(
+        self,
+        step_type: str,
+        step_context: Dict[str, Any],
+        subject: str,
+        topic: str,
+        system_prompt: str
+    ) -> tuple:
+        """
+        集成学习检索的步骤生成（任务#10）
+
+        流程：
+        1. 检索相似模式 → 注入prompt → 生成内容 → 评分 → 记录应用
+
+        Args:
+            step_type: 步骤类型 ('text_content', 'illustrated_content', 'assessment', 'ai_tutor', 'simulator')
+            step_context: 步骤上下文信息（title, content_summary, learning_objectives等）
+            subject: 学科
+            topic: 主题
+            system_prompt: 系统提示词
+
+        Returns:
+            (content: str, quality_score: float, agent_feedback: str)
+        """
+        if not self.db:
+            logger.warning("[generate_step_with_learning] No database session, skipping learning retrieval")
+            return await self._generate_step_without_learning(step_type, step_context, system_prompt)
 
         try:
-            response = await self.claude_service.generate_raw_response(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                max_tokens=6000
+            from app.services.learning.template_service import UnifiedTemplateService
+
+            template_service = UnifiedTemplateService(self.db)
+
+            # 1. 检索相似模式
+            query_text = f"{step_context.get('title', '')} {step_context.get('content_summary', '')}"
+            similar_patterns = await template_service.get_similar_patterns_by_vector(
+                query_text=query_text,
+                step_type=step_type,
+                subject=subject,
+                min_confidence=0.7,
+                limit=3
             )
-            return self._clean_simulator_code(response)
+
+            logger.info(f"[Learning] Found {len(similar_patterns)} similar patterns for {step_type}")
+
+            # 2. 构建增强的prompt
+            enhanced_prompt = self._build_prompt_with_patterns(
+                step_type=step_type,
+                step_context=step_context,
+                patterns=similar_patterns
+            )
+
+            # 3. 生成内容
+            response = await self.claude_service.generate_raw_response(
+                prompt=enhanced_prompt,
+                system_prompt=system_prompt,
+                max_tokens=4000
+            )
+
+            # 4. 清理和解析内容
+            if step_type == 'simulator':
+                content = self._clean_simulator_code(response)
+            else:
+                content = response
+
+            # 5. Agent评分
+            agent_score, agent_feedback = await self._evaluate_step_quality(
+                step_type=step_type,
+                content=content,
+                step_context=step_context
+            )
+
+            # 6. 记录模式应用
+            for pattern in similar_patterns:
+                await template_service.record_pattern_application(
+                    pattern_id=pattern.id,
+                    step_type=step_type,
+                    subject=subject,
+                    topic=topic,
+                    original_input=step_context,
+                    applied_strategy=pattern.strategy,
+                    result_quality=agent_score,
+                    success=agent_score >= 24  # 40分满分，24分及以上算成功（60%通过率）
+                )
+
+            logger.info(f"[Learning] Generated {step_type} with quality score {agent_score}/20")
+            return content, agent_score, agent_feedback
+
         except Exception as e:
-            logger.error(f"[Producer] Fix error: {e}")
-            return None
+            logger.error(f"[Learning] Error in generate_step_with_learning: {e}")
+            # 降级到无学习增强的生成
+            return await self._generate_step_without_learning(step_type, step_context, system_prompt)
+
+    async def _generate_step_without_learning(
+        self,
+        step_type: str,
+        step_context: Dict[str, Any],
+        system_prompt: str
+    ) -> tuple:
+        """无学习增强的基础生成（fallback）"""
+        # 构建基础prompt
+        basic_prompt = self._build_basic_prompt(step_type, step_context)
+
+        # 生成内容
+        response = await self.claude_service.generate_raw_response(
+            prompt=basic_prompt,
+            system_prompt=system_prompt,
+            max_tokens=4000
+        )
+
+        # 清理内容
+        if step_type == 'simulator':
+            content = self._clean_simulator_code(response)
+        else:
+            content = response
+
+        # 基础评分（不使用Agent）
+        return content, 12.0, "基础生成，未使用学习增强"
+
+    def _build_prompt_with_patterns(
+        self,
+        step_type: str,
+        step_context: Dict[str, Any],
+        patterns: List[Any]
+    ) -> str:
+        """
+        构建包含学习模式的增强prompt（任务#10）
+
+        Args:
+            step_type: 步骤类型
+            step_context: 步骤上下文
+            patterns: 相似模式列表（GenerationPattern对象）
+
+        Returns:
+            增强的prompt字符串
+        """
+        # 基础prompt
+        base_prompt = self._build_basic_prompt(step_type, step_context)
+
+        # 如果没有模式，返回基础prompt
+        if not patterns:
+            return base_prompt
+
+        # 构建学习模式部分
+        learning_section = "\n\n【学习参考 - 成功模式】\n"
+        learning_section += "系统已从历史高质量内容中提取了以下成功模式，请参考应用：\n\n"
+
+        for i, pattern in enumerate(patterns, 1):
+            learning_section += f"{i}. {pattern.pattern_name}\n"
+            learning_section += f"   类型：{pattern.pattern_type}\n"
+            learning_section += f"   策略：{pattern.strategy}\n"
+            if pattern.example_data:
+                learning_section += f"   示例：{str(pattern.example_data)[:200]}...\n"
+            learning_section += f"   成功率：{pattern.success_count}/{pattern.application_count} ({pattern.confidence*100:.1f}%)\n\n"
+
+        # 将学习部分插入到基础prompt中
+        enhanced_prompt = base_prompt + learning_section
+
+        return enhanced_prompt
+
+    def _build_basic_prompt(
+        self,
+        step_type: str,
+        step_context: Dict[str, Any]
+    ) -> str:
+        """
+        构建基础prompt（无学习增强）
+
+        Args:
+            step_type: 步骤类型
+            step_context: 步骤上下文
+
+        Returns:
+            基础prompt字符串
+        """
+        title = step_context.get('title', '')
+        content_summary = step_context.get('content_summary', '')
+        learning_objectives = step_context.get('learning_objectives', [])
+        objectives_text = "\n".join([f"  - {obj}" for obj in learning_objectives]) if learning_objectives else "  未提供"
+
+        if step_type == 'text_content':
+            return f"""生成高质量教学文本内容。
+
+【内容信息】
+标题：{title}
+内容摘要：{content_summary}
+学习目标：
+{objectives_text}
+
+【要求】
+1. 内容深度足够（至少300字）
+2. 逻辑清晰，层次分明
+3. 使用专业术语但要有解释
+4. 结合实例说明抽象概念
+
+请直接输出文本内容，不要额外解释。"""
+
+        elif step_type == 'illustrated_content':
+            return f"""生成图文配合的教学内容。
+
+【内容信息】
+标题：{title}
+内容摘要：{content_summary}
+学习目标：
+{objectives_text}
+
+【要求】
+1. 文字说明清晰（200-400字）
+2. 图片描述详细（包括元素、标注、颜色等）
+3. 图文紧密配合，互补增强
+
+请输出JSON格式：
+{{
+    "text_content": "文字说明...",
+    "diagram_description": "图片详细描述..."
+}}"""
+
+        elif step_type == 'assessment':
+            return f"""生成高质量测验题目。
+
+【测验信息】
+标题：{title}
+内容摘要：{content_summary}
+学习目标：
+{objectives_text}
+
+【要求】
+1. 题目数量：3-5道单选题
+2. 难度适中，题干清晰
+3. 选项设计合理，干扰项有意义
+4. 解析详细清晰
+
+请输出JSON格式的题目列表。"""
+
+        elif step_type == 'ai_tutor':
+            return f"""生成AI导师对话内容。
+
+【导师信息】
+标题：{title}
+内容摘要：{content_summary}
+学习目标：
+{objectives_text}
+
+【要求】
+1. 初始引导语友好清晰
+2. 预设5-8个引导性问题
+3. 循序渐进，启发思考
+4. 避免直接给答案
+
+请输出JSON格式的AI导师配置。"""
+
+        elif step_type == 'simulator':
+            return f"""生成完整HTML模拟器。
+
+【模拟器信息】
+标题：{title}
+描述：{content_summary}
+学习目标：
+{objectives_text}
+
+【要求】
+1. 完整HTML文档（<!DOCTYPE html>...）
+2. 使用Canvas 2D API绘制
+3. 至少2个交互控件
+4. 动画流畅，代码清晰
+
+只输出完整HTML代码，不要markdown标记。"""
+
+        else:
+            return f"""生成{step_type}类型的内容。
+
+【内容信息】
+标题：{title}
+描述：{content_summary}
+学习目标：
+{objectives_text}
+
+请生成高质量的教学内容。"""
+
+    async def _evaluate_step_quality(
+        self,
+        step_type: str,
+        content: str,
+        step_context: Dict[str, Any]
+    ) -> tuple:
+        """
+        评估步骤内容质量
+
+        Args:
+            step_type: 步骤类型
+            content: 生成的内容
+            step_context: 步骤上下文
+
+        Returns:
+            (agent_score: float, feedback: str)
+        """
+        try:
+            if step_type == 'text_content':
+                return await self._agent_review_text_content(
+                    content=content,
+                    title=step_context.get('title', ''),
+                    learning_objectives=step_context.get('learning_objectives', [])
+                )
+
+            elif step_type == 'assessment':
+                # 需要解析questions
+                import json
+                try:
+                    data = json.loads(content)
+                    questions = data.get('questions', [])
+                except:
+                    questions = []
+
+                return await self._agent_review_assessment(
+                    questions=questions,
+                    title=step_context.get('title', ''),
+                    learning_objectives=step_context.get('learning_objectives', [])
+                )
+
+            elif step_type == 'illustrated_content':
+                # 需要解析diagram_description
+                import json
+                try:
+                    data = json.loads(content)
+                    text_content = data.get('text_content', '')
+                    diagram_desc = data.get('diagram_description', '')
+                except:
+                    text_content = content[:1000]
+                    diagram_desc = '图片描述'
+
+                return await self._agent_review_illustrated_content(
+                    content=text_content,
+                    diagram_description=diagram_desc,
+                    title=step_context.get('title', ''),
+                    learning_objectives=step_context.get('learning_objectives', [])
+                )
+
+            elif step_type == 'ai_tutor':
+                # 需要解析initial_prompt和questions
+                import json
+                try:
+                    data = json.loads(content)
+                    initial_prompt = data.get('initial_prompt', '')
+                    question_patterns = data.get('question_patterns', [])
+                except:
+                    initial_prompt = content[:500]
+                    question_patterns = []
+
+                return await self._agent_review_ai_tutor(
+                    initial_prompt=initial_prompt,
+                    question_patterns=question_patterns,
+                    title=step_context.get('title', ''),
+                    learning_objectives=step_context.get('learning_objectives', [])
+                )
+
+            elif step_type == 'simulator':
+                return await self._agent_review(
+                    code=content,
+                    simulator_name=step_context.get('title', ''),
+                    simulator_description=step_context.get('content_summary', '')
+                )
+
+            else:
+                return 12.0, f"未知步骤类型: {step_type}"
+
+        except Exception as e:
+            logger.error(f"[Evaluate] Error evaluating {step_type}: {e}")
+            return 12.0, f"评估异常: {str(e)}"
 
     def _supervisor_review(self, code: str) -> tuple:
         """
-        监督者：审核代码并打分
+        监督者：审核代码并打分（任务#6增强）
 
-        评分标准（满分100）：
-        - 可运行性: 30分（HTML结构、脚本正确）
-        - 内容完整: 30分（视觉元素、交互功能）
-        - 表达深度: 20分（代码行数、元素丰富度）
-        - 渲染质量: 20分（颜色正确、动画效果）
+        评分标准（满分80，Agent占20）：
+        - 可运行性: 30分（HTML结构、脚本正确、语法验证）
+        - 内容完整: 30分（视觉元素、交互功能、Canvas API检测）
+        - 表达深度: 10分（代码行数、元素丰富度）
+        - 渲染质量: 10分（颜色对比、动画循环、交互响应）
+
+        硬性规则（0分，强制重新生成）：
+        - 画布尺寸超出1600×900
+        - 交互元素少于2个
 
         Returns:
             (score, issues)
         """
-        score = 100
+        score = 60  # 从60分开始（Agent评分占40分，2026-02-15调整）
         issues = []
 
+        # ========== 硬性规则检查 (违反=0分) ==========
+
+        # 0. 必要元素检查（2026-02-15新增）
+        required_elements = {
+            'DOCTYPE': '<!DOCTYPE html>' in code.upper(),
+            'html标签': '<html' in code.lower(),
+            'head标签': '<head>' in code.lower(),
+            'body标签': '<body>' in code.lower(),
+            'canvas标签': '<canvas' in code.lower(),
+            'script标签': '<script>' in code.lower() or '<script ' in code.lower(),
+        }
+
+        missing_elements = [name for name, exists in required_elements.items() if not exists]
+        if missing_elements:
+            return 0, [f"❌ 致命错误：缺少必要元素 {', '.join(missing_elements)}"]
+
+        # 1. 画布尺寸检查
+        canvas_size_valid, canvas_issues = self._check_canvas_size(code)
+        if not canvas_size_valid:
+            return 0, canvas_issues
+
+        # 2. 交互元素数量检查
+        interaction_count_valid, interaction_issues = self._check_interaction_count(code)
+        if not interaction_count_valid:
+            return 0, interaction_issues
+
+        # ========== 常规评分 ==========
+
         # === 可运行性 (30分) ===
-        # 检查HTML结构
+        # 检查HTML结构（已在必要元素检查中处理，这里不再扣分）
         has_html_tag = '<!DOCTYPE html>' in code and '<html' in code
         has_canvas = '<canvas' in code
         has_script = '<script>' in code or '<script ' in code
 
-        if not has_html_tag:
-            score -= 20
-            issues.append("缺少完整HTML结构(<!DOCTYPE html>)")
-        if not has_canvas:
+        # Canvas API使用检测（任务#6新增）
+        canvas_api_usage = self._detect_canvas_api_usage(code)
+        if not canvas_api_usage['has_drawing_calls']:
             score -= 10
-            issues.append("缺少canvas元素")
-        if not has_script:
-            score -= 10
-            issues.append("缺少script脚本")
-
-        # 对于HTML格式，不检查ctx API，因为使用的是Canvas 2D原生API
-        # api_valid, _, invalid_apis = self._validate_api_usage(code)
-        # if not api_valid:
-        #     score -= 15
-        #     issues.append(f"无效API: {', '.join(invalid_apis[:3])}")
+            issues.append("缺少Canvas绘图调用（fillRect/arc/beginPath等）")
 
         # 语法验证（重复声明、中文标点等致命问题）
         syntax_valid, syntax_error = self._validate_js_syntax_detailed(code)
         if not syntax_valid and syntax_error:
             if syntax_error.error_type in (SyntaxErrorType.DUPLICATE_DECLARATION, SyntaxErrorType.CHINESE_PUNCTUATION):
-                score -= 25
+                score -= 20
                 issues.append(f"致命语法错误: {syntax_error.message}")
             elif syntax_error.error_type in (SyntaxErrorType.UNCLOSED_BRACKET, SyntaxErrorType.MISMATCHED_BRACKET):
-                score -= 20
+                score -= 15
                 issues.append(f"括号错误: {syntax_error.message}")
 
-        # 检查 API 参数格式是否正确
-        import re
-        # HTML Canvas 2D API使用原生方法，不需要检查ctx.create*参数
-        param_issues = []
-
-        # HTML使用原生Math对象，不需要检查
-        # global_math_calls = re.findall(r'(?<!\w)Math\.(floor|ceil|round|sin|cos|tan|abs|sqrt|pow|min|max|random|PI)\b', code)
-        # if global_math_calls:
-        #     unique_calls = list(set(global_math_calls))[:3]
-        #     param_issues.append(f"使用了全局Math而非math: Math.{', Math.'.join(unique_calls)}")
-
-        if param_issues:
-            score -= 10
-            issues.extend(param_issues)
-
-        # HTML Canvas 2D API不需要检查ctx.create*的参数数量
-        # 因为使用的是原生Canvas API (fillRect, arc, etc.)
-
         # === 内容完整 (30分) ===
-        # HTML模拟器不需要检查变量读取，因为交互控件直接在HTML中实现
-
         # 检查是否有文本显示元素
         has_text_display = bool(re.search(r'<(span|div|p)[^>]*id=["\'][^"\']+["\'][^>]*>', code))
         if not has_text_display:
-            score -= 10
+            score -= 8
             issues.append("缺少文本显示元素")
-
-
-        # === 表达深度 (20分) ===
-        code_lines = len([l for l in code.split('\n') if l.strip()])
-        if code_lines < 20:
-            # 代码太短，不可能是完整模拟器，直接判0分
-            return 0, [f"代码严重不足: {code_lines}行(需20+)"]
-        elif code_lines < 30:
-            score -= 20
-            issues.append(f"代码太短: {code_lines}行(需30+)")
-        elif code_lines < 50:
-            score -= 10
-            issues.append(f"代码偏短: {code_lines}行(建议50+)")
-
-        # 代码过长扣分
-        if code_lines > 200:
-            score -= 10
-            issues.append(f"代码过长: {code_lines}行(建议200行以内)")
-
-        # 检查元素丰富度 (HTML中的Canvas绘图调用)
-        canvas_draw_count = len(re.findall(r'\b(fillRect|strokeRect|arc|fillText|beginPath|lineTo|moveTo)\b', code))
-        if canvas_draw_count < 5:
-            score -= 10
-            issues.append(f"Canvas绘图元素太少: {canvas_draw_count}个(建议5+)")
-
-        # === 提取 script 代码段 ===
-        script_section = ''
-        if '<script>' in code:
-            script_matches = re.findall(r'<script[^>]*>(.*?)</script>', code, re.DOTALL)
-            if script_matches:
-                script_section = script_matches[0]
-
-        # === 渲染质量 (20分) ===
-        color_valid, _, dark_colors = self._validate_color_contrast(code)
-        if not color_valid:
-            score -= 5
-            issues.append(f"深色: {', '.join(dark_colors[:3])}")
-
-        # 检查动画逻辑 (requestAnimationFrame)
-        has_animation = 'requestAnimationFrame' in code
-        has_math = bool(re.search(r'Math\.(sin|cos|PI|abs|sqrt|pow)', code))
-
-        if not has_animation:
-            score -= 5
-            issues.append("缺少动画循环(requestAnimationFrame)")
-        if not has_math:
-            score -= 3
-            issues.append("缺少数学运算(Math.sin/cos等)")
 
         # 检查交互控件
         has_controls = bool(re.search(r'<input[^>]*type=["\']range["\']', code))
         if not has_controls:
-            score -= 5
+            score -= 8
             issues.append("缺少交互控件(range input)")
+
+        # 交互响应检测（任务#6新增）
+        has_event_listeners = self._detect_interaction_response(code)
+        if not has_event_listeners:
+            score -= 7
+            issues.append("缺少交互事件监听器（addEventListener）")
+
+        # === 表达深度 (10分) ===
+        code_lines = len([l for l in code.split('\n') if l.strip()])
+        if code_lines < 30:
+            # 代码太短，降低严厉度（任务#6：30→40行）
+            return 0, [f"代码严重不足: {code_lines}行(需30+)"]
+        elif code_lines < 40:
+            score -= 8
+            issues.append(f"代码太短: {code_lines}行(建议40+)")
+        elif code_lines < 60:
+            score -= 4
+            issues.append(f"代码偏短: {code_lines}行(建议60+)")
+
+        # 检查元素丰富度
+        if not canvas_api_usage['is_rich']:
+            score -= 5
+            issues.append(f"Canvas绘图元素较少: {canvas_api_usage['draw_count']}个(建议8+)")
+
+        # === 渲染质量 (10分) ===
+        color_valid, _, dark_colors = self._validate_color_contrast(code)
+        if not color_valid:
+            score -= 3
+            issues.append(f"深色: {', '.join(dark_colors[:3])}")
+
+        # 动画循环检测（任务#6增强）
+        animation_check = self._detect_animation_loop(code)
+        if not animation_check['has_raf']:
+            score -= 3
+            issues.append("缺少动画循环(requestAnimationFrame)")
+        elif not animation_check['has_clear']:
+            score -= 1
+            issues.append("动画循环中缺少清屏操作")
+
+        has_math = bool(re.search(r'Math\.(sin|cos|PI|abs|sqrt|pow)', code))
+        if not has_math:
+            score -= 2
+            issues.append("缺少数学运算(Math.sin/cos等)")
 
         # 检查是否使用了 emoji 或 Unicode 特殊字符代替图形
         emoji_pattern = re.findall(r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0001FA00-\U0001FA6F]', code)
         if emoji_pattern:
-            score -= 10
+            score -= 5
             issues.append("使用了emoji/Unicode特殊字符，应使用Canvas 2D API绘制")
 
         return max(0, score), issues
+
+    def _check_canvas_size(self, code: str) -> tuple:
+        """
+        硬性规则：检查画布尺寸是否符合要求（1600×900）
+
+        检查项：
+        1. canvas标签的width和height属性
+        2. 所有绘图坐标是否在画布范围内
+
+        Returns:
+            (is_valid: bool, issues: list)
+        """
+        import re
+
+        issues = []
+
+        # 1. 检查canvas标签尺寸
+        canvas_match = re.search(r'<canvas[^>]*width\s*=\s*["\']?(\d+)["\']?[^>]*height\s*=\s*["\']?(\d+)["\']?', code)
+        if not canvas_match:
+            canvas_match = re.search(r'<canvas[^>]*height\s*=\s*["\']?(\d+)["\']?[^>]*width\s*=\s*["\']?(\d+)["\']?', code)
+            if canvas_match:
+                width, height = int(canvas_match.group(2)), int(canvas_match.group(1))
+            else:
+                issues.append("【硬性规则违反】无法检测到canvas标签的width和height属性")
+                return False, issues
+        else:
+            width, height = int(canvas_match.group(1)), int(canvas_match.group(2))
+
+        if width != 1600 or height != 900:
+            issues.append(f"【硬性规则违反】画布尺寸错误: {width}×{height}，要求1600×900")
+            return False, issues
+
+        # 注意: 坐标范围检查已移除,因为无法可靠检测变量坐标
+        # 改为在prompt中强调坐标必须在画布范围内
+        return True, []
+
+    def _check_interaction_count(self, code: str) -> tuple:
+        """
+        硬性规则：检查交互元素数量（至少2个）
+
+        检查项：
+        1. addEventListener调用
+        2. on*事件属性（onclick, onmousemove等）
+
+        Returns:
+            (is_valid: bool, issues: list)
+        """
+        import re
+
+        issues = []
+        interaction_count = 0
+
+        # 1. 统计addEventListener
+        event_listeners = re.findall(r'addEventListener\s*\(\s*["\'](\w+)["\']', code)
+        interaction_count += len(event_listeners)
+
+        # 2. 统计on*事件属性
+        inline_events = re.findall(r'\bon(click|mousemove|mousedown|mouseup|keydown|keyup|touchstart|touchend|touchmove)\s*=', code, re.IGNORECASE)
+        interaction_count += len(inline_events)
+
+        if interaction_count < 2:
+            issues.append(f"【硬性规则违反】交互元素不足: 检测到{interaction_count}个，要求至少2个")
+            return False, issues
+
+        return True, []
+
+    def _detect_canvas_api_usage(self, code: str) -> Dict[str, Any]:
+        """
+        检测Canvas API使用情况（任务#6新增）
+
+        Returns:
+            {
+                'has_drawing_calls': bool,
+                'draw_count': int,
+                'is_rich': bool (>=8个绘图调用)
+            }
+        """
+        import re
+
+        drawing_apis = ['fillRect', 'strokeRect', 'arc', 'fillText', 'strokeText',
+                       'beginPath', 'lineTo', 'moveTo', 'quadraticCurveTo', 'bezierCurveTo']
+
+        draw_count = 0
+        for api in drawing_apis:
+            draw_count += len(re.findall(rf'\b{api}\b', code))
+
+        return {
+            'has_drawing_calls': draw_count > 0,
+            'draw_count': draw_count,
+            'is_rich': draw_count >= 8
+        }
+
+    def _detect_animation_loop(self, code: str) -> Dict[str, Any]:
+        """
+        检测动画循环实现（任务#6新增）
+
+        Returns:
+            {
+                'has_raf': bool,  # 是否有requestAnimationFrame
+                'has_clear': bool  # 是否有清屏操作
+            }
+        """
+        import re
+
+        has_raf = 'requestAnimationFrame' in code
+        has_clear = bool(re.search(r'(fillRect\s*\(0\s*,\s*0|clearRect)', code))
+
+        return {
+            'has_raf': has_raf,
+            'has_clear': has_clear
+        }
+
+    def _detect_interaction_response(self, code: str) -> bool:
+        """
+        检测交互响应实现（任务#6新增）
+
+        检查是否有事件监听器（addEventListener或oninput）
+        """
+        return 'addEventListener' in code or 'oninput' in code
 
     def _count_top_level_args(self, args_str: str) -> int:
         """计算函数调用的顶层参数数量（忽略嵌套括号内的逗号）"""
@@ -1137,12 +2001,16 @@ class ChapterGenerator:
 
     def _clean_simulator_code(self, response: str) -> str:
         """
-        清理AI响应，提取HTML代码（2026-02-11: 适配HTML格式）
+        清理AI响应，提取HTML代码（2026-02-11: 适配HTML格式，任务#6增强）
 
         支持的格式：
         1. 直接的HTML代码（以<!DOCTYPE开头）
         2. Markdown代码块包裹的HTML（```html ... ```）
         3. JSON包裹的HTML（{"code": "..."}）
+
+        增强功能（任务#6）：
+        - 统一清理流程
+        - 支持多层嵌套提取
         """
         import re
         import json as _json
@@ -1150,51 +2018,63 @@ class ChapterGenerator:
         code = response.strip()
         original_response = response
 
-        # 1. 检测JSON包裹格式：{"code": "<!DOCTYPE html>..."}
-        try:
-            json_str = code
-            # 移除markdown代码块标记
-            if json_str.startswith('```'):
-                first_newline = json_str.index('\n')
-                json_str = json_str[first_newline + 1:]
-            if json_str.rstrip().endswith('```'):
-                json_str = json_str.rstrip()[:-3].rstrip()
+        # 步骤1: 移除markdown包装器
+        code = self._remove_markdown_wrapper(code)
 
-            # 尝试解析JSON
-            parsed = _json.loads(json_str)
-            if isinstance(parsed, dict) and 'code' in parsed:
-                extracted = parsed['code']
-                if isinstance(extracted, str) and len(extracted) > 100:
-                    # 检查是否是HTML
-                    if '<!DOCTYPE' in extracted.upper() or '<HTML' in extracted.upper():
-                        logger.info(f"[_clean_simulator_code] Extracted HTML from JSON 'code' field: {len(extracted.splitlines())} lines")
-                        return extracted.strip()
-        except (ValueError, _json.JSONDecodeError, IndexError):
-            pass
+        # 步骤2: 提取JSON包裹的内容
+        code = self._extract_from_json_wrapper(code)
 
-        # 2. 提取HTML代码块：```html ... ```
+        # 步骤3: 提取HTML内容
+        extracted = self._extract_html_content(code)
+
+        if extracted:
+            logger.info(f"[_clean_simulator_code] Successfully extracted HTML: {len(extracted.splitlines())} lines")
+            return extracted.strip()
+
+        # 完全失败，返回原始响应
+        logger.warning(f"[_clean_simulator_code] Failed to extract HTML, returning original response: {len(original_response)} chars")
+        return original_response.strip()
+
+    def _remove_markdown_wrapper(self, code: str) -> str:
+        """移除markdown代码块包装器"""
+        import re
+
+        # 移除 ```html ... ``` 或 ``` ... ```
         html_blocks = re.findall(r'```html\s*\n(.*?)```', code, re.DOTALL | re.IGNORECASE)
         if html_blocks:
-            # 选择最长的HTML块
-            best_block = max(html_blocks, key=len)
-            logger.info(f"[_clean_simulator_code] Extracted from ```html block: {len(best_block.splitlines())} lines")
-            return best_block.strip()
+            return max(html_blocks, key=len)
 
-        # 3. 提取任意代码块：``` ... ```
         code_blocks = re.findall(r'```[a-z]*\s*\n(.*?)```', code, re.DOTALL | re.IGNORECASE)
         if code_blocks:
             # 优先选择包含DOCTYPE或<html>的块
             for block in code_blocks:
                 if '<!DOCTYPE' in block.upper() or '<HTML' in block.upper():
-                    logger.info(f"[_clean_simulator_code] Extracted HTML from generic code block: {len(block.splitlines())} lines")
-                    return block.strip()
-            # 如果没有找到HTML特征，选择最长的块
-            best_block = max(code_blocks, key=len)
-            if len(best_block) > 100:
-                logger.info(f"[_clean_simulator_code] Extracted longest code block: {len(best_block.splitlines())} lines")
-                return best_block.strip()
+                    return block
+            # 否则返回最长的块
+            return max(code_blocks, key=len) if code_blocks else code
 
-        # 4. 直接的HTML代码（没有markdown包裹）
+        return code
+
+    def _extract_from_json_wrapper(self, code: str) -> str:
+        """从JSON包装器中提取内容"""
+        import json as _json
+
+        try:
+            parsed = _json.loads(code)
+            if isinstance(parsed, dict):
+                # 尝试多个可能的键名
+                for key in ['code', 'html_content', 'content', 'html']:
+                    if key in parsed and isinstance(parsed[key], str) and len(parsed[key]) > 100:
+                        return parsed[key]
+        except (ValueError, _json.JSONDecodeError):
+            pass
+
+        return code
+
+    def _extract_html_content(self, code: str) -> Optional[str]:
+        """提取HTML内容"""
+        import re
+
         # 查找<!DOCTYPE html>或<html的位置
         doctype_match = re.search(r'<!DOCTYPE\s+html>', code, re.IGNORECASE)
         html_match = re.search(r'<html[^>]*>', code, re.IGNORECASE)
@@ -1210,18 +2090,13 @@ class ChapterGenerator:
             end_match = re.search(r'</html>', code[start_pos:], re.IGNORECASE)
             if end_match:
                 end_pos = start_pos + end_match.end()
-                extracted = code[start_pos:end_pos]
-                logger.info(f"[_clean_simulator_code] Extracted raw HTML: {len(extracted.splitlines())} lines")
-                return extracted.strip()
+                return code[start_pos:end_pos]
             else:
                 # 没有找到</html>，取到末尾
-                extracted = code[start_pos:]
-                logger.info(f"[_clean_simulator_code] Extracted HTML (no closing tag): {len(extracted.splitlines())} lines")
-                return extracted.strip()
+                return code[start_pos:]
 
-        # 5. 最后尝试：移除明显的解释文字，返回剩余内容
+        # 如果没有找到HTML标记，尝试移除解释文字
         lines = code.split('\n')
-        # 移除开头的纯文字解释行（不包含<或{的行）
         start_idx = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
@@ -1229,7 +2104,6 @@ class ChapterGenerator:
                 start_idx = i
                 break
 
-        # 移除结尾的纯文字解释行
         end_idx = len(lines)
         for i in range(len(lines) - 1, -1, -1):
             stripped = lines[i].strip()
@@ -1240,12 +2114,9 @@ class ChapterGenerator:
         if start_idx < end_idx:
             result = '\n'.join(lines[start_idx:end_idx]).strip()
             if len(result) > 100:
-                logger.info(f"[_clean_simulator_code] Extracted after removing explanations: {len(result.splitlines())} lines")
                 return result
 
-        # 6. 完全失败，返回原始响应
-        logger.warning(f"[_clean_simulator_code] Failed to extract HTML, returning original response: {len(original_response)} chars")
-        return original_response.strip()
+        return None
 
     def _get_line_context(self, lines: List[str], line_num: int, context_lines: int = 2) -> tuple:
         """获取指定行的上下文"""
@@ -1826,10 +2697,10 @@ class ChapterGenerator:
                     raise ValueError(f"JSON 解析失败，需要重新生成: {e2}")
 
             # 解析步骤
-            script = []
-            for step_data in data.get('script', []):
+            steps = []
+            for step_data in data.get('steps', data.get('script', [])):
                 step = ChapterStep(
-                    step_id=step_data.get('step_id', f'step_{len(script)+1}'),
+                    step_id=step_data.get('step_id', f'step_{len(steps)+1}'),
                     type=step_data.get('type', 'text_content'),
                     title=step_data.get('title', ''),
                     content=step_data.get('content'),
@@ -1855,15 +2726,15 @@ class ChapterGenerator:
                     if 'mode' not in step.ai_spec:
                         step.ai_spec['mode'] = 'proactive_assessment'
 
-                script.append(step)
+                steps.append(step)
 
             return ChapterResult(
                 lesson_id=data.get('lesson_id', 'lesson_1'),
                 title=data.get('title', ''),
                 order=data.get('order', 0),
-                total_steps=len(script),
+                total_steps=len(steps),
                 rationale=data.get('rationale', ''),
-                script=script,
+                steps=steps,
                 estimated_minutes=data.get('estimated_minutes', 30),
                 learning_objectives=data.get('learning_objectives', []),
                 complexity_level=data.get('complexity_level', 'standard')
@@ -2088,6 +2959,695 @@ class ChapterGenerator:
         except Exception as e:
             logger.error(f"Failed to parse single step: {e}")
             raise ValueError(f"单步解析失败: {e}")
+
+    async def _agent_review(self, code: str, simulator_name: str, simulator_description: str) -> tuple:
+        """
+        Agent评审：评估模拟器的教学有效性、用户体验、创新性（满分40，2026-02-15调整）
+
+        评分维度：
+        - 教学有效性(0-16): 概念演示清晰度、因果关系展示
+        - 用户体验(0-12): 界面美观、操作流畅、反馈及时
+        - 创新性(0-12): 独特视角、巧妙设计、记忆点
+
+        Returns:
+            (agent_score: int, feedback: str)
+        """
+        # 提取代码片段（避免发送过长内容）
+        code_sample = code[:3000] + "..." if len(code) > 3000 else code
+
+        prompt = f"""你是一位专业的教育技术评估专家。请评估以下HTML模拟器的质量。
+
+【模拟器信息】
+名称：{simulator_name}
+描述：{simulator_description}
+
+【代码片段】（前3000字符）
+{code_sample}
+
+【评估任务】
+请从以下三个维度给出评分（总分40分，2026-02-15权重提升）：
+
+1. 教学有效性 (0-16分)
+   - 概念演示是否清晰？是否直观展示了核心原理？
+   - 因果关系是否明确？用户能否理解变量如何影响结果？
+
+2. 用户体验 (0-12分)
+   - 界面是否美观？颜色搭配是否合理？
+   - 操作是否流畅？是否有清晰的视觉反馈？
+
+3. 创新性 (0-12分)
+   - 是否有独特的视角或创新的展示方式？
+   - 是否有助于记忆和理解？
+
+【输出格式】
+请输出JSON格式：
+{{
+    "教学有效性分": 12,
+    "用户体验分": 8,
+    "创新性分": 6,
+    "总分": 26,
+    "评价": "简要说明优点和不足（50-150字）"
+}}"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是教育技术评估专家，专门评估教学模拟器质量。请客观公正地评分，并给出建设性意见。",
+                max_tokens=500
+            )
+
+            # 解析JSON
+            import json
+            import re
+
+            # 尝试提取JSON
+            json_match = re.search(r'\{[^{}]*"总分"[^{}]*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+                agent_score = data.get('总分', 0)
+                feedback = data.get('评价', '')
+                logger.info(f"[Agent] Score: {agent_score}/40, Feedback: {feedback[:100]}")
+                return agent_score, feedback
+            else:
+                logger.warning(f"[Agent] Failed to parse JSON from response: {response[:200]}")
+                return 20, "Agent评估解析失败，使用默认分数"
+
+        except Exception as e:
+            logger.error(f"[Agent] Review error: {e}")
+            return 20, f"Agent评估异常: {str(e)}"
+
+    async def _agent_review_text_content(
+        self,
+        content: str,
+        title: str,
+        learning_objectives: List[str]
+    ) -> tuple:
+        """
+        Agent评审：评估文本内容质量（任务#8，满分20）
+
+        评分维度：
+        - 内容深度(0-8): 概念覆盖、逻辑层次、专业准确
+        - 准确性(0-7): 科学准确、无错误、引用可靠
+        - 清晰度(0-5): 语言流畅、易理解、结构清晰
+
+        Args:
+            content: 文本内容
+            title: 内容标题
+            learning_objectives: 学习目标列表
+
+        Returns:
+            (agent_score: int, feedback: str)
+        """
+        content_sample = content[:2000] + "..." if len(content) > 2000 else content
+        objectives_text = "\n".join([f"  - {obj}" for obj in learning_objectives]) if learning_objectives else "  未提供"
+
+        prompt = f"""你是一位专业的教育内容评估专家。请评估以下文本内容的质量。
+
+【内容信息】
+标题：{title}
+学习目标：
+{objectives_text}
+
+【内容片段】（前2000字符）
+{content_sample}
+
+【评估任务】
+请从以下三个维度给出评分（总分20分）：
+
+1. 内容深度 (0-8分)
+   - 概念覆盖是否全面？
+   - 逻辑层次是否清晰？
+   - 是否有足够的专业深度？
+
+2. 准确性 (0-7分)
+   - 内容是否科学准确？
+   - 是否有事实错误或逻辑漏洞？
+   - 专业术语使用是否正确？
+
+3. 清晰度 (0-5分)
+   - 语言表达是否流畅？
+   - 是否易于理解？
+   - 结构组织是否清晰？
+
+【输出格式】
+请输出JSON格式：
+{{
+    "内容深度分": 6,
+    "准确性分": 5,
+    "清晰度分": 4,
+    "总分": 15,
+    "评价": "简要说明优点和不足（50-150字）"
+}}"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是教育内容评估专家，专门评估教学文本质量。请客观公正地评分，并给出建设性意见。",
+                max_tokens=500
+            )
+
+            agent_score, feedback = self._parse_agent_score(response, default_score=24)
+            logger.info(f"[Agent Text] Score: {agent_score}/40, Feedback: {feedback[:100]}")
+            return agent_score, feedback
+
+        except Exception as e:
+            logger.error(f"[Agent Text] Review error: {e}")
+            return 12, f"Agent评估异常: {str(e)}"
+
+    async def _agent_review_assessment(
+        self,
+        questions: List[Dict],
+        title: str,
+        learning_objectives: List[str]
+    ) -> tuple:
+        """
+        Agent评审：评估测验题目质量（任务#8，满分20）
+
+        评分维度：
+        - 题目质量(0-8): 难度适中、题干清晰、选项合理
+        - 区分度(0-7): 能有效区分不同水平学生
+        - 目标对齐(0-5): 与学习目标紧密对应
+
+        Args:
+            questions: 题目列表 [{'question': str, 'options': List[str], 'correct_answer': str}]
+            title: 测验标题
+            learning_objectives: 学习目标列表
+
+        Returns:
+            (agent_score: int, feedback: str)
+        """
+        questions_text = self._format_questions(questions[:3])  # 只评估前3题
+        objectives_text = "\n".join([f"  - {obj}" for obj in learning_objectives]) if learning_objectives else "  未提供"
+
+        prompt = f"""你是一位专业的教育测评评估专家。请评估以下测验题目的质量。
+
+【测验信息】
+标题：{title}
+学习目标：
+{objectives_text}
+
+【题目内容】（前3题）
+{questions_text}
+
+【评估任务】
+请从以下三个维度给出评分（总分20分）：
+
+1. 题目质量 (0-8分)
+   - 难度是否适中？
+   - 题干是否清晰无歧义？
+   - 选项设计是否合理（干扰项有意义）？
+
+2. 区分度 (0-7分)
+   - 能否有效区分不同水平的学生？
+   - 是否避免了过于简单或过难的题目？
+   - 干扰项是否具有诊断价值？
+
+3. 目标对齐 (0-5分)
+   - 题目是否紧扣学习目标？
+   - 是否覆盖了关键知识点？
+   - 题型是否适合评估目标？
+
+【输出格式】
+请输出JSON格式：
+{{
+    "题目质量分": 6,
+    "区分度分": 5,
+    "目标对齐分": 4,
+    "总分": 15,
+    "评价": "简要说明优点和不足（50-150字）"
+}}"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是教育测评评估专家，专门评估测验题目质量。请客观公正地评分，并给出建设性意见。",
+                max_tokens=500
+            )
+
+            agent_score, feedback = self._parse_agent_score(response, default_score=12)
+            logger.info(f"[Agent Assessment] Score: {agent_score}/20, Feedback: {feedback[:100]}")
+            return agent_score, feedback
+
+        except Exception as e:
+            logger.error(f"[Agent Assessment] Review error: {e}")
+            return 12, f"Agent评估异常: {str(e)}"
+
+    def _parse_agent_score(self, response: str, default_score: int = 20) -> tuple:
+        """
+        解析Agent返回的JSON评分（任务#8新增）
+
+        Args:
+            response: Agent响应文本
+            default_score: 解析失败时的默认分数
+
+        Returns:
+            (score: int, feedback: str)
+        """
+        import json
+        import re
+
+        try:
+            # 尝试提取JSON
+            json_match = re.search(r'\{[^{}]*"总分"[^{}]*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+                score = data.get('总分', default_score)
+                feedback = data.get('评价', '')
+                return score, feedback
+            else:
+                logger.warning(f"[Parse Agent Score] No JSON found in response")
+                return default_score, "Agent评估解析失败，使用默认分数"
+
+        except Exception as e:
+            logger.error(f"[Parse Agent Score] Error: {e}")
+            return default_score, f"解析异常: {str(e)}"
+
+    def _format_questions(self, questions: List[Dict]) -> str:
+        """
+        格式化题目列表（任务#8新增）
+
+        Args:
+            questions: 题目列表
+
+        Returns:
+            格式化的题目文本
+        """
+        if not questions:
+            return "  无题目"
+
+        formatted = []
+        for i, q in enumerate(questions, 1):
+            question_text = q.get('question', '')
+            options = q.get('options', [])
+            correct = q.get('correct_answer', '')
+
+            formatted.append(f"\n题目{i}：{question_text}")
+            for opt in options:
+                formatted.append(f"  {opt}")
+            formatted.append(f"  正确答案：{correct}")
+
+        return '\n'.join(formatted)
+
+    async def _agent_review_illustrated_content(
+        self,
+        content: str,
+        diagram_description: str,
+        title: str,
+        learning_objectives: List[str]
+    ) -> tuple:
+        """
+        Agent评审：评估图文内容质量（任务#9，满分20）
+
+        评分维度：
+        - 图文配合(0-8): 图片与文字紧密对应、互补增强
+        - 可视化效果(0-7): 图示清晰、信息丰富、美观
+        - 教学价值(0-5): 有助于理解、记忆、应用
+
+        Args:
+            content: 文字说明
+            diagram_description: 图片描述
+            title: 内容标题
+            learning_objectives: 学习目标列表
+
+        Returns:
+            (agent_score: int, feedback: str)
+        """
+        content_sample = content[:1500] + "..." if len(content) > 1500 else content
+        diagram_sample = diagram_description[:500] + "..." if len(diagram_description) > 500 else diagram_description
+        objectives_text = "\n".join([f"  - {obj}" for obj in learning_objectives]) if learning_objectives else "  未提供"
+
+        prompt = f"""你是一位专业的教育可视化评估专家。请评估以下图文内容的质量。
+
+【内容信息】
+标题：{title}
+学习目标：
+{objectives_text}
+
+【文字说明】
+{content_sample}
+
+【图片描述】
+{diagram_sample}
+
+【评估任务】
+请从以下三个维度给出评分（总分20分）：
+
+1. 图文配合 (0-8分)
+   - 图片与文字是否紧密对应？
+   - 图文是否互补增强（图片展示文字难以表达的内容）？
+   - 是否存在冗余或脱节？
+
+2. 可视化效果 (0-7分)
+   - 图示是否清晰易懂？
+   - 信息是否丰富（标注、箭头、颜色等）？
+   - 视觉设计是否美观专业？
+
+3. 教学价值 (0-5分)
+   - 是否有助于理解抽象概念？
+   - 是否有助于记忆关键信息？
+   - 是否有助于实际应用？
+
+【输出格式】
+请输出JSON格式：
+{{
+    "图文配合分": 6,
+    "可视化效果分": 5,
+    "教学价值分": 4,
+    "总分": 15,
+    "评价": "简要说明优点和不足（50-150字）"
+}}"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是教育可视化评估专家，专门评估图文教学内容质量。请客观公正地评分，并给出建设性意见。",
+                max_tokens=500
+            )
+
+            agent_score, feedback = self._parse_agent_score(response, default_score=12)
+            logger.info(f"[Agent Illustrated] Score: {agent_score}/20, Feedback: {feedback[:100]}")
+            return agent_score, feedback
+
+        except Exception as e:
+            logger.error(f"[Agent Illustrated] Review error: {e}")
+            return 12, f"Agent评估异常: {str(e)}"
+
+    async def _agent_review_ai_tutor(
+        self,
+        initial_prompt: str,
+        question_patterns: List[str],
+        title: str,
+        learning_objectives: List[str]
+    ) -> tuple:
+        """
+        Agent评审：评估AI导师内容质量（任务#9，满分20）
+
+        评分维度：
+        - 对话质量(0-8): 引导性问题设计、对话流畅自然
+        - 引导性(0-7): 循序渐进、启发思考、避免直接给答案
+        - 适应性(0-5): 能应对不同回答、个性化调整
+
+        Args:
+            initial_prompt: 初始引导语
+            question_patterns: 预设问题模式列表
+            title: AI导师标题
+            learning_objectives: 学习目标列表
+
+        Returns:
+            (agent_score: int, feedback: str)
+        """
+        prompt_sample = initial_prompt[:1000] + "..." if len(initial_prompt) > 1000 else initial_prompt
+        patterns_text = "\n".join([f"  - {p}" for p in question_patterns[:5]]) if question_patterns else "  未提供"
+        objectives_text = "\n".join([f"  - {obj}" for obj in learning_objectives]) if learning_objectives else "  未提供"
+
+        prompt = f"""你是一位专业的AI教育对话系统评估专家。请评估以下AI导师内容的质量。
+
+【AI导师信息】
+标题：{title}
+学习目标：
+{objectives_text}
+
+【初始引导语】
+{prompt_sample}
+
+【预设问题模式】
+{patterns_text}
+
+【评估任务】
+请从以下三个维度给出评分（总分20分）：
+
+1. 对话质量 (0-8分)
+   - 引导性问题设计是否合理？
+   - 对话是否流畅自然？
+   - 语言表达是否清晰友好？
+
+2. 引导性 (0-7分)
+   - 是否循序渐进引导学生思考？
+   - 是否启发学生自主探索？
+   - 是否避免直接给出答案？
+
+3. 适应性 (0-5分)
+   - 能否应对学生的不同回答？
+   - 是否有个性化调整机制？
+   - 是否能诊断学生的理解程度？
+
+【输出格式】
+请输出JSON格式：
+{{
+    "对话质量分": 6,
+    "引导性分": 5,
+    "适应性分": 4,
+    "总分": 15,
+    "评价": "简要说明优点和不足（50-150字）"
+}}"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是AI教育对话系统评估专家，专门评估AI导师教学质量。请客观公正地评分，并给出建设性意见。",
+                max_tokens=500
+            )
+
+            agent_score, feedback = self._parse_agent_score(response, default_score=12)
+            logger.info(f"[Agent AI Tutor] Score: {agent_score}/20, Feedback: {feedback[:100]}")
+            return agent_score, feedback
+
+        except Exception as e:
+            logger.error(f"[Agent AI Tutor] Review error: {e}")
+            return 12, f"Agent评估异常: {str(e)}"
+
+    async def _supervisor_decision(
+        self,
+        code: str,
+        simulator_name: str,
+        rule_score: int,
+        agent_score: int,
+        agent_feedback: str,
+        rule_issues: List[str],
+        round_num: int
+    ) -> tuple:
+        """
+        AI监督者决策：综合规则分、Agent分和意见，决定是否采纳
+
+        Returns:
+            (decision: str, reason: str)
+            decision: "accept" | "reject" | "fix"
+
+        决策说明（2026-02-15更新）：
+        - accept: 接受当前代码
+        - reject: 完全重新生成（丢弃当前代码）
+        - fix: 在当前代码基础上修复问题
+        """
+        total_score = rule_score + agent_score
+
+        prompt = f"""你是课程生成系统的AI监督者，负责决定是否采纳当前生成的模拟器代码。
+
+【模拟器信息】
+名称：{simulator_name}
+当前轮次：第{round_num}轮（最多3轮）
+
+【评分情况】
+规则评分：{rule_score}/60（基于代码规则检查，2026-02-15调整）
+Agent评分：{agent_score}/40（Agent评估教学效果，权重提升到40%）
+总分：{total_score}/100
+通过阈值：75分（2026-02-15更新）
+
+【规则检查发现的问题】
+{chr(10).join(f"- {issue}" for issue in rule_issues) if rule_issues else "无明显问题"}
+
+【Agent评价意见】
+{agent_feedback}
+
+【决策任务】
+请综合考虑以下因素做出决策：
+1. 总分是否达到75分阈值？（已从74分提高到75分）
+2. 规则问题是否严重（如结构缺失、致命错误）？
+3. Agent的评价是否指出重大教学缺陷？
+4. 当前是第几轮？（第3轮需更宽容）
+5. 问题的性质：结构性问题 vs 细节问题
+
+【决策选项】⚠️ 2026-02-15更新
+- "accept": 接受当前代码（总分≥75且无重大问题）
+- "reject": 完全重新生成（总分<65或有致命结构错误，丢弃当前代码从头开始）
+- "fix": 在当前代码基础上修复（65≤总分<75，有可修复的细节问题）
+
+【决策指南】
+- 总分<75分 → 必须选择 "reject" 或 "fix"，不能accept
+- 结构性问题（缺少必要元素、逻辑错误）→ 选择 "reject" 重做
+- 细节问题（布局、颜色、交互优化）→ 选择 "fix" 修复
+- 如果总分=0（缺少必要元素）→ 必须选择 "reject"
+- 第3轮时，如果总分≥70，可以选择 "accept"（放宽标准）
+
+【输出格式】
+请输出JSON格式：
+{{
+    "decision": "accept",
+    "reason": "简要说明决策理由（30-100字）"
+}}"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是AI监督者，负责质量把关。请客观评估，既要保证质量，也要避免过于严苛。对于结构性问题选择reject重做，对于细节问题选择fix修复。",
+                max_tokens=300
+            )
+
+            # 解析JSON
+            import json
+            import re
+
+            json_match = re.search(r'\{[^{}]*"decision"[^{}]*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+                decision = data.get('decision', 'fix')
+                reason = data.get('reason', '')
+
+                # 验证决策合法性（revise改为fix）
+                if decision == 'revise':
+                    decision = 'fix'  # 兼容旧版本
+                if decision not in ['accept', 'reject', 'fix']:
+                    logger.warning(f"[Supervisor] Invalid decision '{decision}', using 'fix'")
+                    decision = 'fix'
+
+                # 特殊规则：总分=0必须reject
+                if total_score == 0 and decision != 'reject':
+                    logger.warning(f"[Supervisor] Total score is 0, forcing 'reject' decision")
+                    decision = 'reject'
+                    reason = "总分为0（缺少必要元素），必须重新生成"
+
+                logger.info(f"[Supervisor] Decision={decision}, Reason={reason}")
+                return decision, reason
+            else:
+                logger.warning(f"[Supervisor] Failed to parse decision: {response[:200]}")
+                # 默认决策
+                if total_score == 0:
+                    return 'reject', '总分为0，必须重新生成'
+                elif total_score >= 75:
+                    return 'accept', '总分达标，默认通过'
+                elif total_score >= 65:
+                    return 'fix', '分数接近阈值，建议修复'
+                else:
+                    return 'reject', '分数过低，需要重新生成'
+
+        except Exception as e:
+            logger.error(f"[Supervisor] Decision error: {e}")
+            # 出错时使用简单规则
+            if total_score == 0:
+                return 'reject', '总分为0，必须重新生成'
+            elif total_score >= 75:
+                return 'accept', f'异常处理：总分{total_score}达标'
+            else:
+                return 'reject', f'异常处理：总分{total_score}不达标'
+
+    def should_evaluate_with_agent(
+        self,
+        step_type: str,
+        rule_score: float,
+        similar_samples: Optional[List[Dict]] = None
+    ) -> tuple:
+        """
+        智能决策是否需要Agent评估（任务#5）
+
+        策略：
+        1. 样本充足度检查（>=5个相似样本，方差<100）
+        2. 基于规则分估算Agent分
+        3. 概率跳过逻辑（预估总分>=50时，50%概率跳过）
+
+        Args:
+            step_type: 步骤类型
+            rule_score: 规则打分（0-80）
+            similar_samples: 相似样本列表（包含历史评分数据）
+
+        Returns:
+            (should_evaluate: bool, reason: str)
+        """
+        # 1. 样本充足度检查
+        sample_count = self._count_samples(similar_samples)
+
+        if sample_count < 5:
+            logger.info(f"[Smart Decision] Sample insufficient ({sample_count}<5), MUST evaluate with Agent")
+            return True, f"样本不足({sample_count}<5)，必须Agent评估"
+
+        # 2. 检查分数方差
+        scores = [s.get('total_score', 0) for s in similar_samples if 'total_score' in s]
+        if not scores:
+            logger.info(f"[Smart Decision] No historical scores, MUST evaluate")
+            return True, "无历史评分数据，必须Agent评估"
+
+        variance = self._calculate_variance(scores)
+        if variance >= 100:
+            logger.info(f"[Smart Decision] High variance ({variance:.1f}>=100), MUST evaluate")
+            return True, f"分数方差大({variance:.1f}>=100)，必须Agent评估"
+
+        # 3. 估算Agent分
+        estimated_agent_score = self._estimate_agent_score(rule_score, similar_samples)
+        estimated_total = rule_score + estimated_agent_score
+
+        logger.info(f"[Smart Decision] Rule={rule_score}/60, Est_Agent={estimated_agent_score}/40, Est_Total={estimated_total}/100")
+
+        # 4. 概率跳过逻辑
+        if estimated_total >= 50:
+            # 50%概率跳过
+            import random
+            skip_agent = random.random() < 0.5
+            if skip_agent:
+                logger.info(f"[Smart Decision] Est_Total={estimated_total}>=50, Skip Agent (prob=0.5)")
+                return False, f"预估总分{estimated_total}分达标，概率跳过Agent评估"
+            else:
+                logger.info(f"[Smart Decision] Est_Total={estimated_total}>=50, Still evaluate (prob=0.5)")
+                return True, f"预估总分{estimated_total}分，随机决策需要Agent评估"
+        else:
+            logger.info(f"[Smart Decision] Est_Total={estimated_total}<50, MUST evaluate")
+            return True, f"预估总分{estimated_total}分不达标，必须Agent评估"
+
+    def _count_samples(self, similar_samples: Optional[List[Dict]]) -> int:
+        """统计有效样本数量"""
+        if not similar_samples:
+            return 0
+        # 只统计有完整评分数据的样本
+        return len([s for s in similar_samples if 'rule_score' in s and 'agent_score' in s])
+
+    def _calculate_variance(self, scores: List[float]) -> float:
+        """计算分数方差"""
+        if not scores or len(scores) < 2:
+            return 999.0  # 样本太少，返回高方差
+
+        mean = sum(scores) / len(scores)
+        variance = sum((x - mean) ** 2 for x in scores) / len(scores)
+        return variance
+
+    def _estimate_agent_score(
+        self,
+        rule_score: float,
+        similar_samples: Optional[List[Dict]]
+    ) -> float:
+        """
+        基于规则分估算Agent分（2026-02-15调整为40分制）
+
+        策略：
+        1. 如果有相似样本，使用平均Agent分
+        2. 如果无样本，使用启发式规则：
+           - rule_score >= 50: agent_score ≈ 30
+           - rule_score >= 40: agent_score ≈ 24
+           - rule_score >= 25: agent_score ≈ 16
+           - rule_score < 25: agent_score ≈ 10
+        """
+        if similar_samples:
+            agent_scores = [s.get('agent_score', 0) for s in similar_samples if 'agent_score' in s]
+            if agent_scores:
+                avg_agent = sum(agent_scores) / len(agent_scores)
+                logger.info(f"[Estimate] Using avg agent score from {len(agent_scores)} samples: {avg_agent:.1f}")
+                return avg_agent
+
+        # 启发式规则（调整为40分制）
+        if rule_score >= 50:
+            return 30.0
+        elif rule_score >= 40:
+            return 24.0
+        elif rule_score >= 25:
+            return 16.0
+        else:
+            return 10.0
 
 
 class GeneratorPromptBuilder:

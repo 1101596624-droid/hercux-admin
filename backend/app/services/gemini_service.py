@@ -35,15 +35,15 @@ class GeminiService:
         self,
         prompt: str,
         style: str = "educational",
-        size: str = "1024x1024"
+        size: str = "1600x900"
     ) -> Optional[bytes]:
         """
-        生成图片
+        生成图片 (16:9标准比例,与模拟器画布一致)
 
         Args:
             prompt: 图片描述
             style: 风格 (educational, diagram, illustration)
-            size: 尺寸
+            size: 尺寸 (默认1600x900,16:9比例)
 
         Returns:
             图片二进制数据，失败返回 None
@@ -199,15 +199,17 @@ class GeminiService:
         self,
         diagram_spec: dict,
         course_title: str,
-        lesson_title: str
+        lesson_title: str,
+        size: str = "1600x900"
     ) -> Optional[bytes]:
         """
-        根据图表规格生成图片
+        根据图表规格生成图片 (16:9标准比例,与模拟器画布一致)
 
         Args:
             diagram_spec: 图表规格
             course_title: 课程标题
             lesson_title: 课时标题
+            size: 尺寸 (默认1600x900,16:9比例)
 
         Returns:
             图片二进制数据
@@ -231,22 +233,22 @@ class GeminiService:
         if design_notes:
             prompt += f"\n设计说明：{design_notes}"
 
-        return await self.generate_image(prompt, style="diagram")
+        return await self.generate_image(prompt, style="diagram", size=size)
 
     def _build_enhanced_prompt(self, prompt: str, style: str) -> str:
-        """构建增强的图片生成 prompt"""
+        """构建增强的图片生成 prompt（2026-02-15：添加中文要求）"""
         style_prefixes = {
-            "educational": "Create a clean, professional educational illustration. Use clear colors and simple shapes. ",
-            "diagram": "Create a clear, labeled diagram with professional styling. Use a white background, clean lines, and readable text. ",
-            "illustration": "Create a modern, flat-style illustration suitable for educational content. ",
-            "flowchart": "Create a professional flowchart with clear boxes, arrows, and labels. Use a clean white background. ",
-            "infographic": "Create an informative infographic with icons, charts, and clear visual hierarchy. "
+            "educational": "Create a clean, professional educational illustration in 16:9 landscape format. Use clear colors and simple shapes. All text labels must be in Chinese (中文). ",
+            "diagram": "Create a clear, labeled diagram with professional styling in 16:9 landscape format. Use a white background, clean lines, and readable text. All text labels and annotations must be in Chinese (中文). ",
+            "illustration": "Create a modern, flat-style illustration suitable for educational content in 16:9 landscape format. All text must be in Chinese (中文). ",
+            "flowchart": "Create a professional flowchart with clear boxes, arrows, and labels in 16:9 landscape format. Use a clean white background. All text labels must be in Chinese (中文). ",
+            "infographic": "Create an informative infographic with icons, charts, and clear visual hierarchy in 16:9 landscape format. All text must be in Chinese (中文). "
         }
 
         prefix = style_prefixes.get(style, style_prefixes["educational"])
 
-        # 添加通用的质量要求
-        suffix = " High quality, suitable for educational materials, no text watermarks."
+        # 添加通用的质量要求（强调中文）
+        suffix = " High quality, suitable for educational materials, no text watermarks. Wide horizontal layout optimized for 16:9 aspect ratio. IMPORTANT: All text, labels, and annotations must be in Chinese (中文), not English."
 
         return f"{prefix}{prompt}{suffix}"
 

@@ -19,6 +19,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
+# 设置课程生成模块的日志级别为ERROR（减少控制台输出）
+if settings.ENV == "production":
+    logging.getLogger('app.services.course_generation').setLevel(logging.ERROR)
+
 logger = logging.getLogger(__name__)
 
 
