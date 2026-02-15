@@ -1600,7 +1600,7 @@ class ChapterGenerator:
 
         # 0. 必要元素检查（2026-02-15新增）
         required_elements = {
-            'DOCTYPE': '<!DOCTYPE html>' in code.upper(),
+            'DOCTYPE': '<!doctype html>' in code.lower(),
             'html标签': '<html' in code.lower(),
             'head标签': '<head>' in code.lower(),
             'body标签': '<body>' in code.lower(),
