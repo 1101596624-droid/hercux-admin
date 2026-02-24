@@ -629,7 +629,23 @@ class ChapterGenerator:
 - 根据学科选择合适配色（物理-蓝色，生物-绿色，化学-多彩，数学-对比色）
 - 使用2-3种主色，避免过多颜色造成混乱
 - 重点元素用对比色突出（如红色标注关键点）
-- 背景建议浅色（白色 #FFFFFF 或浅灰 #F8FAFC）
+- 背景使用学科主题渐变色（非纯白），搭配淡色装饰纹理
+  * 物理: #EFF6FF→#F8FAFC (浅蓝) + 横线/网格
+  * 数学: #EEF2FF→#F5F3FF (靛蓝) + 方格纸/正弦波
+  * 化学: #FFFBEB→#FFF7ED (暖黄) + 六边形分子网格
+  * 生物: #ECFDF5→#F0FDF4 (浅绿) + 细胞圆/水波纹
+  * 计算机: #F1F5F9→#E2E8F0 (冷灰) + 数字网格
+- 控件面板区域使用半透明白色: rgba(255,255,255,0.92)
+- 数据面板(drawPanel)使用与背景互补的学术风格配色，不要用白底:
+  * drawPanel(ctx,x,y,w,h,title,bgColor,borderColor) — 支持自定义背景色和边框色
+  * 蓝色背景 → 暖琥珀面板: bg='rgba(255,237,213,0.82)', bc='rgba(194,120,50,0.35)'
+  * 天蓝背景 → 暖桃面板: bg='rgba(254,226,210,0.82)', bc='rgba(194,100,40,0.35)'
+  * 暖黄背景 → 冷蓝面板: bg='rgba(219,234,254,0.82)', bc='rgba(59,130,246,0.35)'
+  * 靛蓝背景 → 暖金面板: bg='rgba(254,249,195,0.82)', bc='rgba(161,98,7,0.30)'
+  * 冷灰背景 → 暖米面板: bg='rgba(255,241,224,0.82)', bc='rgba(180,130,70,0.30)'
+  * 绿色背景 → 玫瑰面板: bg='rgba(255,228,230,0.82)', bc='rgba(190,60,50,0.30)'
+  * 紫色背景 → 青柠面板: bg='rgba(236,252,203,0.82)', bc='rgba(77,124,15,0.30)'
+  * 青色背景 → 珊瑚面板: bg='rgba(255,228,225,0.82)', bc='rgba(190,60,50,0.30)'
 
 ❌ 禁止:
 - 极低对比度（浅灰on白色，如 #E2E8F0 on #FFFFFF）
@@ -748,9 +764,18 @@ class ChapterGenerator:
         // 变量监听器将在这里生成
 
         function animate() {{
-            // 清屏 - 使用浅色背景
-            ctx.fillStyle = '#FFFFFF';
+            // 清屏 - 使用学科主题渐变背景（非纯白）
+            // 物理: #EFF6FF→#F8FAFC  数学: #EEF2FF→#F5F3FF  化学: #FFFBEB→#FFF7ED
+            // 生物: #ECFDF5→#F0FDF4  计算机: #F1F5F9→#E2E8F0
+            const bg = ctx.createLinearGradient(0, 0, 0, 790);
+            bg.addColorStop(0, '/* 学科主题色上 */');
+            bg.addColorStop(1, '/* 学科主题色下 */');
+            ctx.fillStyle = bg;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // 可选: 添加淡色装饰纹理（网格/波纹/分子等，透明度≤0.06）
+            // 控件面板区域
+            ctx.fillStyle = 'rgba(255,255,255,0.92)';
+            ctx.fillRect(0, 790, canvas.width, 110);
 
             // 在这里实现可视化逻辑
             // 使用 Canvas 2D API 绘制内容

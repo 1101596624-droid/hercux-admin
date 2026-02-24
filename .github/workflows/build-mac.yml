@@ -1,0 +1,36 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Compile Electron
+        run: npm run electron:compile
+
+      - name: Build macOS app
+        run: npx electron-builder --mac dmg zip --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hercu-admin-mac
+          path: |
+            dist-electron-app/*.dmg
+            dist-electron-app/*.zip
+          retention-days: 30
