@@ -17,8 +17,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from app.db.session import get_db
-from app.models.models import StudioProcessor, StudioPackage, StudioPackageStatus
+from app.db.session import get_db, AsyncSessionLocal
+from app.models.models import StudioProcessor, StudioPackage, StudioPackageStatus, GenerationTaskStatus
 from app.schemas.studio import (
     ProcessorWithConfig, ProcessorConfigUpdate, CreateProcessorRequest,
     PackageListItem, CoursePackageV2, GenerateRequestV2,
@@ -1305,27 +1305,16 @@ async def duplicate_package(
 @router.post("/packages/generate-v3")
 async def generate_course_v3(
     request: GenerateRequestV2,
+    admin_id: int = Query(default=1, description="管理员ID"),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Generate course with Supervisor-Generator architecture (V3)
-
-    This new architecture uses:
-    - Supervisor AI: Generates outline, reviews chapters, decides retries
-    - Generator AI: Generates individual chapters based on supervisor's instructions
-
-    Returns Server-Sent Events stream with:
-    - phase: Generation phase updates
-    - outline: Course outline generated
-    - chapter_start: Starting new chapter
-    - chunk: Content chunks
-    - chapter_review: Chapter review result
-    - chapter_retry: Chapter needs retry
-    - chapter_complete: Chapter completed
-    - complete: Generation complete with full package
-    - error: Error occurred
+    V3 同步入口（后台任务化）：
+    - 首次请求提交任务到队列
+    - SSE 仅用于订阅任务状态/结果
+    - 客户端断开连接不会中断服务端任务
     """
-    from app.services.course_generation import CourseGenerationService
+    from app.services.course_generation.task_queue import TaskQueueService
 
     # Get processor system prompt if custom
     processor_prompt = None
@@ -1337,103 +1326,129 @@ async def generate_course_v3(
         if processor:
             processor_prompt = processor.system_prompt
 
-    service = CourseGenerationService(db=db)
+    deferred_source_material = _build_deferred_generation_source_material(request)
+    task_info = await TaskQueueService.submit_task(
+        admin_id=admin_id,
+        course_title=request.course_title,
+        source_material=deferred_source_material,
+        source_info=request.source_info,
+        processor_id=request.processor_id,
+        processor_prompt=processor_prompt,
+        client_request_id=request.client_request_id,
+        db=db,
+    )
+    task_id = task_info["task_id"]
+
+    async def _load_package_payload(package_id: str) -> Optional[Dict[str, Any]]:
+        if not package_id:
+            return None
+        async with AsyncSessionLocal() as local_db:
+            result = await local_db.execute(
+                select(StudioPackage).where(StudioPackage.id == package_id)
+            )
+            package = result.scalar_one_or_none()
+            if not package:
+                return None
+            return {
+                "id": package.id,
+                "version": "2.0.0",
+                "meta": package.meta or {
+                    "title": package.title or "",
+                    "description": package.description or "",
+                    "source_info": package.source_info or "",
+                    "total_lessons": package.total_lessons or len(package.lessons or []),
+                    "estimated_hours": package.estimated_hours or 0,
+                    "style": package.style or "default",
+                    "created_at": package.created_at.isoformat() if package.created_at else _utc_now_iso(),
+                },
+                "lessons": package.lessons or [],
+                "edges": package.edges or [],
+                "global_ai_config": package.global_ai_config or {},
+            }
+
+    def _build_stats_from_package(pkg: Dict[str, Any]) -> Dict[str, Any]:
+        lessons = pkg.get("lessons") or []
+        simulator_count = 0
+        for lesson in lessons:
+            script = (lesson or {}).get("script") or []
+            for step in script:
+                if isinstance(step, dict) and str(step.get("type", "")).lower() == "simulator":
+                    simulator_count += 1
+        return {
+            "total_chapters": len(lessons),
+            "total_simulators": simulator_count,
+            "generation_time": 0,
+        }
 
     async def event_generator():
-        import asyncio
-
-        queue = asyncio.Queue()
-        done = False
-
-        async def produce_events():
-            nonlocal done
-            try:
-                upload_ids = _normalize_upload_ids(request.source_upload_ids)
-                if upload_ids:
-                    await queue.put({
-                        "event": "phase",
-                        "data": {
-                            "phase": 0,
-                            "message": "正在读取上传文件..."
-                        }
-                    })
-                resolved_source_material = await _build_generation_source_material(request)
-                if upload_ids:
-                    await queue.put({
-                        "event": "phase",
-                        "data": {
-                            "phase": 0,
-                            "message": "上传素材读取完成，开始生成课程..."
-                        }
-                    })
-                async for event in service.generate_course_stream(
-                    course_title=request.course_title,
-                    source_material=resolved_source_material,
-                    source_info=request.source_info,
-                    processor_id=request.processor_id,
-                    processor_prompt=processor_prompt
-                ):
-                    await queue.put(event)
-            except asyncio.CancelledError:
-                logger.warning("Generation V3 producer cancelled (client disconnected)")
-                raise
-            except HTTPException as exc:
-                detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
-                await queue.put({"_error": detail})
-            except Exception as e:
-                await queue.put({"_error": str(e)})
-            finally:
-                done = True
-                await queue.put(None)
-
-        async def produce_heartbeats():
-            while not done:
-                await asyncio.sleep(15)
-                if not done:
-                    await queue.put({"_heartbeat": True})
-
-        event_task = asyncio.create_task(produce_events())
-        heartbeat_task = asyncio.create_task(produce_heartbeats())
-
+        last_status: Optional[str] = None
+        last_progress: Optional[int] = None
+        last_phase: Optional[str] = None
+        last_chapters: Optional[tuple[int, int]] = None
         try:
-            # 先发送一个注释帧，尽快建立并刷新 SSE 通道
             yield ": stream-start\n\n"
+            yield (
+                "event: task\n"
+                f"data: {json.dumps({'task_id': task_id, 'status': task_info.get('status'), 'queue_position': task_info.get('queue_position'), 'deduplicated': task_info.get('deduplicated', False)}, ensure_ascii=False)}\n\n"
+            )
+
             while True:
-                item = await queue.get()
-                if item is None:
+                status_info = await TaskQueueService.get_task_status(task_id)
+                if not status_info:
+                    yield f"event: error\ndata: {json.dumps({'message': '任务不存在', 'task_id': task_id}, ensure_ascii=False)}\n\n"
                     break
 
-                if isinstance(item, dict) and item.get("_heartbeat"):
-                    yield ": heartbeat\n\n"
-                    continue
+                current_status = str(status_info.get("status") or "pending")
+                progress_pct = int(status_info.get("progress_pct") or 0)
+                current_phase = str(status_info.get("current_phase") or "")
+                chapters_completed = int(status_info.get("chapters_completed") or 0)
+                chapters_total = int(status_info.get("chapters_total") or 0)
+                chapter_tuple = (chapters_completed, chapters_total)
 
-                if isinstance(item, dict) and "_error" in item:
-                    logger.error(f"Generation V3 stream error: {item['_error']}")
-                    yield f"event: error\ndata: {json.dumps({'message': item['_error']})}\n\n"
+                if (
+                    current_status != last_status
+                    or progress_pct != last_progress
+                    or current_phase != last_phase
+                    or chapter_tuple != last_chapters
+                ):
+                    yield (
+                        "event: phase\n"
+                        f"data: {json.dumps({'phase': 0, 'message': current_phase or current_status, 'task_id': task_id, 'status': current_status, 'progress_pct': progress_pct, 'chapters_completed': chapters_completed, 'chapters_total': chapters_total}, ensure_ascii=False)}\n\n"
+                    )
+                    last_status = current_status
+                    last_progress = progress_pct
+                    last_phase = current_phase
+                    last_chapters = chapter_tuple
+
+                if current_status == GenerationTaskStatus.COMPLETED.value:
+                    package_id = status_info.get("package_id")
+                    package_payload = await _load_package_payload(package_id) if package_id else None
+                    if not package_payload:
+                        yield f"event: error\ndata: {json.dumps({'message': '任务已完成但课程包不存在', 'task_id': task_id, 'package_id': package_id}, ensure_ascii=False)}\n\n"
+                        break
+                    yield (
+                        "event: complete\n"
+                        f"data: {json.dumps({'task_id': task_id, 'package_id': package_id, 'package': package_payload, 'stats': _build_stats_from_package(package_payload)}, ensure_ascii=False)}\n\n"
+                    )
+                    break
+                if current_status == GenerationTaskStatus.FAILED.value:
+                    err_msg = status_info.get("error_message") or "课程生成失败"
+                    yield f"event: error\ndata: {json.dumps({'message': err_msg, 'task_id': task_id}, ensure_ascii=False)}\n\n"
+                    break
+                if current_status == GenerationTaskStatus.CANCELLED.value:
+                    yield f"event: error\ndata: {json.dumps({'message': '任务已取消', 'task_id': task_id}, ensure_ascii=False)}\n\n"
                     break
 
-                event_type = item.get("event", "message")
-                event_data = item.get("data", {})
-
-                if event_type == "complete" and "package" in event_data:
-                    pkg = event_data["package"]
-                    try:
-                        await _save_package_to_db(db, pkg, request.processor_id)
-                    except Exception as save_error:
-                        logger.error(f"Failed to save package (non-blocking): {str(save_error)}")
-
-                yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(2)
+                yield ": heartbeat\n\n"
 
         except asyncio.CancelledError:
-            logger.warning("Generation V3 stream cancelled (client disconnected)")
+            # 客户端断开只影响订阅，不影响后台任务执行
+            logger.info("Generation V3 client disconnected: task_id=%s", task_id)
             raise
         except Exception as e:
             logger.error(f"Generation V3 stream error: {str(e)}", exc_info=True)
-            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
-        finally:
-            heartbeat_task.cancel()
-            if not event_task.done():
-                event_task.cancel()
+            yield f"event: error\ndata: {json.dumps({'message': str(e), 'task_id': task_id}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -1541,6 +1556,7 @@ async def generate_course_async(
             source_info=request.source_info,
             processor_id=request.processor_id,
             processor_prompt=processor_prompt,
+            client_request_id=request.client_request_id,
             db=db,
         )
         return {"success": True, **task_info}

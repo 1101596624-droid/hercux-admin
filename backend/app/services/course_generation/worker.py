@@ -31,7 +31,7 @@ from app.db.redis import get_redis
 from app.db.session import AsyncSessionLocal
 from app.models.models import GenerationTask, GenerationTaskStatus, StudioPackage, StudioPackageStatus
 from app.services.course_generation.task_queue import (
-    TaskQueueService, QUEUE_KEY, PROGRESS_KEY_PREFIX, RUNNING_KEY, CANCEL_KEY_PREFIX
+    TaskQueueService, QUEUE_KEY, RUNNING_KEY, CANCEL_KEY_PREFIX
 )
 
 logging.basicConfig(
@@ -84,6 +84,8 @@ async def run_generation_task(task_payload: dict, semaphore: asyncio.Semaphore):
                     await asyncio.wait_for(heartbeat_stop.wait(), timeout=15)
                 except asyncio.TimeoutError:
                     try:
+                        if await TaskQueueService.is_cancelled(task_id):
+                            break
                         await TaskQueueService.update_progress(
                             task_id,
                             status=progress_state["status"],
@@ -174,6 +176,21 @@ async def run_generation_task(task_payload: dict, semaphore: asyncio.Semaphore):
                     # 检查取消标记
                     if await TaskQueueService.is_cancelled(task_id):
                         logger.info(f"任务被取消: {task_id}")
+                        await db.execute(
+                            sql_update(GenerationTask).where(GenerationTask.id == task_id).values(
+                                status=GenerationTaskStatus.CANCELLED.value,
+                                completed_at=datetime.now(timezone.utc),
+                                current_phase="任务已取消",
+                                error_message="用户取消",
+                            )
+                        )
+                        await db.commit()
+                        await _update_progress(
+                            status=GenerationTaskStatus.CANCELLED.value,
+                            current_phase="任务已取消",
+                            error_message="用户取消",
+                        )
+                        await redis.delete(f"{CANCEL_KEY_PREFIX}{task_id}")
                         return
 
                     event_type = event.get("event", "")
@@ -246,17 +263,19 @@ async def run_generation_task(task_payload: dict, semaphore: asyncio.Semaphore):
                             package_id=pkg_id,
                             error_message=None,
                         )
-                        await _stop_heartbeat()
-                        result = await db.execute(
-                            select(GenerationTask).where(GenerationTask.id == task_id)
+                        await db.execute(
+                            sql_update(GenerationTask).where(GenerationTask.id == task_id).values(
+                                status=GenerationTaskStatus.COMPLETED.value,
+                                completed_at=datetime.now(timezone.utc),
+                                package_id=pkg_id,
+                                current_phase="课程生成完成",
+                                progress_pct=100,
+                                error_message=None,
+                            )
                         )
-                        task_obj = result.scalar_one_or_none()
-                        if task_obj:
-                            await db.delete(task_obj)
-                            await db.commit()
-                        await redis.delete(f"{PROGRESS_KEY_PREFIX}{task_id}")
+                        await db.commit()
                         await redis.delete(f"{CANCEL_KEY_PREFIX}{task_id}")
-                        logger.info(f"任务完成并已清理: {task_id}, 课程包: {pkg_id}, course_id: {course_id}")
+                        logger.info(f"任务完成并保留记录: {task_id}, 课程包: {pkg_id}, course_id: {course_id}")
                     else:
                         await db.execute(
                             sql_update(GenerationTask).where(GenerationTask.id == task_id).values(

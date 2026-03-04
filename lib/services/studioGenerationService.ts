@@ -4,17 +4,26 @@
  */
 
 import { useStudioStore, getAllSourceMaterial, getUploadSourceIds } from '@/stores/studio/useStudioStore';
-import { studioGenerateApi, V3StreamCallbacks, V3CourseOutline, V3GenerationStats } from '@/lib/api/studio';
-import type { ProcessorWithConfig, LessonOutline } from '@/types/studio';
+import { studioGenerateApi, studioAsyncApi, V3StreamCallbacks, V3CourseOutline, V3GenerationStats } from '@/lib/api/studio';
+import type { ProcessorWithConfig, LessonOutline, GenerateRequestV2 } from '@/types/studio';
 
 class StudioGenerationService {
   private cancelFn: (() => void) | null = null;
   private isRunning = false;
   private isPaused = false;
   private isPausingOrCancelling = false;
+  private activeTaskId: string | null = null;
+  private currentRequest: GenerateRequestV2 | null = null;
+
+  private createClientRequestId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `studio-v3-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
 
   /**
-   * 开始��成课程 (V3 架构)
+   * 开始生成课程 (V3 架构)
    */
   startGeneration(processor: ProcessorWithConfig | null) {
     const store = useStudioStore.getState();
@@ -31,6 +40,8 @@ class StudioGenerationService {
     }
 
     this.isRunning = true;
+    this.isPaused = false;
+    this.activeTaskId = null;
 
     // Reset generation state
     store.setCurrentView('generating');
@@ -54,19 +65,22 @@ class StudioGenerationService {
       v3ReviewResults: [],
     });
 
-    // Start V3 streaming generation
-    this.cancelFn = studioGenerateApi.generateStreamV3(
-      {
-        course_title: courseTitle,
-        source_material: getAllSourceMaterial(sources),
-        source_upload_ids: getUploadSourceIds(sources),
-        source_info: sourceInfo || '',
-        processor_id: selectedProcessorId,
-      },
-      this.createV3Callbacks()
-    );
+    const requestPayload: GenerateRequestV2 = {
+      course_title: courseTitle,
+      source_material: getAllSourceMaterial(sources),
+      source_upload_ids: getUploadSourceIds(sources),
+      source_info: sourceInfo || '',
+      processor_id: selectedProcessorId,
+      client_request_id: this.createClientRequestId(),
+    };
+    this.currentRequest = requestPayload;
+    this.startStream(requestPayload);
+  }
 
-    // Store cancel function in store
+  private startStream(requestPayload: GenerateRequestV2) {
+    const store = useStudioStore.getState();
+    this.cancelFn = studioGenerateApi.generateStreamV3(requestPayload, this.createV3Callbacks());
+    // 仅中断订阅，不自动取消后台任务
     store.setCancelGeneration(() => this.cancel());
   }
 
@@ -75,6 +89,9 @@ class StudioGenerationService {
    */
   private createV3Callbacks(): V3StreamCallbacks {
     return {
+      onTaskCreated: (taskId) => {
+        this.activeTaskId = taskId;
+      },
       onPhase: (phase, message, processorInfo) => {
         const s = useStudioStore.getState();
         s.setStreamStatus(message);
@@ -179,6 +196,8 @@ class StudioGenerationService {
 
         this.isRunning = false;
         this.cancelFn = null;
+        this.activeTaskId = null;
+        this.currentRequest = null;
       },
 
       onError: (message) => {
@@ -191,6 +210,10 @@ class StudioGenerationService {
         s.setIsGenerating(false);
         this.isRunning = false;
         this.cancelFn = null;
+        if (message.includes('任务已取消')) {
+          this.activeTaskId = null;
+          this.currentRequest = null;
+        }
         console.error('[GenerationService V3] Error:', message);
       },
     };
@@ -211,6 +234,26 @@ class StudioGenerationService {
     const store = useStudioStore.getState();
     store.setIsGenerating(false);
     store.setCancelGeneration(null);
+  }
+
+  /**
+   * 显式取消后台任务（用于“取消生成”按钮）
+   */
+  async cancelWithServer(adminId: number = 1) {
+    const taskId = this.activeTaskId;
+    this.cancel();
+    if (taskId) {
+      try {
+        await studioAsyncApi.cancelTask(taskId, adminId);
+      } catch (error) {
+        console.error('[GenerationService V3] cancel server task failed:', error);
+      }
+    }
+    this.activeTaskId = null;
+    this.currentRequest = null;
+    const store = useStudioStore.getState();
+    store.setStreamStatus('任务已取消');
+    store.setGenerationError('任务已取消');
   }
 
   /**
@@ -263,16 +306,17 @@ class StudioGenerationService {
   }
 
   /**
-   * 继续生成（V3 从头开始，因为监督者需要完整上下文）
+   * 继续订阅（后台任务持续执行，使用同一 request_id 复连）
    */
   resume() {
     if (this.isPaused) {
       this.isPaused = false;
       useStudioStore.setState({ isPaused: false });
-
-      const store = useStudioStore.getState();
-      const processor = store.currentProcessor;
-      this.retry(processor);
+      if (this.currentRequest) {
+        this.isRunning = true;
+        useStudioStore.setState({ isGenerating: true, generationError: null });
+        this.startStream(this.currentRequest);
+      }
     }
   }
 

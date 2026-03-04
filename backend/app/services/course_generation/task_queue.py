@@ -13,6 +13,7 @@
 import json
 import uuid
 import logging
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 from sqlalchemy import select, update
@@ -30,6 +31,7 @@ QUEUE_KEY = "hercu:gen:queue"                    # 任务队列 (Redis List)
 PROGRESS_KEY_PREFIX = "hercu:gen:progress:"      # 任务进度 (Redis Hash)
 RUNNING_KEY = "hercu:gen:running"                # 正在运行的任务集合 (Redis Set)
 CANCEL_KEY_PREFIX = "hercu:gen:cancel:"          # 取消标记 (Redis Key)
+REQUEST_DEDUP_KEY_PREFIX = "hercu:gen:reqdedup:"  # 客户端请求幂等键
 
 
 class TaskQueueService:
@@ -136,11 +138,31 @@ class TaskQueueService:
         source_info: str,
         processor_id: str,
         processor_prompt: Optional[str] = None,
+        client_request_id: Optional[str] = None,
         db: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """提交生成任务到队列"""
         task_id = str(uuid.uuid4())
         redis = await get_redis()
+        dedupe_key: Optional[str] = None
+
+        # 幂等提交：同一 admin + client_request_id 只创建一个任务
+        if client_request_id:
+            dedupe_key = f"{REQUEST_DEDUP_KEY_PREFIX}{admin_id}:{client_request_id.strip()}"
+            existing_task_id = await redis.get(dedupe_key)
+            if existing_task_id:
+                if isinstance(existing_task_id, bytes):
+                    existing_task_id = existing_task_id.decode("utf-8", errors="ignore")
+                status = await TaskQueueService.get_task_status(str(existing_task_id))
+                if status:
+                    logger.info("任务幂等命中: admin=%s request_id=%s task=%s", admin_id, client_request_id, existing_task_id)
+                    return {
+                        "task_id": str(existing_task_id),
+                        "status": status.get("status", "pending"),
+                        "queue_position": 0,
+                        "deduplicated": True,
+                    }
+                await redis.delete(dedupe_key)
 
         # 检查队列长度
         queue_len = await redis.llen(QUEUE_KEY)
@@ -204,6 +226,12 @@ class TaskQueueService:
             await redis.hset(TaskQueueService._progress_key(task_id), mapping={
                 "queue_position": str(queue_len + 1),
             })
+            if dedupe_key:
+                await redis.set(
+                    dedupe_key,
+                    task_id,
+                    ex=max(86400, settings.GENERATION_PROGRESS_TTL),
+                )
 
             logger.info(f"任务已提交: {task_id}, 队列位置: {queue_len + 1}")
 
@@ -211,6 +239,7 @@ class TaskQueueService:
                 "task_id": task_id,
                 "status": "pending",
                 "queue_position": queue_len + 1,
+                "deduplicated": False,
             }
         finally:
             if should_close:
@@ -353,16 +382,26 @@ class TaskQueueService:
             # 从 RUNNING_KEY 移除（无论是否在里面）
             await redis.srem(RUNNING_KEY, task_id)
 
-            # 删除数据库记录（而非仅更新状态），让任务从 list_tasks 彻底消失
-            await db.delete(task)
+            # 保留任务记录，便于退出登录/关闭应用后回看历史
+            await db.execute(
+                update(GenerationTask).where(GenerationTask.id == task_id).values(
+                    status=GenerationTaskStatus.CANCELLED.value,
+                    completed_at=datetime.now(timezone.utc),
+                    current_phase="任务已取消",
+                    error_message="用户取消",
+                )
+            )
             await db.commit()
 
-            # 清理 Redis 进度数据
-            await redis.delete(f"{PROGRESS_KEY_PREFIX}{task_id}")
-            # 注意：不删除 CANCEL_KEY，running 任务需要 Worker 通过它感知取消
-            # cancel key 有 600s TTL，会自动过期
+            await TaskQueueService.update_progress(
+                task_id,
+                status=GenerationTaskStatus.CANCELLED.value,
+                current_phase="任务已取消",
+                error_message="用户取消",
+            )
+            # 注意：running 任务取消依赖 cancel key，让 worker 感知后优雅退出
 
-            logger.info(f"任务已取消并删除: {task_id}")
+            logger.info(f"任务已取消并保留记录: {task_id}")
             return True
 
     @staticmethod
@@ -465,6 +504,7 @@ class TaskQueueService:
                 source_info=task.source_info or "",
                 processor_id=task.processor_id or "",
                 processor_prompt=task.processor_prompt,
+                client_request_id=None,
             )
 
     @staticmethod

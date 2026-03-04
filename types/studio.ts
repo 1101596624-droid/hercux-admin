@@ -121,6 +121,7 @@ export interface GenerationProgress {
 export interface GenerateRequestV2 {
   source_material: string;
   source_upload_ids?: string[];
+  client_request_id?: string;
   course_title: string;
   processor_id: string;
   source_info: string;

@@ -251,6 +251,7 @@ class GenerateRequestV2(BaseModel):
     """V2 generation request"""
     source_material: str = ""
     source_upload_ids: Optional[List[str]] = None
+    client_request_id: Optional[str] = None
     course_title: str
     processor_id: str
     source_info: str = ""

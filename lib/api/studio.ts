@@ -325,6 +325,14 @@ export const studioGenerateApi = {
           }
 
           switch (eventType) {
+            case 'task':
+              callbacks.onTaskCreated?.(
+                eventData.task_id,
+                eventData.status,
+                eventData.queue_position,
+                eventData.deduplicated
+              );
+              break;
             case 'phase':
               callbacks.onPhase(eventData.phase, eventData.message, eventData.processor);
               break;
@@ -529,6 +537,12 @@ export const studioGenerateApi = {
  * V3 流式生成回调接口
  */
 export interface V3StreamCallbacks {
+  onTaskCreated?: (
+    taskId: string,
+    status?: string,
+    queuePosition?: number,
+    deduplicated?: boolean
+  ) => void;
   onPhase: (phase: number, message: string, processor?: ProcessorWithConfig) => void;
   onOutline: (outline: V3CourseOutline) => void;
   onChapterStart: (index: number, total: number, title: string, attempt: number) => void;

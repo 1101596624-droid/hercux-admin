@@ -122,8 +122,8 @@ export default function StudioPage() {
   }, [courseTitle, sources, sourceInfo, selectedProcessorId, processors]);
 
   // Handle cancel
-  const handleCancelGenerate = () => {
-    studioGenerationService.cancel();
+  const handleCancelGenerate = async () => {
+    await studioGenerationService.cancelWithServer(1);
     resetGeneration();
   };
 
@@ -209,11 +209,16 @@ export default function StudioPage() {
   const handleAsyncGenerate = useCallback(async () => {
     if (!canStartGenerate() || isSubmitting) return;
     setIsSubmitting(true);
+    const clientRequestId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `studio-async-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     try {
       const result = await studioAsyncApi.submitGeneration({
         course_title: courseTitle,
         source_material: getAllSourceMaterial(sources),
         source_upload_ids: getUploadSourceIds(sources),
+        client_request_id: clientRequestId,
         source_info: sourceInfo,
         processor_id: selectedProcessorId,
       });
@@ -227,6 +232,19 @@ export default function StudioPage() {
       setIsSubmitting(false);
     }
   }, [courseTitle, sources, sourceInfo, selectedProcessorId, isSubmitting]);
+
+  const handleViewPackage = useCallback(async (packageId: string) => {
+    try {
+      const pkg = await studioPackagesApi.get(packageId);
+      setGeneratedPackage(pkg);
+      setSelectedLessonId(pkg.lessons?.[0]?.lesson_id || null);
+      setCurrentView('result');
+      setShowTaskList(false);
+    } catch (error) {
+      console.error('加载课程包失败:', error);
+      alert(error instanceof Error ? error.message : '加载课程包失败');
+    }
+  }, [setGeneratedPackage, setSelectedLessonId, setCurrentView]);
 
   // Get selected lesson
   const selectedLesson = generatedPackage?.lessons.find(l => l.lesson_id === selectedLessonId) || null;
@@ -272,7 +290,7 @@ export default function StudioPage() {
       {/* Content */}
       {showTaskList ? (
         <div className="flex-1 overflow-auto px-6 py-4">
-          <TaskListView adminId={1} />
+          <TaskListView adminId={1} onViewPackage={handleViewPackage} />
         </div>
       ) : currentView === 'input' ? (
         <>
