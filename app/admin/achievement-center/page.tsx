@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { achievementCenterAPI, BadgeConfig, SkillTreeConfig, AchievementStats, BadgeCategory, BadgeRarity } from '@/lib/api/admin/achievement-center';
+import { achievementCenterAPI, BadgeConfig, SkillTreeConfig, AchievementStats, BadgeCategory, BadgeRarity, BadgeCreateInput, BadgeUpdateInput } from '@/lib/api/admin/achievement-center';
 
 type TabType = 'badges' | 'skill-trees' | 'pending-domains';
 
@@ -411,7 +411,7 @@ function BadgeModal({
 }: {
   badge: BadgeConfig | null;
   onClose: () => void;
-  onSave: (data: any) => Promise<void>;
+  onSave: (data: BadgeCreateInput | BadgeUpdateInput) => Promise<void>;
 }) {
   const isEditing = !!badge;
 
@@ -554,7 +554,7 @@ function BadgeModal({
         ...formData,
         condition: JSON.parse(formData.condition),
         // 只有史诗和传说级别才保存动画
-        unlock_animation: canHaveAnimation ? formData.unlock_animation : null,
+        unlock_animation: canHaveAnimation ? formData.unlock_animation : undefined,
       });
     } finally {
       setSaving(false);

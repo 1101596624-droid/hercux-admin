@@ -18,6 +18,7 @@ from .generator import JSONRepairTool
 from .standards_loader import get_standards_loader
 
 logger = logging.getLogger(__name__)
+LLM_OUTPUT_TOKEN_LIMIT = 8192
 
 
 class CourseSupervisor:
@@ -40,12 +41,109 @@ class CourseSupervisor:
         self._search_service = None
         self.standards_loader = get_standards_loader()  # 新增：标准加载器
 
+    def _llm_max_tokens(self, requested: Optional[int] = None) -> int:
+        """统一限制单次输出token上限为8192。"""
+        if requested is None:
+            return LLM_OUTPUT_TOKEN_LIMIT
+        return max(1, min(requested, LLM_OUTPUT_TOKEN_LIMIT))
+
+    def _get_course_constraints(self) -> Dict[str, Any]:
+        """读取课程标准中的硬性约束，统一供提示词与审核逻辑使用。"""
+        fallback = {
+            "min_chapters": 2,
+            "max_chapters": None,
+            "min_steps": 3,
+            "max_steps": None,
+            "min_text_length": self.quality_standards.min_text_length,
+            "min_key_points": self.quality_standards.min_key_points,
+            "min_total_words": self.quality_standards.min_total_words,
+            "must_components": [],
+            "min_learning_objectives": self.quality_standards.min_learning_objectives,
+            "min_questions": 2,
+            "min_explanation_length": 0,
+            "min_diagram_description": self.quality_standards.min_diagram_description,
+            "pass_score": 75,
+            "retry_threshold": 60,
+        }
+        try:
+            standards = self.standards_loader.get_course_standards() or {}
+            course_level = standards.get("course_level", {}) or {}
+            chapter_level = standards.get("chapter_level", {}) or {}
+            quality_thresholds = standards.get("quality_thresholds", {}) or {}
+            learning_objectives = chapter_level.get("learning_objectives", {}) or {}
+            assessment = chapter_level.get("assessment", {}) or {}
+            illustrated_content = standards.get("illustrated_content", {}) or {}
+
+            return {
+                "min_chapters": course_level.get("min_chapters", fallback["min_chapters"]),
+                "max_chapters": course_level.get("max_chapters", fallback["max_chapters"]),
+                "min_steps": chapter_level.get("min_steps", fallback["min_steps"]),
+                "max_steps": chapter_level.get("max_steps", fallback["max_steps"]),
+                "min_text_length": chapter_level.get("min_text_length_per_step", fallback["min_text_length"]),
+                "min_key_points": chapter_level.get("min_key_points_per_step", fallback["min_key_points"]),
+                "min_total_words": chapter_level.get("min_total_words", fallback["min_total_words"]),
+                "must_components": chapter_level.get("must_have_components", fallback["must_components"]),
+                "min_learning_objectives": learning_objectives.get("min_count", fallback["min_learning_objectives"]),
+                "min_questions": assessment.get("min_questions", fallback["min_questions"]),
+                "min_explanation_length": assessment.get("min_explanation_length", fallback["min_explanation_length"]),
+                "min_diagram_description": illustrated_content.get("min_description_length", fallback["min_diagram_description"]),
+                "pass_score": quality_thresholds.get("pass_score", fallback["pass_score"]),
+                "retry_threshold": quality_thresholds.get("retry_threshold", fallback["retry_threshold"]),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to load course constraints: {e}")
+            return fallback
+
+    def _get_course_standards_brief(self) -> str:
+        """提取课程标准摘要，注入监督者提示词。"""
+        try:
+            constraints = self._get_course_constraints()
+            min_chapters = constraints.get("min_chapters", "N/A")
+            max_chapters = constraints.get("max_chapters")
+            min_steps = constraints.get("min_steps", "N/A")
+            max_steps = constraints.get("max_steps")
+            min_words = constraints.get("min_total_words", "N/A")
+            must_components = constraints.get("must_components", [])
+            min_objectives = constraints.get("min_learning_objectives", "N/A")
+            pass_score = constraints.get("pass_score", "N/A")
+            retry_threshold = constraints.get("retry_threshold", "N/A")
+
+            if max_chapters is None:
+                chapter_count_rule = f"- 课程章节数：至少 {min_chapters} 章"
+            else:
+                chapter_count_rule = f"- 课程章节数：{min_chapters}-{max_chapters} 章"
+
+            if max_steps is None:
+                step_count_rule = f"- 每章步骤数：至少 {min_steps} 步"
+            else:
+                step_count_rule = f"- 每章步骤数：{min_steps}-{max_steps} 步"
+
+            return (
+                "【课程标准（必须遵守）】\n"
+                f"{chapter_count_rule}\n"
+                f"{step_count_rule}\n"
+                f"- 每章最低总字数：{min_words}\n"
+                f"- 每章必须包含组件：{', '.join(must_components) if must_components else 'N/A'}\n"
+                f"- 学习目标最少数量：{min_objectives}\n"
+                f"- 质量通过分：{pass_score}\n"
+                f"- 低于该分需重试：{retry_threshold}\n"
+                f"- 单次输出token上限：{LLM_OUTPUT_TOKEN_LIMIT}\n"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load course standards summary: {e}")
+            return (
+                "【课程标准（回退）】\n"
+                "- 每章内容必须完整、结构合理、无占位符\n"
+                "- 学习目标、步骤内容、测验解释必须达标\n"
+                f"- 单次输出token上限：{LLM_OUTPUT_TOKEN_LIMIT}\n"
+            )
+
     @property
     def search_service(self):
         """Lazy load search service"""
         if self._search_service is None:
-            from app.services.tavily_service import get_tavily_service
-            self._search_service = get_tavily_service()
+            from app.services.deepseek_search_service import get_search_service
+            self._search_service = get_search_service()
         return self._search_service
 
     async def search_latest_info(self, topic: str) -> str:
@@ -57,29 +155,39 @@ class CourseSupervisor:
             return ""
 
     def _detect_source_chapters(self, source_material: str) -> int:
-        """检测源材料中的章节数量"""
+        """检测源材料中的章节数量（按优先级：单元 > 章/节/篇 > Chapter > Markdown标题）"""
         import re
-        patterns = [
-            r'第[一二三四五六七八九十百\d]+[章节篇]',
-            r'Chapter\s+\d+',
-            r'CHAPTER\s+\d+',
-            r'(?m)^#{1,2}\s+\d+[\.\s]',
-            r'(?m)^\d+[\.\、]\s*[^\d\s]',
-        ]
-        chapter_titles = set()
-        for pattern in patterns:
-            matches = re.findall(pattern, source_material)
-            for m in matches:
-                chapter_titles.add(m.strip())
-            if len(chapter_titles) >= 3:
-                break
-        return len(chapter_titles)
+
+        # 优先级1：单元（学校教材的章节单位）
+        unit_matches = set(re.findall(r'第[一二三四五六七八九十百\d]+单元', source_material))
+        if len(unit_matches) >= 2:
+            return min(len(unit_matches), 20)
+
+        # 优先级2：章/节/篇
+        chapter_matches = set(re.findall(r'第[一二三四五六七八九十百\d]+[章节篇]', source_material))
+        if len(chapter_matches) >= 2:
+            return min(len(chapter_matches), 20)
+
+        # 优先级3：英文 Chapter
+        en_matches = set()
+        for p in [r'Chapter\s+\d+', r'CHAPTER\s+\d+']:
+            en_matches.update(re.findall(p, source_material))
+        if len(en_matches) >= 2:
+            return min(len(en_matches), 20)
+
+        # 优先级4：Markdown 标题
+        md_matches = set(re.findall(r'(?m)^#{1,2}\s+\d+[\.\s]', source_material))
+        if len(md_matches) >= 2:
+            return min(len(md_matches), 20)
+
+        return 0
 
     async def generate_outline(
         self,
         state: GenerationState,
         system_prompt: str,
-        processor_constraints: Optional[Dict[str, Any]] = None
+        processor_constraints: Optional[Dict[str, Any]] = None,
+        is_science: bool = True
     ) -> CourseOutline:
         """生成课程大纲
 
@@ -91,6 +199,10 @@ class CourseSupervisor:
 
         # 搜索最新信息
         search_context = await self.search_latest_info(state.course_title)
+        standards_summary = self._get_course_standards_brief()
+        constraints = self._get_course_constraints()
+        default_min_chapters = constraints.get("min_chapters", 2)
+        default_max_chapters = constraints.get("max_chapters")
 
         prompt = f"""你是一位资深的课程设计专家。请为以下课程生成详细的大纲。
 
@@ -102,6 +214,8 @@ class CourseSupervisor:
 
 【源材料信息】
 {state.source_info}
+
+{standards_summary}
 
 """
 
@@ -162,14 +276,21 @@ class CourseSupervisor:
         # 对于大文件（>3万字），检测源材料中的章节数
         min_chapters_hint = ""
         detected_chapter_count = 0
+        required_min_chapters = default_min_chapters
         if material_length > 30000:
             detected_chapter_count = self._detect_source_chapters(state.source_material)
             if detected_chapter_count > 0:
+                required_min_chapters = max(required_min_chapters, detected_chapter_count)
                 min_chapters_hint = f"""
 【源材料章节检测】
 检测到源材料本身包含约 {detected_chapter_count} 个章节/部分。
-【强制要求】生成的课程章节数不得少于 {detected_chapter_count} 章。你必须完整、精确地覆盖源材料中的所有内容，不得遗漏或过度合并。
+【强制要求】生成的课程章节数不得少于 {required_min_chapters} 章。你必须完整、精确地覆盖源材料中的所有内容，不得遗漏或过度合并。
 """
+
+        chapter_count_requirement = f"- 默认课程标准：章节数不得少于 {required_min_chapters} 章"
+        if default_max_chapters is not None:
+            chapter_count_requirement += f"，且不得超过 {default_max_chapters} 章"
+        chapter_count_requirement += "。"
 
         prompt += f"""【课程风格】
 {style_hint}
@@ -180,17 +301,26 @@ class CourseSupervisor:
 """
 
         prompt += """【要求】
-1. 章节数量由你根据以下因素自主决定，不设固定范围：
-   - 【最优先】课程风格：不同风格对章节粒度的要求不同
-   - 【次优先】源材料内容量：材料越丰富，可划分的章节越多
-   - 【参考】知识结构的自然分界：按内容的逻辑边界划分，不要为凑数而拆分或合并
-   - 【强制】如果上方有"源材料章节检测"，生成的章节数不得少于检测到的数量
-2. 【核心原则】课程必须完整、精确地表达源材料中的所有内容，不得遗漏任何重要知识点
+1. 章节数量必须满足硬约束：
+"""
+        prompt += f"""   {chapter_count_requirement}
+   - 若上方存在"课程风格结构约束"，以其为最高优先级并覆盖默认标准
+   - 在满足硬约束前提下，再根据课程风格、源材料内容量和知识结构自然分界确定章节粒度
+"""
+        prompt += """2. 【核心原则】课程必须完整、精确地表达源材料中的所有内容，不得遗漏任何重要知识点
 3. 每章要有明确的学习目标和核心概念
 4. 章节之间要有逻辑递进关系
-5. 为每章建议合适的模拟器主题（用于可视化演示核心概念）
+"""
+
+        if is_science:
+            prompt += """5. 为每章建议合适的模拟器主题（用于可视化演示核心概念）
 6. 模拟器主题要具体、可实现，且各章不重复
-7. 【重要】确保内容反映最新的研究成果和行业动态
+"""
+        else:
+            prompt += """5. 本课程为文科类课程，不需要生成模拟器（simulator）步骤
+"""
+
+        prompt += """7. 【重要】确保内容反映最新的研究成果和行业动态
 
 【章节标题要求 - 非常重要】
 - 章节标题必须具体、专业，体现该章的核心内容
@@ -219,7 +349,10 @@ class CourseSupervisor:
             "index": 0,
             "title": "具体的章节标题",
             "chapter_type": "introduction",
-            "recommended_forms": ["text_content", "simulator", "assessment"],
+"""
+
+        if is_science:
+            prompt += """            "recommended_forms": ["text_content", "simulator", "assessment"],
             "complexity_level": "simple",
             "key_concepts": ["概念1", "概念2"],
             "learning_objectives": ["目标1", "目标2"],
@@ -248,6 +381,30 @@ class CourseSupervisor:
 - 模拟器主题要具体到可以用代码实现（如"展示力的合成与分解"而非"物理模拟"）
 - 同一课程内的图片（illustrated_content）和模拟器之间要有明显区别，不能视觉重复
 """
+        else:
+            prompt += """            "recommended_forms": ["text_content", "illustrated_content", "assessment"],
+            "complexity_level": "simple",
+            "key_concepts": ["概念1", "概念2"],
+            "learning_objectives": ["目标1", "目标2"]
+        },
+        {
+            "index": 1,
+            "title": "另一个具体的章节标题",
+            "chapter_type": "core_content",
+            "recommended_forms": ["text_content", "illustrated_content", "ai_tutor", "assessment"],
+            "complexity_level": "standard",
+            "key_concepts": ["概念3", "概念4"],
+            "learning_objectives": ["目标3", "目标4"]
+        }
+    ]
+}
+
+注意：
+- chapters 数组中列出所有章节，不要用省略号(...)
+- 必须输出完整、可直接解析的JSON
+- 不要在JSON中添加注释
+- 本课程为文科类课程，不需要 suggested_simulator 字段，也不需要 simulator 类型的步骤
+"""
 
         # 记录对话
         self.conversation_messages.append({
@@ -258,7 +415,7 @@ class CourseSupervisor:
         response = await self.claude_service.generate_raw_response(
             prompt=prompt,
             system_prompt=system_prompt,
-            max_tokens=4000
+            max_tokens=self._llm_max_tokens()
         )
 
         self.conversation_messages.append({
@@ -267,13 +424,13 @@ class CourseSupervisor:
         })
 
         # 解析大纲
-        outline = self._parse_outline(response, state)
+        outline = self._parse_outline(response, state, is_science=is_science)
         state.outline = outline
 
         logger.info(f"Generated outline with {outline.total_chapters} chapters")
         return outline
 
-    def _parse_outline(self, response: str, state: GenerationState) -> CourseOutline:
+    def _parse_outline(self, response: str, state: GenerationState, is_science: bool = True) -> CourseOutline:
         """解析大纲JSON，带JSON修复"""
         course_title = state.course_title
         try:
@@ -306,15 +463,23 @@ class CourseSupervisor:
                 except ValueError:
                     chapter_type = ChapterType.CORE_CONTENT
 
+                recommended_forms = ch_data.get('recommended_forms', ['text_content'])
+                suggested_sim = ch_data.get('suggested_simulator')
+
+                # 非理科课程：强制移除 simulator 相关内容
+                if not is_science:
+                    recommended_forms = [f for f in recommended_forms if f != 'simulator']
+                    suggested_sim = None
+
                 chapters.append(ChapterOutline(
                     index=ch_data.get('index', len(chapters)),
                     title=ch_data.get('title', f'第{len(chapters)+1}章'),
                     chapter_type=chapter_type,
-                    recommended_forms=ch_data.get('recommended_forms', ['text_content']),
+                    recommended_forms=recommended_forms,
                     complexity_level=ch_data.get('complexity_level', 'standard'),
                     key_concepts=ch_data.get('key_concepts', []),
                     learning_objectives=ch_data.get('learning_objectives', []),
-                    suggested_simulator=ch_data.get('suggested_simulator')
+                    suggested_simulator=suggested_sim
                 ))
 
             return CourseOutline(
@@ -351,21 +516,37 @@ class CourseSupervisor:
                 fallback_count = 12
 
             fallback_chapters = []
-            # 循环使用的章节类型模板
-            templates = [
-                (ChapterType.INTRODUCTION, "simple", ["text_content"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
-                (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content", "ai_tutor", "assessment"]),
-                (ChapterType.PRACTICE, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
-                (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
-                (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
-                (ChapterType.PRACTICE, "standard", ["text_content", "simulator"]),
-                (ChapterType.ASSESSMENT, "simple", ["text_content", "ai_tutor", "assessment"]),
-            ]
+            # 循环使用的章节类型模板（根据学科类型选择）
+            if is_science:
+                templates = [
+                    (ChapterType.INTRODUCTION, "simple", ["text_content"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
+                    (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content", "ai_tutor", "assessment"]),
+                    (ChapterType.PRACTICE, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
+                    (ChapterType.CORE_CONTENT, "advanced", ["text_content", "simulator"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "simulator", "ai_tutor", "assessment"]),
+                    (ChapterType.PRACTICE, "standard", ["text_content", "simulator"]),
+                    (ChapterType.ASSESSMENT, "simple", ["text_content", "ai_tutor", "assessment"]),
+                ]
+            else:
+                templates = [
+                    (ChapterType.INTRODUCTION, "simple", ["text_content"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content", "ai_tutor", "assessment"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                    (ChapterType.CORE_CONTENT, "advanced", ["text_content", "illustrated_content", "ai_tutor", "assessment"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                    (ChapterType.PRACTICE, "standard", ["text_content", "ai_tutor", "assessment"]),
+                    (ChapterType.CORE_CONTENT, "advanced", ["text_content", "illustrated_content"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content", "ai_tutor", "assessment"]),
+                    (ChapterType.CORE_CONTENT, "standard", ["text_content", "illustrated_content"]),
+                    (ChapterType.PRACTICE, "standard", ["text_content", "ai_tutor", "assessment"]),
+                    (ChapterType.ASSESSMENT, "simple", ["text_content", "ai_tutor", "assessment"]),
+                ]
             for i in range(fallback_count):
                 t = templates[i] if i < len(templates) else templates[-1]
                 fallback_chapters.append(ChapterOutline(
@@ -395,6 +576,7 @@ class CourseSupervisor:
 
         outline = state.outline
         chapter_outline = outline.chapters[chapter_index]
+        standards_summary = self._get_course_standards_brief()
 
         # 基础信息
         prompt = f"""【章节生成任务】
@@ -415,6 +597,9 @@ class CourseSupervisor:
 - 课程描述：{outline.description}
 - 核心概念：{', '.join(outline.core_concepts)}
 - 难度级别：{outline.difficulty}
+- 单次输出token上限：{LLM_OUTPUT_TOKEN_LIMIT}
+
+{standards_summary}
 
 """
 
@@ -432,6 +617,23 @@ class CourseSupervisor:
 2. custom_code 中的代码字符串必须正确转义（引号用 \\"，换行用 \\n）
 3. 确保所有括号正确闭合
 4. 不要在JSON中使用注释
+
+"""
+
+        # 如果上次有步骤重试失败，添加定向修复指导
+        if hasattr(state, 'last_step_error') and state.last_step_error:
+            prompt += f"""
+【重要 - 上次步骤重试失败】
+失败原因：{state.last_step_error}
+
+监督者修复指导：
+{getattr(state, 'step_fix_guidance', '请根据失败原因逐条修复，禁止输出占位文本')}
+
+请特别注意：
+1. 所有失败项必须在本次生成中显式修复
+2. 禁止输出占位内容（如“待补充”“略”“问题1”）
+3. 输出必须满足课程标准中的最小结构与质量要求
+4. 本次输出不得超过 {LLM_OUTPUT_TOKEN_LIMIT} tokens
 
 """
 
@@ -472,15 +674,18 @@ class CourseSupervisor:
 
 """
 
+        # 判断是否理科（决定是否在骨架中包含模拟器）
+        is_science = state.subject_classification.get('is_science', False) if state.subject_classification else False
+
         # 添加质量要求
-        prompt += self._get_quality_requirements()
+        prompt += self._get_quality_requirements(is_science=is_science)
 
         # 添加输出格式
-        prompt += self._get_output_format(chapter_index, chapter_outline)
+        prompt += self._get_output_format(chapter_index, chapter_outline, is_science=is_science)
 
         return prompt
 
-    def _get_quality_requirements(self) -> str:
+    def _get_quality_requirements(self, is_science: bool = True) -> str:
         """
         获取质量要求说明 - 骨架生成阶段专用
 
@@ -488,23 +693,24 @@ class CourseSupervisor:
         代码质量要求已移至 generator.py 的代码生成阶段。
         文本质量要求已移至 service.py 的文本生成阶段。
         """
-        return """
-【质量要求 - 骨架生成阶段】
+        constraints = self._get_course_constraints()
+        min_steps = constraints.get("min_steps", 7)
+        max_steps = constraints.get("max_steps")
+        min_objectives = constraints.get("min_learning_objectives", 3)
+        min_key_points = constraints.get("min_key_points", 4)
 
-=== 章节结构要求 ===
+        if max_steps is None:
+            step_count_rule = f"1. 步骤数量：至少 {min_steps} 步"
+        else:
+            step_count_rule = f"1. 步骤数量：{min_steps}-{max_steps} 步"
 
-1. 步骤数量：由你根据该章节的内容深度和课程风格自主决定，不设固定范围
-2. 步骤类型由你自主搭配，可用类型：
-   - text_content（纯文本讲解）
+        if is_science:
+            step_types = """   - text_content（纯文本讲解）
    - illustrated_content（图文讲解）
    - simulator（互动模拟器）
    - ai_tutor（AI导师苏格拉底式提问 - 检验学生理解深度）
-   - assessment（测验）
-3. 【重要】同一课程内的图片和模拟器必须有明显区别，不能重复相似的视觉内容
-4. 【重要】每章建议在 assessment 前安排一个 ai_tutor 步骤，通过AI导师对话检验学生理解
-5. 学习目标：至少 4 个，使用动词开头
-6. 每个步骤的 key_points：3-5 个要点
-
+   - assessment（测验）"""
+            simulator_req = """
 === 模拟器变量要求（重要）===
 
 模拟器的 variables 数组必须完整定义：
@@ -513,12 +719,36 @@ class CourseSupervisor:
 - 变量之间应有逻辑关联
 - 示例：
   {"name": "speed", "label": "速度", "min": 1, "max": 100, "default": 50, "step": 1, "unit": "m/s"}
+"""
+            visual_note = "3. 【重要】同一课程内的图片和模拟器必须有明显区别，不能重复相似的视觉内容"
+            extra_prohibit = "- 不要遗漏 variables 定义"
+        else:
+            step_types = """   - text_content（纯文本讲解）
+   - illustrated_content（图文讲解）
+   - ai_tutor（AI导师苏格拉底式提问 - 检验学生理解深度）
+   - assessment（测验）"""
+            simulator_req = ""
+            visual_note = "3. 【重要】本课程为文科类课程，不要生成 simulator 类型的步骤"
+            extra_prohibit = "- 不要生成 simulator 类型的步骤"
 
+        return f"""
+【质量要求 - 骨架生成阶段】
+
+=== 章节结构要求 ===
+
+{step_count_rule}
+2. 步骤类型由你自主搭配，可用类型：
+{step_types}
+{visual_note}
+4. 【重要】每章在 assessment 前安排一个 ai_tutor 步骤，通过AI导师对话检验学生理解
+5. 学习目标：至少 {min_objectives} 个，使用动词开头
+6. 每个步骤的 key_points：至少 {min_key_points} 个要点
+{simulator_req}
 === 禁止事项 ===
 
 - 不要有"待补充"、"..."、"暂无"、"略"等占位内容
 - 不要在 key_points 中写空字符串
-- 不要遗漏 variables 定义
+{extra_prohibit}
 
 === 重要提醒 ===
 
@@ -528,117 +758,138 @@ class CourseSupervisor:
 - explanation 字段留空（后续自动生成）
 - rationale 字段留空（后续自动生成）
 - custom_code 字段留空（后续自动生成）
+- ai_spec 中的 opening_message 留空、probing_questions 和 diagnostic_focus 使用模板占位符即可（后续自动生成真实内容）
 
 """
 
-    def _get_output_format(self, chapter_index: int, chapter_outline: ChapterOutline) -> str:
+    def _get_output_format(self, chapter_index: int, chapter_outline: ChapterOutline, is_science: bool = True) -> str:
         """获取输出格式说明 - 简化版, 所有长文本由后续步骤生成"""
-        return f"""
-【输出格式 - 简化骨架版】
-为确保 JSON 解析成功，请输出简化的章节骨架。所有长文本内容将由系统后续自动生成。
 
-{{
-    "lesson_id": "lesson_{chapter_index + 1}",
-    "title": "{chapter_outline.title}",
-    "order": {chapter_index},
-    "total_steps": 步骤数量,
-    "rationale": "",
-    "steps": [
-        {{
-            "step_id": "step_1",
-            "type": "text_content",
-            "title": "步骤标题（简短）",
-            "content": {{
-                "body": "",
-                "key_points": ["要点1", "要点2", "要点3"]
-            }}
-        }},
-        {{
-            "step_id": "step_2",
-            "type": "illustrated_content",
-            "title": "图文讲解：xxx",
-            "content": {{
-                "body": "",
-                "key_points": ["要点1", "要点2"]
-            }},
-            "diagram_spec": {{
-                "diagram_id": "diagram_1",
-                "type": "static_diagram",
-                "description": "图片描述（30字以内的关键词）",
-                "style": "educational",
-                "elements": ["元素1", "元素2"]
-            }}
-        }},
-        {{
+        lesson_id = f"lesson_{chapter_index + 1}"
+        title = chapter_outline.title
+        complexity = chapter_outline.complexity_level
+        constraints = self._get_course_constraints()
+        min_steps = constraints.get("min_steps", 7)
+        max_steps = constraints.get("max_steps")
+
+        # 模拟器步骤示例（仅理科）
+        if is_science:
+            simulator_block = """
+        {
             "step_id": "step_3",
             "type": "simulator",
             "title": "互动模拟：xxx",
-            "simulator_spec": {{
+            "simulator_spec": {
                 "mode": "custom",
                 "name": "模拟器名称",
                 "description": "简短描述（30字以内）",
                 "variables": [
-                    {{"name": "var1", "label": "变量1", "min": 0, "max": 100, "default": 50, "step": 1, "unit": "单位"}},
-                    {{"name": "var2", "label": "变量2", "min": 0, "max": 100, "default": 50, "step": 1, "unit": "单位"}}
+                    {"name": "var1", "label": "变量1", "min": 0, "max": 100, "default": 50, "step": 1, "unit": "单位"},
+                    {"name": "var2", "label": "变量2", "min": 0, "max": 100, "default": 50, "step": 1, "unit": "单位"}
                 ],
                 "custom_code": ""
-            }}
-        }},
-        {{
-            "step_id": "step_4",
-            "type": "ai_tutor",
-            "title": "AI导师：核心概念检测",
-            "ai_spec": {{
-                "mode": "proactive_assessment",
-                "opening_message": "",
-                "probing_questions": [{{"question":"问题","intent":"意图","expected_elements":["要素"]}}],
-                "diagnostic_focus": {{"key_concepts":["概念"],"common_misconceptions":["误区"]}},
-                "max_turns": 6
-            }}
-        }},
-        {{
-            "step_id": "step_5",
-            "type": "assessment",
-            "title": "知识检测",
-            "assessment_spec": {{
-                "type": "quick_check",
-                "questions": [
-                    {{
-                        "question": "问题内容（简短）",
-                        "options": ["A", "B", "C", "D"],
-                        "correct": "A",
-                        "explanation": ""
-                    }}
-                ],
-                "pass_required": true
-            }}
-        }}
-    ],
-    "estimated_minutes": 预估时长,
-    "learning_objectives": ["目标1", "目标2", "目标3"],
-    "complexity_level": "{chapter_outline.complexity_level}"
-}}
+            }
+        },"""
+            ai_step_id = "step_4"
+            assess_step_id = "step_5"
+            step_type_note = '- 步骤类型自主搭配（text_content、illustrated_content、simulator、ai_tutor、assessment）\n- 同一课程内的图片和模拟器必须有明显区别'
+        else:
+            simulator_block = ""
+            ai_step_id = "step_3"
+            assess_step_id = "step_4"
+            step_type_note = '- 步骤类型自主搭配（text_content、illustrated_content、ai_tutor、assessment）\n- 本课程为文科类课程，不要生成 simulator 类型的步骤'
 
-【极其重要 - 必须遵守】
-1. 所有 body 字段必须为空字符串 ""
-2. 所有 description 字段必须简短（30字以内）
-3. 所有 explanation 字段必须为空字符串 ""
-4. rationale 字段必须为空字符串 ""
-5. custom_code 字段必须为空字符串 ""
-6. 只填写结构信息：step_id、type、title、key_points、variables
+        # 用普通字符串拼接构建JSON模板，避免f-string花括号转义问题
+        json_template = (
+            '{\n'
+            '    "lesson_id": "' + lesson_id + '",\n'
+            '    "title": "' + title + '",\n'
+            '    "order": ' + str(chapter_index) + ',\n'
+            '    "total_steps": ' + str(min_steps) + ',\n'
+            '    "rationale": "",\n'
+            '    "steps": [\n'
+            '        {\n'
+            '            "step_id": "step_1",\n'
+            '            "type": "text_content",\n'
+            '            "title": "步骤标题（简短）",\n'
+            '            "content": {\n'
+            '                "body": "",\n'
+            '                "key_points": ["要点1", "要点2", "要点3"]\n'
+            '            }\n'
+            '        },\n'
+            '        {\n'
+            '            "step_id": "step_2",\n'
+            '            "type": "illustrated_content",\n'
+            '            "title": "图文讲解：xxx",\n'
+            '            "content": {\n'
+            '                "body": "",\n'
+            '                "key_points": ["要点1", "要点2"]\n'
+            '            },\n'
+            '            "diagram_spec": {\n'
+            '                "diagram_id": "diagram_1",\n'
+            '                "type": "static_diagram",\n'
+            '                "description": "图片描述（30字以内的关键词）",\n'
+            '                "style": "educational",\n'
+            '                "elements": ["元素1", "元素2"]\n'
+            '            }\n'
+            '        },' + simulator_block + '\n'
+            '        {\n'
+            '            "step_id": "' + ai_step_id + '",\n'
+            '            "type": "ai_tutor",\n'
+            '            "title": "AI导师：核心概念检测",\n'
+            '            "ai_spec": {\n'
+            '                "mode": "proactive_assessment",\n'
+            '                "opening_message": "",\n'
+            '                "probing_questions": [{"question":"问题","intent":"意图","expected_elements":["要素"]}],\n'
+            '                "diagnostic_focus": {"key_concepts":["概念"],"common_misconceptions":["误区"]},\n'
+            '                "max_turns": 6\n'
+            '            }\n'
+            '        },\n'
+            '        {\n'
+            '            "step_id": "' + assess_step_id + '",\n'
+            '            "type": "assessment",\n'
+            '            "title": "知识检测",\n'
+            '            "assessment_spec": {\n'
+            '                "type": "quick_check",\n'
+            '                "questions": [\n'
+            '                    {\n'
+            '                        "question": "问题内容（简短）",\n'
+            '                        "options": ["A", "B", "C", "D"],\n'
+            '                        "correct": "A",\n'
+            '                        "explanation": ""\n'
+            '                    }\n'
+            '                ],\n'
+            '                "pass_required": true\n'
+            '            }\n'
+            '        }\n'
+            '    ],\n'
+            '    "estimated_minutes": 20,\n'
+            '    "learning_objectives": ["目标1", "目标2", "目标3"],\n'
+            '    "complexity_level": "' + complexity + '"\n'
+            '}'
+        )
 
-【JSON 格式规范】
-1. 使用英文双引号 " "，不要用中文引号
-2. 不要在字符串中直接换行
-3. 数组最后一个元素后不要加逗号
+        return (
+            '\n【输出格式 - 简化骨架版】\n'
+            '为确保 JSON 解析成功，请输出简化的章节骨架。所有长文本内容将由系统后续自动生成。\n\n'
+            + json_template + '\n\n'
+            '【极其重要 - 必须遵守】\n'
+            '1. 所有 body 字段必须为空字符串 ""\n'
+            '2. 所有 description 字段必须简短（30字以内）\n'
+            '3. 所有 explanation 字段必须为空字符串 ""\n'
+            '4. rationale 字段必须为空字符串 ""\n'
+            '5. custom_code 字段必须为空字符串 ""\n'
+            '6. 只填写结构信息：step_id、type、title、key_points、variables\n\n'
+            '【JSON 格式规范】\n'
+            '1. 使用英文双引号 " "，不要用中文引号\n'
+            '2. 不要在字符串中直接换行\n'
+            '3. 数组最后一个元素后不要加逗号\n\n'
+            '【章节结构要求】\n'
+            + (f'- 步骤数量必须在 {min_steps}-{max_steps} 之间\n' if max_steps is not None else f'- 步骤数量至少 {min_steps} 步\n')
+            + step_type_note + '\n\n'
+            '请直接输出JSON，不要有其他内容。\n'
+        )
 
-【章节结构要求】
-- 步骤数量由你根据章节内容深度自主决定
-- 步骤类型自主搭配（text_content、illustrated_content、simulator、ai_tutor、assessment）
-- 同一课程内的图片和模拟器必须有明显区别
-
-请直接输出JSON，不要有其他内容。
-"""
 
     async def review_chapter(
         self,
@@ -657,11 +908,20 @@ class CourseSupervisor:
         simulator_score = 100
 
         chapter_outline = state.outline.chapters[chapter_index]
+        constraints = self._get_course_constraints()
+        min_steps = constraints.get("min_steps", 3)
+        max_steps = constraints.get("max_steps")
+        min_questions = constraints.get("min_questions", 2)
+        min_explanation_length = constraints.get("min_explanation_length", 0)
+        min_learning_objectives = constraints.get("min_learning_objectives", 3)
 
-        # === 1. 步骤数量（不设硬限制，仅记录极端情况） ===
-        if chapter.total_steps < 3:
-            issues.append(f"步骤过少，只有{chapter.total_steps}步，内容可能不完整")
+        # === 1. 步骤数量（严格遵循课程标准） ===
+        if chapter.total_steps < min_steps:
+            issues.append(f"步骤过少，只有{chapter.total_steps}步，至少需要{min_steps}步")
             content_score -= 15
+        if max_steps is not None and chapter.total_steps > max_steps:
+            issues.append(f"步骤过多，当前{chapter.total_steps}步，最多允许{max_steps}步")
+            content_score -= 10
 
         # === 2. 检查模拟器质量（使用统一评分系统）===
         simulators = [s for s in chapter.steps if s.type == 'simulator']
@@ -711,9 +971,25 @@ class CourseSupervisor:
                 len(a.assessment_spec.get('questions', []))
                 for a in assessments if a.assessment_spec
             )
-            if total_questions == 0:
-                issues.append("测验步骤没有题目内容")
+            if total_questions < min_questions:
+                issues.append(f"测验题目不足：当前{total_questions}道，至少需要{min_questions}道")
                 content_score -= 10
+
+            # 检查解析长度
+            for assessment in assessments:
+                if not assessment.assessment_spec:
+                    continue
+                for q_idx, q in enumerate(assessment.assessment_spec.get('questions', []), start=1):
+                    explanation = (q.get('explanation') or '').strip()
+                    if not explanation:
+                        issues.append(f"测验第{q_idx}题缺少解析")
+                        content_score -= 5
+                        continue
+                    if min_explanation_length > 0 and len(explanation) < min_explanation_length:
+                        issues.append(
+                            f"测验第{q_idx}题解析过短（{len(explanation)}字），至少需要{min_explanation_length}字"
+                        )
+                        content_score -= 3
 
         # === 5. 检查图文区别性（不限数量，但要有区别） ===
         illustrated = [s for s in chapter.steps if s.type == 'illustrated_content']
@@ -729,10 +1005,17 @@ class CourseSupervisor:
                 content_score -= 15
 
         # === 7. 检查与大纲的一致性 ===
+        if len(chapter.learning_objectives) < min_learning_objectives:
+            issues.append(
+                f"学习目标不足：当前{len(chapter.learning_objectives)}个，至少需要{min_learning_objectives}个"
+            )
+            content_score -= 10
+
+        # === 8. 检查与大纲的一致性 ===
         if chapter.title != chapter_outline.title:
             suggestions.append(f"章节标题与大纲不一致，大纲为'{chapter_outline.title}'")
 
-        # === 8. 生成每个步骤的详细审核结果（用于单步重做）===
+        # === 9. 生成每个步骤的详细审核结果（用于单步重做）===
         step_reviews = []
         for i, step in enumerate(chapter.steps):
             step_review = await self.review_single_step(state, chapter, i)
@@ -846,7 +1129,7 @@ class CourseSupervisor:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是一位严格的课程质量审核专家。",
-                max_tokens=1000
+                max_tokens=self._llm_max_tokens()
             )
 
             # 解析AI审核结果
@@ -918,18 +1201,30 @@ class CourseSupervisor:
         self,
         raw_response: str,
         error_message: str,
-        chapter_index: int
+        chapter_index: int,
+        error_type: str = "unknown",
+        is_truncated: bool = False
     ) -> str:
         """分析 JSON 解析错误并生成修复指导"""
 
         # 截取响应的关键部分
         response_preview = raw_response[:2000] if len(raw_response) > 2000 else raw_response
         response_end = raw_response[-500:] if len(raw_response) > 500 else ""
+        standards_summary = self._get_course_standards_brief()
 
         prompt = f"""生成器返回的章节内容无法解析为有效的 JSON。请分析问题并给出修复指导。
 
+【章节】
+第{chapter_index + 1}章
+
 【错误信息】
 {error_message}
+
+【错误类型】
+{error_type}
+
+【是否疑似截断】
+{"是" if is_truncated else "否"}
 
 【响应开头】
 {response_preview}
@@ -937,25 +1232,85 @@ class CourseSupervisor:
 【响应结尾】
 {response_end}
 
+{standards_summary}
+
 【常见问题】
 1. JSON 字符串中包含未转义的引号或换行符
 2. JSON 结构不完整（缺少闭合括号）
 3. 在 JSON 外有多余的文字说明
-4. custom_code 字段中的代码包含特殊字符未转义
+4. 输出超过token预算导致尾部截断
 
-请分析具体问题，并以简洁的指令形式给出修复建议（不超过200字）。
+请分析具体问题，并输出严格可执行的修复指令（不超过200字），必须覆盖：
+1. 本次重试最关键的3条约束
+2. 必须避免的输出错误
+3. 输出不能超过 {LLM_OUTPUT_TOKEN_LIMIT} tokens
 直接输出修复指令，不要有其他内容。"""
 
         try:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是一位 JSON 格式专家，擅长诊断和修复 JSON 解析问题。",
-                max_tokens=500
+                max_tokens=self._llm_max_tokens()
             )
             return response.strip()
         except Exception as e:
             logger.warning(f"Failed to analyze JSON error: {e}")
-            return "请确保输出纯净的 JSON 格式，不要有任何额外文字。代码字符串中的引号和换行符必须正确转义。"
+            return (
+                "请输出可解析JSON；先保证括号闭合和字符串转义正确；"
+                f"严格遵守课程标准并将输出限制在 {LLM_OUTPUT_TOKEN_LIMIT} tokens 内。"
+            )
+
+    async def analyze_step_retry_guidance(
+        self,
+        state: GenerationState,
+        chapter_title: str,
+        step_index: int,
+        step_type: str,
+        step_title: str,
+        failure_reason: str,
+        attempt: int,
+        max_attempts: int
+    ) -> str:
+        """基于失败原因生成步骤重试指导。"""
+        standards_summary = self._get_course_standards_brief()
+        prompt = f"""你是课程生成监督者。请根据步骤失败原因，生成下一次重试用的精确修复指令。
+
+【课程】
+{state.course_title}
+
+【章节】
+{chapter_title}
+
+【步骤】
+index={step_index}，type={step_type}，title={step_title}
+
+【失败原因】
+{failure_reason}
+
+【重试次数】
+第{attempt}/{max_attempts}次
+
+{standards_summary}
+
+请输出“重试指导”文本（120字内），必须包含：
+1. 本次必须修复的2-3项
+2. 禁止出现的错误
+3. 输出不得超过 {LLM_OUTPUT_TOKEN_LIMIT} tokens
+不要输出JSON。"""
+
+        try:
+            response = await self.claude_service.generate_raw_response(
+                prompt=prompt,
+                system_prompt="你是一位严格的课程质量监督者，擅长将失败原因转成可执行重试指令。",
+                max_tokens=self._llm_max_tokens()
+            )
+            return response.strip()
+        except Exception as e:
+            logger.warning(f"Failed to analyze step retry guidance: {e}")
+            return (
+                "本次必须修复失败项并补齐必填结构；禁止占位文本；"
+                f"输出长度限制为 {LLM_OUTPUT_TOKEN_LIMIT} tokens。"
+            )
 
     def get_step_regeneration_context(
         self,
@@ -1023,19 +1378,25 @@ class CourseSupervisor:
         issues = []
         suggestions = []
         score = 100
+        constraints = self._get_course_constraints()
+        min_text_length = constraints.get("min_text_length", self.quality_standards.min_text_length)
+        min_key_points = constraints.get("min_key_points", self.quality_standards.min_key_points)
+        min_diagram_description = constraints.get("min_diagram_description", self.quality_standards.min_diagram_description)
+        min_questions = constraints.get("min_questions", 2)
+        min_explanation_length = constraints.get("min_explanation_length", 0)
 
         # 根据步骤类型进行审核
         if step.type == 'text_content' or step.type == 'illustrated_content':
             # 检查内容长度
             if step.content:
                 body = step.content.get('body', '')
-                if len(body) < self.quality_standards.min_text_length:
-                    issues.append(f"内容太短，只有{len(body)}字，至少需要{self.quality_standards.min_text_length}字")
+                if len(body) < min_text_length:
+                    issues.append(f"内容太短，只有{len(body)}字，至少需要{min_text_length}字")
                     score -= 20
 
                 key_points = step.content.get('key_points', [])
-                if len(key_points) < self.quality_standards.min_key_points:
-                    issues.append(f"要点太少，只有{len(key_points)}个，至少需要{self.quality_standards.min_key_points}个")
+                if len(key_points) < min_key_points:
+                    issues.append(f"要点太少，只有{len(key_points)}个，至少需要{min_key_points}个")
                     score -= 10
 
                 # 检查禁止内容
@@ -1055,8 +1416,8 @@ class CourseSupervisor:
                 elif not step.diagram_spec.get('description'):
                     issues.append("图片描述为空")
                     score -= 15
-                elif len(step.diagram_spec.get('description', '')) < 50:
-                    issues.append("图片描述太短，至少需要50字")
+                elif len(step.diagram_spec.get('description', '')) < min_diagram_description:
+                    issues.append(f"图片描述太短，至少需要{min_diagram_description}字")
                     suggestions.append("请详细描述图片内容，包括主题、场景、关键元素、视觉风格")
                     score -= 10
 
@@ -1082,9 +1443,9 @@ class CourseSupervisor:
         elif step.type == 'assessment':
             if step.assessment_spec:
                 questions = step.assessment_spec.get('questions', [])
-                if len(questions) < 2:
+                if len(questions) < min_questions:
                     issues.append(f"测验题目太少，只有{len(questions)}道")
-                    suggestions.append("至少需要2道测验题目")
+                    suggestions.append(f"至少需要{min_questions}道测验题目")
                     score -= 15
 
                 # 检查每道题的完整性
@@ -1098,6 +1459,11 @@ class CourseSupervisor:
                     if not q.get('explanation'):
                         issues.append(f"第{i+1}题缺少解析")
                         score -= 5
+                    elif min_explanation_length > 0 and len((q.get('explanation') or '').strip()) < min_explanation_length:
+                        issues.append(
+                            f"第{i+1}题解析过短，至少需要{min_explanation_length}字"
+                        )
+                        score -= 3
             else:
                 issues.append("测评步骤缺少 assessment_spec")
                 score -= 30
@@ -1145,10 +1511,16 @@ class CourseSupervisor:
         issues = []
         suggestions = []
         chapter_outline = state.outline.chapters[chapter_index]
+        constraints = self._get_course_constraints()
+        min_steps = constraints.get("min_steps", 3)
+        max_steps = constraints.get("max_steps")
+        min_learning_objectives = constraints.get("min_learning_objectives", 3)
 
-        # 1. 检查步骤数量（仅极端情况报警）
-        if chapter.total_steps < 3:
-            issues.append(f"步骤过少：{chapter.total_steps}步，内容可能不完整")
+        # 1. 检查步骤数量（严格遵循课程标准）
+        if chapter.total_steps < min_steps:
+            issues.append(f"步骤过少：{chapter.total_steps}步，至少需要{min_steps}步")
+        if max_steps is not None and chapter.total_steps > max_steps:
+            issues.append(f"步骤过多：{chapter.total_steps}步，最多允许{max_steps}步")
 
         # 2. 检查步骤类型分布
         type_counts = {}
@@ -1171,8 +1543,8 @@ class CourseSupervisor:
         # HTML模拟器使用完整的HTML/JS代码，不需要变量完整性检查
 
         # 4. 检查学习目标
-        if len(chapter.learning_objectives) < 3:
-            issues.append(f"学习目标不足：{len(chapter.learning_objectives)}个，至少需要3个")
+        if len(chapter.learning_objectives) < min_learning_objectives:
+            issues.append(f"学习目标不足：{len(chapter.learning_objectives)}个，至少需要{min_learning_objectives}个")
 
         # 5. 检查与大纲一致性
         if chapter.title != chapter_outline.title:
@@ -1330,6 +1702,10 @@ class CourseSupervisor:
         """检查文本/图文内容步骤"""
         issues = []
         error_type = None
+        constraints = self._get_course_constraints()
+        min_text_length = constraints.get("min_text_length", self.quality_standards.min_text_length)
+        min_key_points = constraints.get("min_key_points", self.quality_standards.min_key_points)
+        min_diagram_description = constraints.get("min_diagram_description", self.quality_standards.min_diagram_description)
 
         if not step.content:
             return {
@@ -1342,13 +1718,13 @@ class CourseSupervisor:
         key_points = step.content.get('key_points', [])
 
         # 检查内容长度
-        if len(body) < self.quality_standards.min_text_length:
-            issues.append(f"内容太短：{len(body)}字，至少需要{self.quality_standards.min_text_length}字")
+        if len(body) < min_text_length:
+            issues.append(f"内容太短：{len(body)}字，至少需要{min_text_length}字")
             error_type = 'short_content'
 
         # 检查要点
-        if len(key_points) < self.quality_standards.min_key_points:
-            issues.append(f"要点不足：{len(key_points)}个，至少需要{self.quality_standards.min_key_points}个")
+        if len(key_points) < min_key_points:
+            issues.append(f"要点不足：{len(key_points)}个，至少需要{min_key_points}个")
             if not error_type:
                 error_type = 'insufficient_keypoints'
 
@@ -1366,6 +1742,10 @@ class CourseSupervisor:
             elif not step.diagram_spec.get('description'):
                 issues.append("图片描述为空")
                 error_type = 'empty_description'
+            elif len((step.diagram_spec.get('description') or '').strip()) < min_diagram_description:
+                issues.append(f"图片描述太短，至少需要{min_diagram_description}字")
+                if not error_type:
+                    error_type = 'short_diagram_description'
 
         return {
             'approved': len(issues) == 0,
@@ -1381,6 +1761,9 @@ class CourseSupervisor:
         """检查测验步骤"""
         issues = []
         error_type = None
+        constraints = self._get_course_constraints()
+        min_questions = constraints.get("min_questions", 2)
+        min_explanation_length = constraints.get("min_explanation_length", 0)
 
         if not step.assessment_spec:
             return {
@@ -1391,8 +1774,8 @@ class CourseSupervisor:
 
         questions = step.assessment_spec.get('questions', [])
 
-        if len(questions) < 2:
-            issues.append(f"题目不足：{len(questions)}道，至少需要2道")
+        if len(questions) < min_questions:
+            issues.append(f"题目不足：{len(questions)}道，至少需要{min_questions}道")
             error_type = 'insufficient_questions'
 
         for i, q in enumerate(questions):
@@ -1407,6 +1790,10 @@ class CourseSupervisor:
                 issues.append(f"第{i+1}题缺少解析")
                 if not error_type:
                     error_type = 'missing_explanation'
+            elif min_explanation_length > 0 and len((q.get('explanation') or '').strip()) < min_explanation_length:
+                issues.append(f"第{i+1}题解析过短，至少需要{min_explanation_length}字")
+                if not error_type:
+                    error_type = 'short_explanation'
 
         return {
             'approved': len(issues) == 0,
@@ -1785,7 +2172,7 @@ ctx.setPosition(elementId, safeX, safeY);
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是一位课程质量监督专家，擅长判断内容问题的最佳解决方案。",
-                max_tokens=500
+                max_tokens=self._llm_max_tokens()
             )
 
             # 解析响应
@@ -1872,11 +2259,11 @@ ctx.setPosition(elementId, safeX, safeY);
 
             recommendation += """
 === 画布约束（严格遵守）===
-- 画布尺寸: 统一1600×900px (16:9标准比例,绝对不可超出)
-- Canvas元素: <canvas id="canvas" width="1600" height="900"></canvas>
-- 所有坐标必须在画布范围内: x在[0, 1600], y在[0, 900]
-- 使用比例计算: x = 1600 * 0.5, y = 900 * 0.5
-- 安全绘制区域: x在[50, 1550], y在[50, 850]
+- 画布尺寸: 统一896×504px (16:9标准比例,绝对不可超出)
+- Canvas元素: <canvas id="canvas" width="896" height="504"></canvas>
+- 所有坐标必须在画布范围内: x在[0, 896], y在[0, 504]
+- 使用比例计算: x = 896 * 0.5, y = 504 * 0.5
+- 安全绘制区域: x在[30, 866], y在[30, 474]
 - 禁止硬编码超出范围的坐标
 
 === 视觉质量要求（教学适用性）===
@@ -2101,10 +2488,10 @@ ctx.setPosition(elementId, safeX, safeY);
         Returns:
             {
                 'overall_score': 0-100,
-                'color_score': 0-25,
-                'composition_score': 0-25,
-                'animation_score': 0-25,
-                'refinement_score': 0-25,
+                'color_score': 0-10,
+                'composition_score': 0-30,
+                'animation_score': 0-30,
+                'refinement_score': 0-30,
                 'issues': List[str],
                 'suggestions': List[str]
             }
@@ -2120,12 +2507,19 @@ ctx.setPosition(elementId, safeX, safeY);
                 'suggestions': []
             }
 
-            # === 1. 配色评估 (0-25分) ===
-            color_scheme = self.standards_loader.get_subject_color_scheme(subject)
+            # 评分权重（总分100）
+            COLOR_MAX = 10
+            COMPOSITION_MAX = 30
+            ANIMATION_MAX = 30
+            REFINEMENT_MAX = 30
+
+            # === 1. 配色评估 (0-10分) ===
+            color_scheme = self.standards_loader.get_subject_color_scheme(subject) or {}
+            base_colors = color_scheme.get('base_colors', {})
             recommended_colors = [
-                color_scheme['base_colors']['primary'],
-                color_scheme['base_colors']['secondary'],
-                color_scheme['base_colors']['accent']
+                base_colors.get('primary', '#3B82F6'),
+                base_colors.get('secondary', '#10B981'),
+                base_colors.get('accent', '#F59E0B')
             ]
 
             # 检查是否使用了推荐配色
@@ -2134,52 +2528,52 @@ ctx.setPosition(elementId, safeX, safeY);
                 if color.lower() in code.lower():
                     colors_used += 1
 
-            score['color_score'] = min(25, colors_used * 8)
+            score['color_score'] = min(COLOR_MAX, colors_used * 3)
 
             # 检查是否使用了深色（不可见）
             forbidden_colors = ['#000000', '#111111', '#1e293b', '#0f172a', '#1a1a1a']
             for dark_color in forbidden_colors:
                 if dark_color in code:
                     score['issues'].append(f"使用了深色{dark_color}，在深色背景下不可见")
-                    score['color_score'] -= 10
+                    score['color_score'] -= 4
 
             # 检查对比度
             if '#ffffff' in code or '#e2e8f0' in code or '#f8fafc' in code:
-                score['color_score'] += 5  # 有亮色文字
+                score['color_score'] += 1  # 有亮色文字
 
-            # === 2. 构图评估 (0-25分) ===
+            # === 2. 构图评估 (0-30分) ===
             # 检查是否有标题
             if 'title' in code.lower() or '标题' in code:
-                score['composition_score'] += 5
+                score['composition_score'] += 6
             else:
                 score['issues'].append("缺少标题")
 
             # 检查是否有图例或状态面板
             if 'legend' in code.lower() or 'panel' in code.lower() or '图例' in code or '面板' in code:
-                score['composition_score'] += 5
+                score['composition_score'] += 6
             else:
                 score['issues'].append("缺少图例或状态面板")
 
             # 检查是否有足够的文字标注
             text_count = code.count('createText')
             if text_count >= 6:
-                score['composition_score'] += 10
+                score['composition_score'] += 12
             elif text_count >= 3:
-                score['composition_score'] += 5
+                score['composition_score'] += 6
             else:
                 score['issues'].append(f"文字标注太少（{text_count}个）")
 
             # 检查层次感
             if code.count('createCircle') + code.count('createRect') >= 10:
-                score['composition_score'] += 5
+                score['composition_score'] += 6
 
-            # === 3. 动画评估 (0-25分) ===
+            # === 3. 动画评估 (0-30分) ===
             # 检查是否使用了缓动函数
             easing_functions = ['lerp', 'easeIn', 'easeOut', 'easeInOut', 'easeOutBack']
             has_easing = any(ease in code for ease in easing_functions)
 
             if has_easing:
-                score['animation_score'] += 10
+                score['animation_score'] += 12
                 score['suggestions'].append("很好地使用了缓动函数")
             else:
                 score['issues'].append("建议使用缓动函数（lerp, easeOut等）实现平滑动画")
@@ -2195,48 +2589,48 @@ ctx.setPosition(elementId, safeX, safeY);
             if 'setGlow' in code:
                 animation_types += 1
 
-            score['animation_score'] += min(10, animation_types * 3)
+            score['animation_score'] += min(12, animation_types * 3)
 
             # 检查时间驱动动画
             if 'ctx.time' in code or 'math.sin' in code or 'math.cos' in code:
-                score['animation_score'] += 5
+                score['animation_score'] += 6
 
-            # === 4. 精致度评估 (0-25分) ===
+            # === 4. 精致度评估 (0-30分) ===
             # 检查圆角使用
             if 'cornerRadius' in code:
-                score['refinement_score'] += 5
+                score['refinement_score'] += 6
                 score['suggestions'].append("使用了圆角，视觉更柔和")
             else:
                 score['suggestions'].append("建议为矩形添加圆角（cornerRadius）")
 
             # 检查发光效果
             if 'setGlow' in code:
-                score['refinement_score'] += 5
+                score['refinement_score'] += 6
                 score['suggestions'].append("使用了发光效果，增强视觉吸引力")
 
             # 检查代码组织
             if '// ===' in code or '// ---' in code or code.count('\n\n') >= 3:
-                score['refinement_score'] += 5
+                score['refinement_score'] += 6
 
             # 检查变量命名
             import re
             var_names = re.findall(r'\b(?:let|const)\s+(\w+)', code)
             meaningful = sum(1 for name in var_names if len(name) > 2 and not name.startswith('_'))
             if meaningful >= 8:
-                score['refinement_score'] += 5
+                score['refinement_score'] += 6
 
             # 检查注释
             comment_count = code.count('//') + code.count('/*')
             if comment_count >= 6:
-                score['refinement_score'] += 5
+                score['refinement_score'] += 6
             elif comment_count < 3:
                 score['issues'].append("注释太少")
 
             # === 计算总分 ===
-            score['color_score'] = max(0, min(25, score['color_score']))
-            score['composition_score'] = max(0, min(25, score['composition_score']))
-            score['animation_score'] = max(0, min(25, score['animation_score']))
-            score['refinement_score'] = max(0, min(25, score['refinement_score']))
+            score['color_score'] = max(0, min(COLOR_MAX, score['color_score']))
+            score['composition_score'] = max(0, min(COMPOSITION_MAX, score['composition_score']))
+            score['animation_score'] = max(0, min(ANIMATION_MAX, score['animation_score']))
+            score['refinement_score'] = max(0, min(REFINEMENT_MAX, score['refinement_score']))
 
             score['overall_score'] = (
                 score['color_score'] +

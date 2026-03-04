@@ -33,6 +33,9 @@ from app.api.v1.endpoints.admin import (
     admins as admin_admins
 )
 from app.api.v1.endpoints import agent
+from app.api.v1.endpoints import admin_knowledge_tracking, knowledge, learning_path, review, report, diagnostic_tutor, recommendation, assessment, multi_task, subject_graph, cross_disciplinary, course_rec, smart_feedback, adaptive_agent
+from app.api.v1.endpoints import predictive, goals, habits
+from app.api.v1.endpoints import transfer, temporal
 
 api_router = APIRouter()
 
@@ -98,3 +101,58 @@ api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])
 
 # HERCU Agent 监控
 api_router.include_router(agent.router, prefix="/agent", tags=["Agent"])
+
+# BKT 知识追踪
+api_router.include_router(admin_knowledge_tracking.router, prefix="/admin/knowledge", tags=["Admin - Knowledge Tracking"])
+api_router.include_router(knowledge.router, prefix="/knowledge", tags=["Knowledge Tracking"])
+
+# 自适应学习路径
+api_router.include_router(learning_path.router, prefix="/knowledge", tags=["Learning Path"])
+
+# 间隔复习
+api_router.include_router(review.router, prefix="/review", tags=["Spaced Repetition"])
+
+# 学习报告 + 元认知
+api_router.include_router(report.router, prefix="/learning", tags=["Learning Report & Metacognitive"])
+
+# 诊断式AI Tutor
+api_router.include_router(diagnostic_tutor.router, prefix="/diagnostic-tutor", tags=["Diagnostic AI Tutor"])
+
+# 推荐系统
+api_router.include_router(recommendation.router, prefix="/recommendation", tags=["Recommendation"])
+
+# 智能评估与自适应反馈
+api_router.include_router(assessment.router, prefix="/assessment", tags=["Assessment"])
+
+# 多任务学习与多目标优化
+api_router.include_router(multi_task.router, prefix="/multi-task", tags=["Multi-Task Optimization"])
+
+# 学科知识图谱
+api_router.include_router(subject_graph.router, prefix="/subject-graph", tags=["Subject Knowledge Graph"])
+
+# 跨学科推荐与知识推理
+api_router.include_router(cross_disciplinary.router, prefix="/cross-disciplinary", tags=["Cross-Disciplinary"])
+
+# 课程推荐与学习路径
+api_router.include_router(course_rec.router, prefix="/course-rec", tags=["Course Recommendation"])
+
+# 学习反馈与智能报告
+api_router.include_router(smart_feedback.router, prefix="/smart-feedback", tags=["Smart Feedback & Report"])
+
+# Agent 强化学习与自适应任务生成
+api_router.include_router(adaptive_agent.router, prefix="/adaptive-agent", tags=["Adaptive Agent"])
+
+# Phase 15: 预测分析
+api_router.include_router(predictive.router, prefix="/predictive", tags=["Predictive Analytics"])
+
+# Phase 15: 目标管理
+api_router.include_router(goals.router, prefix="/goals", tags=["Goal Management"])
+
+# Phase 15: 学习习惯追踪
+api_router.include_router(habits.router, prefix="/habits", tags=["Habit Tracking"])
+
+# Phase 16: 动态迁移系数
+api_router.include_router(transfer.router, prefix="/transfer", tags=["Dynamic Transfer"])
+
+# Phase 16: 时间模式分析
+api_router.include_router(temporal.router, prefix="/temporal", tags=["Temporal Patterns"])

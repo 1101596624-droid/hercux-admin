@@ -24,7 +24,7 @@ export interface DynamicElementGroup {
   countVariable: string;  // 控制数量的变量名
   template: {
     type: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   layout: {
     [property: string]: string;  // 属性名 -> 公式字符串（支持 index 变量）
@@ -45,11 +45,11 @@ export interface FormulaAnimationContext {
   setVariable: (name: string, value: number) => void;
 
   // 元素操作
-  getElementProperty: (elementId: string, property: string) => any;
-  setElementProperty: (elementId: string, property: string, value: any) => void;
+  getElementProperty: (elementId: string, property: string) => unknown;
+  setElementProperty: (elementId: string, property: string, value: unknown) => void;
 
   // 动态元素操作
-  createDynamicElement?: (groupId: string, index: number, template: any) => void;
+  createDynamicElement?: (groupId: string, index: number, template: Record<string, unknown>) => void;
   removeDynamicElement?: (groupId: string, index: number) => void;
   getDynamicElementCount?: (groupId: string) => number;
 }
@@ -105,8 +105,6 @@ export class FormulaAnimationSystem {
       const compiled = this.compileAnimation(anim);
       this.animations.set(anim.id, compiled);
     }
-
-    console.log(`FormulaAnimationSystem: Loaded ${this.animations.size} animations`);
   }
 
   /**
@@ -118,8 +116,6 @@ export class FormulaAnimationSystem {
     for (const group of groups) {
       this.dynamicGroups.set(group.id, group);
     }
-
-    console.log(`FormulaAnimationSystem: Loaded ${this.dynamicGroups.size} dynamic groups`);
   }
 
   /**
@@ -131,8 +127,6 @@ export class FormulaAnimationSystem {
     for (const v of variables) {
       this.computedVariables.set(v.id, v);
     }
-
-    console.log(`FormulaAnimationSystem: Loaded ${this.computedVariables.size} computed variables`);
   }
 
   /**

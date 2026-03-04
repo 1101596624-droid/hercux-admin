@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.services.llm_factory import get_llm_service
 from app.services.learning.template_service import UnifiedTemplateService
 from app.services.learning.quality_scorers import QuizScorer, QuizQualityScore
+from app.core.constants import QUALITY_BASELINE, QUALITY_TEMPLATE_SAVE
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,8 @@ class EnhancedQuizGenerator:
         self.scorer = QuizScorer()
 
         # Quality thresholds
-        self.BASELINE_QUALITY = 75.0
-        self.TEMPLATE_QUALITY = 85.0
+        self.BASELINE_QUALITY = QUALITY_BASELINE
+        self.TEMPLATE_QUALITY = QUALITY_TEMPLATE_SAVE
 
     async def generate_quiz_with_learning(
         self,
@@ -312,7 +313,7 @@ class EnhancedQuizGenerator:
             if match:
                 array_str = match.group(1)
                 return json.loads(array_str)
-        except:
+        except (json.JSONDecodeError, ValueError):
             pass
 
         # Method 3: Direct array match
@@ -320,7 +321,7 @@ class EnhancedQuizGenerator:
             match = re.search(r'\[[\s\S]*\]', response)
             if match:
                 return json.loads(match.group())
-        except:
+        except (json.JSONDecodeError, ValueError):
             pass
 
         return []

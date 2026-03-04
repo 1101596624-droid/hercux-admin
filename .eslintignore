@@ -1,0 +1,7 @@
+.next
+node_modules
+dist-electron
+dist-electron-app
+dist-electron-app-repack
+playwright-report
+test-results

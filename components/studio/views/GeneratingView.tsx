@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { getTotalCharCount, useStudioStore } from '@/stores/studio/useStudioStore';
 import { StepRenderer } from '@/components/studio/steps/StepRenderer';
-import type { ProcessorWithConfig, UploadedSource, LessonOutline, Lesson } from '@/types/studio';
+import type { ProcessorWithConfig, UploadedSource, LessonOutline, Lesson, LessonStep } from '@/types/studio';
 import { RefObject } from 'react';
 
 interface GeneratingViewProps {
@@ -102,8 +102,14 @@ function TypewriterContent({
   }, [currentLessonIndex]);
 
   // 尝试从流式JSON中提取已完成的步骤
-  const extractCompletedSteps = (content: string): any[] => {
-    const steps: any[] = [];
+  const isLessonStep = (value: unknown): value is LessonStep => {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Partial<LessonStep>;
+    return typeof candidate.step_id === 'string' && typeof candidate.type === 'string';
+  };
+
+  const extractCompletedSteps = (content: string): LessonStep[] => {
+    const steps: LessonStep[] = [];
 
     // 查找 script 数组
     const scriptMatch = content.match(/"script"\s*:\s*\[/);
@@ -145,7 +151,7 @@ function TypewriterContent({
           const stepStr = content.slice(stepStart, i + 1);
           try {
             const step = JSON.parse(stepStr);
-            if (step.step_id && step.type) {
+            if (isLessonStep(step)) {
               steps.push(step);
             }
           } catch (e) {
@@ -212,7 +218,7 @@ function TypewriterContent({
   }, [currentLessonIndex]);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-4xl mx-auto space-y-4">
       {/* 课时头部 */}
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
         {/* 三个呼吸闪烁的圆点 */}
@@ -622,7 +628,7 @@ export function GeneratingView({
             </div>
           ) : selectedPreviewIndex >= 0 && previewLesson ? (
             /* Preview Completed Lesson */
-            <div className="max-w-3xl mx-auto space-y-6">
+            <div className="max-w-4xl mx-auto space-y-6">
               {/* Lesson Header */}
               <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
                 <h3 className="text-xl font-bold text-slate-900 mb-2">{previewLesson.title}</h3>

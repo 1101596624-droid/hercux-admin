@@ -1,0 +1,18 @@
+{
+  "root": true,
+  "extends": [
+    "next/core-web-vitals"
+  ],
+  "rules": {
+    "react/no-unescaped-entities": "off"
+  },
+  "ignorePatterns": [
+    ".next/",
+    "dist-electron/",
+    "dist-electron-app/",
+    "dist-electron-app-repack/",
+    "node_modules/",
+    "playwright-report/",
+    "test-results/"
+  ]
+}

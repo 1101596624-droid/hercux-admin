@@ -276,6 +276,11 @@ export default function AdminDashboardPage() {
   );
 
   const pendingCount = courses.filter(c => !c.is_published).length;
+  const totalUsers = analyticsData.totalUsers;
+  const activeUsers = analyticsData.activeUsers;
+  const todayLearningHours = analyticsData.todayLearningHours;
+  const activeUserRate = totalUsers > 0 ? ((activeUsers / totalUsers) * 100).toFixed(1) : '0.0';
+  const avgLearningMinutes = activeUsers > 0 ? ((todayLearningHours / activeUsers) * 60).toFixed(0) : '0';
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -398,7 +403,7 @@ export default function AdminDashboardPage() {
             </div>
             <p className="text-2xl font-bold text-slate-900">{analyticsData.activeUsers.toLocaleString()}</p>
             <p className="text-xs text-slate-400 mt-1">
-              {((analyticsData.activeUsers / analyticsData.totalUsers) * 100).toFixed(1)}% 活跃率
+              {activeUserRate}% 活跃率
             </p>
           </div>
           <div className="bg-slate-50 rounded-xl p-4">
@@ -408,7 +413,7 @@ export default function AdminDashboardPage() {
             </div>
             <p className="text-2xl font-bold text-slate-900">{analyticsData.todayLearningHours.toLocaleString()}h</p>
             <p className="text-xs text-slate-400 mt-1">
-              人均 {(analyticsData.todayLearningHours / analyticsData.activeUsers * 60).toFixed(0)} 分钟
+              人均 {avgLearningMinutes} 分钟
             </p>
           </div>
           <div className="bg-slate-50 rounded-xl p-4">

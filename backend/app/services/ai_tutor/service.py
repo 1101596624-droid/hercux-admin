@@ -11,6 +11,7 @@ import json
 
 from app.services.ai_tutor.dialogue_generator import DialogueGenerator
 from app.services.deepseek_service import get_deepseek_service, Message
+from app.core.constants import QUALITY_TEMPLATE_SAVE
 
 
 class AITutorService:
@@ -53,7 +54,7 @@ class AITutorService:
             base_prompt=base_system_prompt,
             subject=subject,
             topic=topic,
-            min_quality=85.0,
+            min_quality=QUALITY_TEMPLATE_SAVE,
         )
 
         # Prepare messages for LLM
@@ -96,7 +97,7 @@ class AITutorService:
             subject=subject,
             topic=topic,
             node_id=node_id,
-            save_threshold=85.0,
+            save_threshold=QUALITY_TEMPLATE_SAVE,
         )
 
     async def get_learning_insights(

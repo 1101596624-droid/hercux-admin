@@ -54,8 +54,8 @@ class MaintenanceModeMiddleware(BaseHTTPMiddleware):
                             payload = decode_token(token)
                             if payload and payload.get("admin"):
                                 return await call_next(request)
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Admin token decode failed: {e}")
 
                 # 返回维护模式响应
                 return JSONResponse(

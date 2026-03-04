@@ -10,7 +10,7 @@
  * - 管理员可选择：覆盖当前 / 重新生成
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { simulatorAPI } from '@/lib/api/admin/simulator';
 import type { SimulatorConfig } from '@/types/editor';
@@ -51,6 +51,8 @@ interface SimulatorAIGeneratorProps {
   hasExistingSimulator?: boolean; // 当前步骤是否已有模拟器
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export function SimulatorAIGenerator({
   onApply,
   hasExistingSimulator = false,
@@ -58,26 +60,140 @@ export function SimulatorAIGenerator({
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generationStatus, setGenerationStatus] = useState<string | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [generatedSimulator, setGeneratedSimulator] = useState<GeneratedSimulator | null>(null);
+  const stopPollingRef = useRef(false);
+
+  const pollTask = useCallback(async (taskId: string, waitMs: number) => {
+    const start = Date.now();
+    const pollIntervalMs = 2000;
+
+    while (Date.now() - start < waitMs) {
+      if (stopPollingRef.current) {
+        setGenerationStatus(`已停止前台轮询（task_id: ${taskId}），任务可能仍在后台执行`);
+        return false;
+      }
+      const taskStatus = await simulatorAPI.getGenerateTaskStatus(taskId);
+      const elapsedSec = Math.floor((Date.now() - start) / 1000);
+      const stageText = taskStatus.stage_message || taskStatus.current_stage || '处理中';
+      const runningSec = typeof taskStatus.running_seconds === 'number'
+        ? Math.floor(taskStatus.running_seconds)
+        : elapsedSec;
+
+      if (taskStatus.status === 'queued') {
+        setGenerationStatus(`任务排队中 (${taskId.slice(0, 8)})：${stageText}，已等待 ${elapsedSec}s`);
+        await sleep(pollIntervalMs);
+        continue;
+      }
+
+      if (taskStatus.status === 'running') {
+        setGenerationStatus(`Agent 处理中 (${taskId.slice(0, 8)})：${stageText}，已运行 ${runningSec}s`);
+        await sleep(pollIntervalMs);
+        continue;
+      }
+
+      if (taskStatus.status === 'succeeded') {
+        if (!taskStatus.result) {
+          throw new Error('任务已完成但未返回代码');
+        }
+        setGeneratedSimulator(taskStatus.result);
+        setGenerationStatus(null);
+        setActiveTaskId(null);
+        return true;
+      }
+
+      if (taskStatus.status === 'canceled') {
+        setGenerationStatus(`任务已取消 (${taskId.slice(0, 8)})`);
+        setActiveTaskId(null);
+        return false;
+      }
+
+      const errMessage = taskStatus.error_message || `任务执行失败 (${taskStatus.status})`;
+      throw new Error(errMessage);
+    }
+
+    setGenerationStatus(`任务仍在后台执行（task_id: ${taskId}），可稍后点击“继续查询任务”`);
+    return false;
+  }, []);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
+    stopPollingRef.current = false;
     setLoading(true);
     setError(null);
+    setGenerationStatus('正在提交生成任务...');
     setGeneratedSimulator(null);
     try {
-      const result = await simulatorAPI.generateCode(prompt.trim());
-      setGeneratedSimulator(result);
+      const task = await simulatorAPI.createGenerateTask(prompt.trim());
+      setActiveTaskId(task.task_id);
+      setGenerationStatus(`任务已提交 (${task.task_id.slice(0, 8)})，正在排队...`);
+      await pollTask(task.task_id, 20 * 60 * 1000);
     } catch (e: any) {
       setError(e.message || 'AI 生成失败，请重试');
+      setGenerationStatus(null);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleContinuePolling = useCallback(async () => {
+    if (!activeTaskId) return;
+    stopPollingRef.current = false;
+    setLoading(true);
+    setError(null);
+    try {
+      await pollTask(activeTaskId, 10 * 60 * 1000);
+    } catch (e: any) {
+      setError(e.message || '任务查询失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeTaskId, pollTask]);
+
+  const handleCancelTask = useCallback(async () => {
+    if (!activeTaskId) return;
+    stopPollingRef.current = true;
+    setLoading(true);
+    setError(null);
+    try {
+      const canceled = await simulatorAPI.cancelGenerateTask(activeTaskId);
+      const stageText = canceled.stage_message || canceled.current_stage || '已发送取消请求';
+      setGenerationStatus(`任务 ${activeTaskId.slice(0, 8)}：${stageText}`);
+      if (canceled.status === 'canceled') {
+        setActiveTaskId(null);
+      }
+    } catch (e: any) {
+      setError(e.message || '任务取消失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeTaskId]);
+
+  const handleRetryTask = useCallback(async () => {
+    if (!activeTaskId) return;
+    stopPollingRef.current = false;
+    setLoading(true);
+    setError(null);
+    try {
+      setGenerationStatus(`正在重试任务（${activeTaskId.slice(0, 8)}）...`);
+      const retryTask = await simulatorAPI.retryGenerateTask(activeTaskId);
+      setActiveTaskId(retryTask.task_id);
+      setGenerationStatus(`重试任务已提交 (${retryTask.task_id.slice(0, 8)})，正在排队...`);
+      await pollTask(retryTask.task_id, 20 * 60 * 1000);
+    } catch (e: any) {
+      setError(e.message || '任务重试失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeTaskId, pollTask]);
+
   const handleRegenerate = useCallback(() => {
+    stopPollingRef.current = true;
     setGeneratedSimulator(null);
     setError(null);
+    setGenerationStatus(null);
+    setActiveTaskId(null);
   }, []);
 
   const handleApply = useCallback(() => {
@@ -100,6 +216,8 @@ export function SimulatorAIGenerator({
     alert(actionText);
     setGeneratedSimulator(null);
     setPrompt('');
+    setGenerationStatus(null);
+    setActiveTaskId(null);
   }, [generatedSimulator, onApply, hasExistingSimulator]);
 
   return (
@@ -148,6 +266,35 @@ export function SimulatorAIGenerator({
           {error && (
             <p className="text-sm text-red-500">{error}</p>
           )}
+
+          {loading && generationStatus && (
+            <p className="text-xs text-indigo-700">{generationStatus}</p>
+          )}
+
+          {activeTaskId && !generatedSimulator && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleContinuePolling}
+                disabled={loading}
+                className="px-3 py-1.5 text-xs bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                继续查询任务（{activeTaskId.slice(0, 8)}）
+              </button>
+              <button
+                onClick={handleCancelTask}
+                className="px-3 py-1.5 text-xs bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                取消任务
+              </button>
+              <button
+                onClick={handleRetryTask}
+                disabled={loading}
+                className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                重试任务
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -164,7 +311,7 @@ export function SimulatorAIGenerator({
           <div className="bg-slate-900 rounded-lg overflow-hidden border-2 border-slate-700">
             <HTMLSimulatorRenderer
               htmlContent={generatedSimulator.html_content || generatedSimulator.custom_code}
-              height={900}
+              height={504}
               showBorder={false}
             />
           </div>

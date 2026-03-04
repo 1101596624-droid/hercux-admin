@@ -114,9 +114,34 @@ async def get_progress_summary(
     total_hours = round(total_seconds / 3600, 1)
 
     # Calculate current streak (consecutive days with activity)
-    # For now, return 0 streak to avoid date parsing issues
-    # TODO: Fix streak calculation for SQLite
+    activity_query = select(
+        LearningProgress.last_accessed,
+        LearningProgress.completed_at,
+        LearningProgress.created_at,
+    ).where(
+        LearningProgress.user_id == current_user.id
+    )
+    activity_result = await db.execute(activity_query)
+    activity_rows = activity_result.all()
+
+    active_dates = set()
+    for row in activity_rows:
+        activity_dt = row[0] or row[1] or row[2]
+        if not activity_dt:
+            continue
+        if activity_dt.tzinfo is None:
+            activity_dt = activity_dt.replace(tzinfo=timezone.utc)
+        else:
+            activity_dt = activity_dt.astimezone(timezone.utc)
+        active_dates.add(activity_dt.date())
+
     streak = 0
+    if active_dates:
+        today = datetime.now(timezone.utc).date()
+        current_day = today if today in active_dates else (today - timedelta(days=1))
+        while current_day in active_dates:
+            streak += 1
+            current_day -= timedelta(days=1)
 
     # Calculate completion rate
     completion_rate = (total_completed / total_started * 100) if total_started > 0 else 0

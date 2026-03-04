@@ -1,1 +1,298 @@
-[{"text": "[{\"text\": \"\\\"\\\"\\\"\\nhercu-agent \\u901a\\u4fe1\\u670d\\u52a1\\n\\u7248\\u672c: 1.0.0\\n\\u521b\\u5efa\\u65e5\\u671f: 2026-02-10\\n\\n\\u804c\\u8d23\\uff1a\\n1. \\u4e0e hercu-agent \\u670d\\u52a1\\u901a\\u4fe1\\n2. \\u540c\\u6b65\\u6807\\u51c6\\u6587\\u6863\\n3. \\u8bf7\\u6c42 Agent \\u751f\\u6210\\u9ad8\\u8d28\\u91cf\\u6a21\\u62df\\u5668\\u4ee3\\u7801\\n4. \\u83b7\\u53d6 Agent \\u7684\\u7f8e\\u5b66\\u8bc4\\u5206\\n\\\"\\\"\\\"\\n\\nimport logging\\nimport httpx\\nfrom typing import Dict, Any, Optional, List\\nfrom app.services.course_generation.standards_loader import get_standards_loader\\n\\nlogger = logging.getLogger(__name__)\\n\\n\\nclass AgentCommunicationService:\\n    \\\"\\\"\\\"\\n    Agent \\u901a\\u4fe1\\u670d\\u52a1\\n\\n    \\u8d1f\\u8d23\\u4e0e hercu-agent \\u670d\\u52a1\\u7684\\u6240\\u6709\\u901a\\u4fe1\\n    \\\"\\\"\\\"\\n\\n    def __init__(self, agent_url: str = \\\"http://localhost:8001\\\"):\\n        self.agent_url = agent_url\\n        self.standards_loader = get_standards_loader()\\n        self.client = httpx.AsyncClient(timeout=60.0)\\n\\n    async def __aenter__(self):\\n        return self\\n\\n    async def __aexit__(self, exc_type, exc_val, exc_tb):\\n        await self.client.aclose()\\n\\n    async def ping_agent(self) -> bool:\\n        \\\"\\\"\\\"\\u68c0\\u67e5 Agent \\u670d\\u52a1\\u662f\\u5426\\u53ef\\u7528\\\"\\\"\\\"\\n        try:\\n            response = await self.client.get(f\\\"{self.agent_url}/health\\\")\\n            return response.status_code == 200\\n        except Exception as e:\\n            logger.warning(f\\\"Agent service not available: {e}\\\")\\n            return False\\n\\n    async def sync_standards(self) -> Dict[str, Any]:\\n        \\\"\\\"\\\"\\n        \\u540c\\u6b65\\u6807\\u51c6\\u6587\\u6863\\u5230 Agent\\n\\n        Returns:\\n            \\u540c\\u6b65\\u7ed3\\u679c\\n        \\\"\\\"\\\"\\n        try:\\n            # \\u51c6\\u5907\\u6807\\u51c6\\u6570\\u636e\\n            standards_data = {\\n                'simulator_standards': self.standards_loader.get_simulator_standards(),\\n                'course_standards': self.standards_loader.get_course_standards(),\\n                'canvas_config': self.standards_loader.get_canvas_config(),\\n                'visualization_elements': self.standards_loader.get_visualization_elements(),\\n                'color_systems': self.standards_loader.get_color_systems(),\\n                'visual_best_practices': self.standards_loader.get_visual_best_practices(),\\n                'interaction_types': self.standards_loader.get_interaction_types(),\\n                'api_reference': self.standards_loader.get_api_reference(),\\n                'animation_easing': self.standards_loader.get_animation_easing()\\n            }\\n\\n            # \\u53d1\\u9001\\u5230 Agent\\n            response = await self.client.post(\\n                f\\\"{self.agent_url}/api/standards/sync\\\",\\n                json=standards_data\\n            )\\n\\n            if response.status_code == 200:\\n                logger.info(\\\"Standards synced to Agent successfully\\\")\\n                return {\\n                    'success': True,\\n                    'message': 'Standards synced successfully',\\n                    'synced_count': len(standards_data)\\n                }\\n            else:\\n                logger.error(f\\\"Failed to sync standards: {response.text}\\\")\\n                return {\\n                    'success': False,\\n                    'message': f'Sync failed: {response.status_code}',\\n                    'error': response.text\\n                }\\n\\n        except Exception as e:\\n            logger.error(f\\\"Failed to sync standards to Agent: {e}\\\")\\n            return {\\n                'success': False,\\n                'message': str(e),\\n                'error': str(e)\\n            }\\n\\n    async def generate_simulator_code(\\n        self,\\n        simulator_name: str,\\n        simulator_description: str,\\n        variables: List[Dict[str, Any]],\\n        subject: str,\\n        chapter_context: str = \\\"\\\"\\n    ) -> Dict[str, Any]:\\n        \\\"\\\"\\\"\\n        \\u8bf7\\u6c42 Agent \\u751f\\u6210\\u9ad8\\u8d28\\u91cf\\u6a21\\u62df\\u5668\\u4ee3\\u7801\\n\\n        Args:\\n            simulator_name: \\u6a21\\u62df\\u5668\\u540d\\u79f0\\n            simulator_description: \\u6a21\\u62df\\u5668\\u63cf\\u8ff0\\n            variables: \\u53d8\\u91cf\\u5217\\u8868\\n            subject: \\u5b66\\u79d1\\n            chapter_context: \\u7ae0\\u8282\\u4e0a\\u4e0b\\u6587\\n\\n        Returns:\\n            {\\n                'success': bool,\\n                'code': str,\\n                'quality_score': int,\\n                'metadata': dict\\n            }\\n        \\\"\\\"\\\"\\n        try:\\n            # \\u83b7\\u53d6\\u5b66\\u79d1\\u914d\\u8272\\u65b9\\u6848\\n            color_scheme = self.standards_loader.get_subject_color_scheme(subject)\\n\\n            # \\u83b7\\u53d6\\u63a8\\u8350\\u5143\\u7d20\\n            recommended_elements = self.standards_loader.get_recommended_elements_for_subject(subject)\\n\\n            # \\u6784\\u5efa\\u8bf7\\u6c42\\n            request_data = {\\n                'simulator_name': simulator_name,\\n                'simulator_description': simulator_description,\\n                'variables': variables,\\n                'subject': subject,\\n                'chapter_context': chapter_context,\\n                'color_scheme': color_scheme,\\n                'recommended_elements': recommended_elements[:5],  # \\u53ea\\u4f20\\u524d5\\u4e2a\\n                'canvas_width': 1000,  # \\u5b66\\u751f\\u7aef\\u5c3a\\u5bf8\\n                'canvas_height': 650\\n            }\\n\\n            # \\u8bf7\\u6c42 Agent\\n            response = await self.client.post(\\n                f\\\"{self.agent_url}/api/simulator/generate\\\",\\n                json=request_data,\\n                timeout=120.0  # \\u751f\\u6210\\u4ee3\\u7801\\u53ef\\u80fd\\u9700\\u8981\\u8f83\\u957f\\u65f6\\u95f4\\n            )\\n\\n            if response.status_code == 200:\\n                result = response.json()\\n                logger.info(f\\\"Agent generated code for '{simulator_name}' (quality: {result.get('quality_score', 0)})\\\")\\n                return {\\n                    'success': True,\\n                    'code': result['code'],\\n                    'quality_score': result.get('quality_score', 0),\\n                    'metadata': result.get('metadata', {})\\n                }\\n            else:\\n                logger.error(f\\\"Agent code generation failed: {response.text}\\\")\\n                return {\\n                    'success': False,\\n                    'error': response.text\\n                }\\n\\n        except Exception as e:\\n            logger.error(f\\\"Failed to request code from Agent: {e}\\\")\\n            return {\\n                'success': False,\\n                'error': str(e)\\n            }\\n\\n    async def evaluate_aesthetic_quality(\\n        self,\\n        code: str,\\n        simulator_name: str,\\n        subject: str\\n    ) -> Dict[str, Any]:\\n        \\\"\\\"\\\"\\n        \\u8bf7\\u6c42 Agent \\u8bc4\\u4f30\\u4ee3\\u7801\\u7684\\u7f8e\\u5b66\\u8d28\\u91cf\\n\\n        Args:\\n            code: \\u6a21\\u62df\\u5668\\u4ee3\\u7801\\n            simulator_name: \\u6a21\\u62df\\u5668\\u540d\\u79f0\\n            subject: \\u5b66\\u79d1\\n\\n        Returns:\\n            {\\n                'overall_score': int (0-100),\\n                'color_score': int (0-25),\\n                'composition_score': int (0-25),\\n                'animation_score': int (0-25),\\n                'refinement_score': int (0-25),\\n                'issues': List[str],\\n                'suggestions': List[str]\\n            }\\n        \\\"\\\"\\\"\\n        try:\\n            # \\u6784\\u5efa\\u8bf7\\u6c42\\n            request_data = {\\n                'code': code,\\n                'simulator_name': simulator_name,\\n                'subject': subject\\n            }\\n\\n            # \\u8bf7\\u6c42 Agent\\n            response = await self.client.post(\\n                f\\\"{self.agent_url}/api/simulator/evaluate\\\",\\n                json=request_data,\\n                timeout=30.0\\n            )\\n\\n            if response.status_code == 200:\\n                result = response.json()\\n                logger.info(f\\\"Agent evaluated '{simulator_name}': {result['overall_score']}/100\\\")\\n                return result\\n            else:\\n                logger.error(f\\\"Agent evaluation failed: {response.text}\\\")\\n                return {\\n                    'overall_score': 0,\\n                    'color_score': 0,\\n                    'composition_score': 0,\\n                    'animation_score': 0,\\n                    'refinement_score': 0,\\n                    'issues': [f'Evaluation failed: {response.text}'],\\n                    'suggestions': []\\n                }\\n\\n        except Exception as e:\\n            logger.error(f\\\"Failed to evaluate with Agent: {e}\\\")\\n            return {\\n                'overall_score': 0,\\n                'color_score': 0,\\n                'composition_score': 0,\\n                'animation_score': 0,\\n                'refinement_score': 0,\\n                'issues': [str(e)],\\n                'suggestions': []\\n            }\\n\\n    async def get_visualization_recommendations(\\n        self,\\n        subject: str,\\n        simulator_description: str\\n    ) -> Dict[str, Any]:\\n        \\\"\\\"\\\"\\n        \\u8bf7\\u6c42 Agent \\u63a8\\u8350\\u53ef\\u89c6\\u5316\\u65b9\\u6848\\n\\n        Args:\\n            subject: \\u5b66\\u79d1\\n            simulator_description: \\u6a21\\u62df\\u5668\\u63cf\\u8ff0\\n\\n        Returns:\\n            \\u63a8\\u8350\\u65b9\\u6848\\n        \\\"\\\"\\\"\\n        try:\\n            request_data = {\\n                'subject': subject,\\n                'simulator_description': simulator_description\\n            }\\n\\n            response = await self.client.post(\\n                f\\\"{self.agent_url}/api/visualization/recommend\\\",\\n                json=request_data,\\n                timeout=15.0\\n            )\\n\\n            if response.status_code == 200:\\n                return response.json()\\n            else:\\n                logger.error(f\\\"Agent recommendation failed: {response.text}\\\")\\n                return {\\n                    'recommended_elements': [],\\n                    'color_scheme': {},\\n                    'error': response.text\\n                }\\n\\n        except Exception as e:\\n            logger.error(f\\\"Failed to get recommendations from Agent: {e}\\\")\\n            return {\\n                'recommended_elements': [],\\n                'color_scheme': {},\\n                'error': str(e)\\n            }\\n\\n\\n# ==================== \\u5168\\u5c40\\u5b9e\\u4f8b ====================\\n\\n_agent_service: Optional[AgentCommunicationService] = None\\n\\n\\ndef get_agent_service(agent_url: str = \\\"http://localhost:8001\\\") -> AgentCommunicationService:\\n    \\\"\\\"\\\"\\u83b7\\u53d6 Agent \\u901a\\u4fe1\\u670d\\u52a1\\u7684\\u5168\\u5c40\\u5b9e\\u4f8b\\\"\\\"\\\"\\n    global _agent_service\\n    if _agent_service is None:\\n        _agent_service = AgentCommunicationService(agent_url)\\n    return _agent_service\\n\", \"type\": \"text\"}]", "type": "text"}]
+"""
+hercu-agent 通信服务
+版本: 1.0.0
+创建日期: 2026-02-10
+
+职责：
+1. 与 hercu-agent 服务通信
+2. 同步标准文档
+3. 请求 Agent 生成高质量模拟器代码
+4. 获取 Agent 的美学评分
+"""
+
+import logging
+import httpx
+from typing import Dict, Any, Optional, List
+from app.services.course_generation.standards_loader import get_standards_loader
+
+logger = logging.getLogger(__name__)
+
+
+class AgentCommunicationService:
+    """
+    Agent 通信服务
+
+    负责与 hercu-agent 服务的所有通信
+    """
+
+    def __init__(self, agent_url: str = "http://localhost:8001"):
+        self.agent_url = agent_url
+        self.standards_loader = get_standards_loader()
+        self.client = httpx.AsyncClient(timeout=60.0)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.client.aclose()
+
+    async def ping_agent(self) -> bool:
+        """检查 Agent 服务是否可用"""
+        try:
+            response = await self.client.get(f"{self.agent_url}/health")
+            return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"Agent service not available: {e}")
+            return False
+
+    async def sync_standards(self) -> Dict[str, Any]:
+        """
+        同步标准文档到 Agent
+
+        Returns:
+            同步结果
+        """
+        try:
+            # 准备标准数据
+            standards_data = {
+                'simulator_standards': self.standards_loader.get_simulator_standards(),
+                'course_standards': self.standards_loader.get_course_standards(),
+                'canvas_config': self.standards_loader.get_canvas_config(),
+                'visualization_elements': self.standards_loader.get_visualization_elements(),
+                'color_systems': self.standards_loader.get_color_systems(),
+                'visual_best_practices': self.standards_loader.get_visual_best_practices(),
+                'interaction_types': self.standards_loader.get_interaction_types(),
+                'api_reference': self.standards_loader.get_api_reference(),
+                'animation_easing': self.standards_loader.get_animation_easing()
+            }
+
+            # 发送到 Agent
+            response = await self.client.post(
+                f"{self.agent_url}/api/standards/sync",
+                json=standards_data
+            )
+
+            if response.status_code == 200:
+                logger.info("Standards synced to Agent successfully")
+                return {
+                    'success': True,
+                    'message': 'Standards synced successfully',
+                    'synced_count': len(standards_data)
+                }
+            else:
+                logger.error(f"Failed to sync standards: {response.text}")
+                return {
+                    'success': False,
+                    'message': f'Sync failed: {response.status_code}',
+                    'error': response.text
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to sync standards to Agent: {e}")
+            return {
+                'success': False,
+                'message': str(e),
+                'error': str(e)
+            }
+
+    async def generate_simulator_code(
+        self,
+        simulator_name: str,
+        simulator_description: str,
+        variables: List[Dict[str, Any]],
+        subject: str,
+        chapter_context: str = ""
+    ) -> Dict[str, Any]:
+        """
+        请求 Agent 生成高质量模拟器代码
+
+        Args:
+            simulator_name: 模拟器名称
+            simulator_description: 模拟器描述
+            variables: 变量列表
+            subject: 学科
+            chapter_context: 章节上下文
+
+        Returns:
+            {
+                'success': bool,
+                'code': str,
+                'quality_score': int,
+                'metadata': dict
+            }
+        """
+        try:
+            # 获取学科配色方案
+            color_scheme = self.standards_loader.get_subject_color_scheme(subject)
+
+            # 获取推荐元素
+            recommended_elements = self.standards_loader.get_recommended_elements_for_subject(subject)
+
+            # 构建请求
+            request_data = {
+                'simulator_name': simulator_name,
+                'simulator_description': simulator_description,
+                'variables': variables,
+                'subject': subject,
+                'chapter_context': chapter_context,
+                'color_scheme': color_scheme,
+                'recommended_elements': recommended_elements[:5],  # 只传前5个
+                'canvas_width': 1000,  # 学生端尺寸
+                'canvas_height': 650
+            }
+
+            # 请求 Agent
+            response = await self.client.post(
+                f"{self.agent_url}/api/simulator/generate",
+                json=request_data,
+                timeout=120.0  # 生成代码可能需要较长时间
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Agent generated code for '{simulator_name}' (quality: {result.get('quality_score', 0)})")
+                return {
+                    'success': True,
+                    'code': result['code'],
+                    'quality_score': result.get('quality_score', 0),
+                    'metadata': result.get('metadata', {})
+                }
+            else:
+                logger.error(f"Agent code generation failed: {response.text}")
+                return {
+                    'success': False,
+                    'error': response.text
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to request code from Agent: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    async def evaluate_aesthetic_quality(
+        self,
+        code: str,
+        simulator_name: str,
+        subject: str
+    ) -> Dict[str, Any]:
+        """
+        请求 Agent 评估代码的美学质量
+
+        Args:
+            code: 模拟器代码
+            simulator_name: 模拟器名称
+            subject: 学科
+
+        Returns:
+            {
+                'overall_score': int (0-100),
+                'color_score': int (0-25),
+                'composition_score': int (0-25),
+                'animation_score': int (0-25),
+                'refinement_score': int (0-25),
+                'issues': List[str],
+                'suggestions': List[str]
+            }
+        """
+        try:
+            # 构建请求
+            request_data = {
+                'code': code,
+                'simulator_name': simulator_name,
+                'subject': subject
+            }
+
+            # 请求 Agent
+            response = await self.client.post(
+                f"{self.agent_url}/api/simulator/evaluate",
+                json=request_data,
+                timeout=30.0
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Agent evaluated '{simulator_name}': {result['overall_score']}/100")
+                return result
+            else:
+                logger.error(f"Agent evaluation failed: {response.text}")
+                return {
+                    'overall_score': 0,
+                    'color_score': 0,
+                    'composition_score': 0,
+                    'animation_score': 0,
+                    'refinement_score': 0,
+                    'issues': [f'Evaluation failed: {response.text}'],
+                    'suggestions': []
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to evaluate with Agent: {e}")
+            return {
+                'overall_score': 0,
+                'color_score': 0,
+                'composition_score': 0,
+                'animation_score': 0,
+                'refinement_score': 0,
+                'issues': [str(e)],
+                'suggestions': []
+            }
+
+    async def get_visualization_recommendations(
+        self,
+        subject: str,
+        simulator_description: str
+    ) -> Dict[str, Any]:
+        """
+        请求 Agent 推荐可视化方案
+
+        Args:
+            subject: 学科
+            simulator_description: 模拟器描述
+
+        Returns:
+            推荐方案
+        """
+        try:
+            request_data = {
+                'subject': subject,
+                'simulator_description': simulator_description
+            }
+
+            response = await self.client.post(
+                f"{self.agent_url}/api/visualization/recommend",
+                json=request_data,
+                timeout=15.0
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Agent recommendation failed: {response.text}")
+                return {
+                    'recommended_elements': [],
+                    'color_scheme': {},
+                    'error': response.text
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to get recommendations from Agent: {e}")
+            return {
+                'recommended_elements': [],
+                'color_scheme': {},
+                'error': str(e)
+            }
+
+
+# ==================== 全局实例 ====================
+
+_agent_service: Optional[AgentCommunicationService] = None
+
+
+def get_agent_service(agent_url: str = "http://localhost:8001") -> AgentCommunicationService:
+    """获取 Agent 通信服务的全局实例"""
+    global _agent_service
+    if _agent_service is None:
+        _agent_service = AgentCommunicationService(agent_url)
+    return _agent_service

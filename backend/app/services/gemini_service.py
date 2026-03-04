@@ -35,7 +35,7 @@ class GeminiService:
         self,
         prompt: str,
         style: str = "educational",
-        size: str = "1600x900"
+        size: str = "896x504"
     ) -> Optional[bytes]:
         """
         生成图片 (16:9标准比例,与模拟器画布一致)
@@ -43,7 +43,7 @@ class GeminiService:
         Args:
             prompt: 图片描述
             style: 风格 (educational, diagram, illustration)
-            size: 尺寸 (默认1600x900,16:9比例)
+            size: 尺寸 (默认896x504,16:9比例)
 
         Returns:
             图片二进制数据，失败返回 None
@@ -173,8 +173,8 @@ class GeminiService:
                                     b64_data = content
                                 try:
                                     return base64.b64decode(b64_data)
-                                except:
-                                    pass
+                                except Exception as e:
+                                    logger.warning(f"Base64 decode failed: {e}")
                     else:
                         error_text = await response.text()
                         logger.warning(f"Chat format failed: {response.status} - {error_text[:300]}")
@@ -200,7 +200,7 @@ class GeminiService:
         diagram_spec: dict,
         course_title: str,
         lesson_title: str,
-        size: str = "1600x900"
+        size: str = "896x504"
     ) -> Optional[bytes]:
         """
         根据图表规格生成图片 (16:9标准比例,与模拟器画布一致)
@@ -209,7 +209,7 @@ class GeminiService:
             diagram_spec: 图表规格
             course_title: 课程标题
             lesson_title: 课时标题
-            size: 尺寸 (默认1600x900,16:9比例)
+            size: 尺寸 (默认896x504,16:9比例)
 
         Returns:
             图片二进制数据

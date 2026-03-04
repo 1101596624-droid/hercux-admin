@@ -203,7 +203,7 @@ export interface ReportData {
     start: string;
     end: string;
   };
-  summary: Record<string, any>;
+  summary: Record<string, unknown>;
   charts: ChartData[];
   tables: TableData[];
 }
@@ -212,15 +212,15 @@ export interface ChartData {
   id: string;
   title: string;
   type: 'line' | 'bar' | 'pie' | 'area' | 'scatter';
-  data: any[];
-  config?: Record<string, any>;
+  data: Record<string, unknown>[];
+  config?: Record<string, unknown>;
 }
 
 export interface TableData {
   id: string;
   title: string;
   columns: TableColumn[];
-  rows: any[];
+  rows: Record<string, unknown>[];
 }
 
 export interface TableColumn {

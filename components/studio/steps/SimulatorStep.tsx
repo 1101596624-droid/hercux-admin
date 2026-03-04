@@ -86,26 +86,31 @@ export function SimulatorStep({ simulator_spec }: SimulatorStepProps) {
 
       {/* 未开始时显示提示 */}
       {!isStarted && (
-        <div
-          className="flex items-center justify-center"
-          style={{ aspectRatio: '16/9', backgroundColor: '#1e293b' }}
-        >
-          <div className="text-center">
-            <p className="text-slate-400 text-lg mb-2">点击左上角"开始"按钮</p>
-            <p className="text-slate-500 text-sm">启动模拟器</p>
+        <div className="flex justify-center w-full">
+          <div
+            className="flex items-center justify-center"
+            style={{ width: 946, height: 554, backgroundColor: '#1e293b', borderRadius: '8px' }}
+          >
+            <div className="text-center">
+              <p className="text-slate-400 text-lg mb-2">点击左上角"开始"按钮</p>
+              <p className="text-slate-500 text-sm">启动模拟器</p>
+            </div>
           </div>
         </div>
       )}
 
       {/* 模拟器内容 */}
       {isStarted && (
-        <HTMLSimulatorRenderer
-          key={key}
-          htmlContent={htmlContent}
-          height={900}
-          onReady={() => {}}
-          onError={(err) => {}}
-        />
+        <div className="flex justify-center w-full">
+          <HTMLSimulatorRenderer
+            key={key}
+            htmlContent={htmlContent}
+            width={946}
+            height={554}
+            onReady={() => {}}
+            onError={(err) => {}}
+          />
+        </div>
       )}
     </div>
   );

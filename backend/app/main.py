@@ -4,10 +4,12 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import logging
 import os
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.db.redis import get_redis, close_redis
 from app.db.neo4j import neo4j_client
+from app.db.session import AsyncSessionLocal
 from app.api.v1.api import api_router
 from app.api.v1.endpoints import studio as studio_router
 from app.core.errors import setup_exception_handlers
@@ -32,34 +34,46 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting HERCU Admin API...")
 
-    # Initialize Redis (optional)
-    try:
-        await get_redis()
-        logger.info("✅ Redis connected")
-    except Exception as e:
-        logger.warning(f"⚠️  Redis connection failed: {e}")
-        logger.warning("   Continuing without Redis...")
+    if settings.TEST_MODE:
+        logger.info("🧪 TEST_MODE enabled: skip Redis/Neo4j initialization")
+    else:
+        # Initialize Redis (optional)
+        try:
+            await get_redis()
+            logger.info("✅ Redis connected")
+        except Exception as e:
+            logger.warning(f"⚠️  Redis connection failed: {e}")
+            logger.warning("   Continuing without Redis...")
 
-    # Initialize Neo4j (optional)
+        # Initialize Neo4j (optional)
+        try:
+            await neo4j_client.connect()
+            logger.info("✅ Neo4j connected")
+        except Exception as e:
+            logger.warning(f"⚠️  Neo4j connection failed: {e}")
+            logger.warning("   Continuing without Neo4j...")
+
+    # Warm up one DB connection per worker to reduce first-request latency spikes.
     try:
-        await neo4j_client.connect()
-        logger.info("✅ Neo4j connected")
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        logger.info("✅ Database warmup complete")
     except Exception as e:
-        logger.warning(f"⚠️  Neo4j connection failed: {e}")
-        logger.warning("   Continuing without Neo4j...")
+        logger.warning(f"⚠️  Database warmup failed: {e}")
 
     yield
 
     # Shutdown
     logger.info("🛑 Shutting down HERCU Admin API...")
-    try:
-        await close_redis()
-    except:
-        pass
-    try:
-        await neo4j_client.close()
-    except:
-        pass
+    if not settings.TEST_MODE:
+        try:
+            await close_redis()
+        except Exception as e:
+            logger.warning(f"Redis close error: {e}")
+        try:
+            await neo4j_client.close()
+        except Exception as e:
+            logger.warning(f"Neo4j close error: {e}")
     logger.info("✅ Connections closed")
 
 

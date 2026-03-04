@@ -15,8 +15,12 @@ PROCESSORS_DIR = Path(__file__).parent
 def _load_builtin_processors():
     """加载内置处理器"""
     builtin_modules = [
-        "intelligent",  # 智能教学规划处理器
-        "rcs",          # RCS 三层讲解处理器
+        "intelligent",    # 智能教学规划处理器
+        "rcs",            # RCS 三层讲解处理器
+        "ca_science_5e",  # 加州理科 NGSS 5E 教学模型
+        "ca_math",        # 加州数学框架 2023
+        "ca_ela",         # 加州 ELA/ELD 框架
+        "ca_social",      # 加州社会科学 HSS 框架
     ]
 
     for module_name in builtin_modules:

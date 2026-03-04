@@ -36,14 +36,12 @@ export const useAdminAuthStore = create<AdminAuthState>()(
 
           try {
             // 使用主应用的登录API
-            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-            console.log('Admin login API URL:', API_URL);
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
 
             const formData = new URLSearchParams();
             formData.append('username', email);
             formData.append('password', password);
 
-            console.log('Sending login request to:', `${API_URL}/auth/login`);
             const response = await fetch(`${API_URL}/auth/login`, {
               method: 'POST',
               headers: {
@@ -52,8 +50,6 @@ export const useAdminAuthStore = create<AdminAuthState>()(
               },
               body: formData,
             });
-
-            console.log('Login response status:', response.status);
 
             if (!response.ok) {
               const errorData = await response.json().catch(() => ({}));

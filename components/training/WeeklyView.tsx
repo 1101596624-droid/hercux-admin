@@ -3,8 +3,10 @@
 import { Card, CardHeader, CardContent, Badge } from '@/components/ui';
 import { useState } from 'react';
 
+import type { TrainingPlan } from '@/lib/api/training';
+
 interface WeeklyViewProps {
-  plan: any;
+  plan: TrainingPlan;
 }
 
 export function WeeklyView({ plan }: WeeklyViewProps) {

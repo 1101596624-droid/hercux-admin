@@ -22,6 +22,7 @@ from app.models.models import (
     QualityEvaluation,
     ContentTemplate,
 )
+from app.core.constants import QUALITY_BASELINE
 
 
 class DistillationService:
@@ -44,7 +45,7 @@ class DistillationService:
         step_type: str,
         subject: str,
         lookback_days: int = 7,
-        min_quality_threshold: float = 75.0,
+        min_quality_threshold: float = QUALITY_BASELINE,
         max_quality_threshold: float = 60.0,
     ) -> Dict[str, List[GenerationPattern]]:
         """

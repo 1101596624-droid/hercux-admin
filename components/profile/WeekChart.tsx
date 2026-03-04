@@ -5,13 +5,14 @@ import { Card, CardHeader, CardContent } from '@/components/ui';
 interface WeekChartProps {
   weeklyProgress?: number;
   weeklyGoal?: number;
+  dailyMinutes?: number[];
 }
 
-export function WeekChart({ weeklyProgress = 0, weeklyGoal = 100 }: WeekChartProps) {
+export function WeekChart({ weeklyProgress = 0, weeklyGoal = 100, dailyMinutes }: WeekChartProps) {
   const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-  const mockData = [40, 65, 30, 80, 55, 20, 45]; // Mock weekly data
+  const data = dailyMinutes && dailyMinutes.length === 7 ? dailyMinutes : [0, 0, 0, 0, 0, 0, 0];
 
-  const maxValue = Math.max(...mockData);
+  const maxValue = Math.max(...data, 1);
   const progressPercent = Math.min((weeklyProgress / weeklyGoal) * 100, 100);
 
   return (
@@ -44,7 +45,7 @@ export function WeekChart({ weeklyProgress = 0, weeklyGoal = 100 }: WeekChartPro
         {/* Bar Chart */}
         <div className="flex items-end justify-between gap-2 h-40">
           {days.map((day, index) => {
-            const height = (mockData[index] / maxValue) * 100;
+            const height = (data[index] / maxValue) * 100;
             const isToday = index === new Date().getDay() - 1;
 
             return (
@@ -57,7 +58,7 @@ export function WeekChart({ weeklyProgress = 0, weeklyGoal = 100 }: WeekChartPro
                         : 'bg-dark-200 hover:bg-primary-200'
                     }`}
                     style={{ height: `${height}%` }}
-                    title={`${mockData[index]}分钟`}
+                    title={`${data[index]}分钟`}
                   />
                 </div>
                 <span className={`text-xs ${isToday ? 'font-bold text-primary-600' : 'text-dark-600'}`}>

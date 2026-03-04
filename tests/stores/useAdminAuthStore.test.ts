@@ -9,17 +9,22 @@ const mockFetch = vi.fn()
 global.fetch = mockFetch
 
 // Mock localStorage
-const localStorageMock = {
-  store: {} as Record<string, string>,
-  getItem: vi.fn((key: string) => localStorageMock.store[key] || null),
-  setItem: vi.fn((key: string, value: string) => {
-    localStorageMock.store[key] = value
+const localStorageStore: Record<string, string> = {}
+const localStorageMock: Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'clear'> & {
+  store: Record<string, string>
+} = {
+  store: localStorageStore,
+  getItem: vi.fn((key: string): string | null => localStorageStore[key] ?? null),
+  setItem: vi.fn((key: string, value: string): void => {
+    localStorageStore[key] = value
   }),
-  removeItem: vi.fn((key: string) => {
-    delete localStorageMock.store[key]
+  removeItem: vi.fn((key: string): void => {
+    delete localStorageStore[key]
   }),
-  clear: vi.fn(() => {
-    localStorageMock.store = {}
+  clear: vi.fn((): void => {
+    for (const key of Object.keys(localStorageStore)) {
+      delete localStorageStore[key]
+    }
   }),
 }
 Object.defineProperty(window, 'localStorage', { value: localStorageMock })
@@ -57,7 +62,7 @@ describe('useAdminAuthStore', () => {
 
   describe('login', () => {
     const mockAdminUser = {
-      id: 1,
+      id: '1',
       email: 'admin@hercu.com',
       username: 'admin',
       admin_level: 1,
@@ -115,7 +120,7 @@ describe('useAdminAuthStore', () => {
       // Set up authenticated state
       useAdminAuthStore.setState({
         user: {
-          id: 1,
+          id: '1',
           name: 'admin',
           email: 'admin@hercu.com',
           role: 'admin',
@@ -142,7 +147,7 @@ describe('useAdminAuthStore', () => {
     it('should return true for super admin (level 1) on any permission', () => {
       useAdminAuthStore.setState({
         user: {
-          id: 1,
+          id: '1',
           name: 'admin',
           email: 'admin@hercu.com',
           role: 'admin',
@@ -154,28 +159,28 @@ describe('useAdminAuthStore', () => {
         isAuthenticated: true,
       })
 
-      expect(useAdminAuthStore.getState().hasPermission('course:create')).toBe(true)
-      expect(useAdminAuthStore.getState().hasPermission('user:delete')).toBe(true)
+      expect(useAdminAuthStore.getState().hasPermission('courses.create')).toBe(true)
+      expect(useAdminAuthStore.getState().hasPermission('users.delete')).toBe(true)
       expect(useAdminAuthStore.getState().canAccessAdminManagement()).toBe(true)
     })
 
     it('should check permissions for non-super admin', () => {
       useAdminAuthStore.setState({
         user: {
-          id: 2,
+          id: '2',
           name: 'editor',
           email: 'editor@hercu.com',
           role: 'admin',
           level: 2,
-          permissions: ['course:create', 'course:edit', 'course:view'],
+          permissions: ['courses.create', 'courses.edit', 'courses.view'],
           createdAt: '',
           isActive: true,
         },
         isAuthenticated: true,
       })
 
-      expect(useAdminAuthStore.getState().hasPermission('course:create')).toBe(true)
-      expect(useAdminAuthStore.getState().hasPermission('user:delete')).toBe(false)
+      expect(useAdminAuthStore.getState().hasPermission('courses.create')).toBe(true)
+      expect(useAdminAuthStore.getState().hasPermission('users.delete')).toBe(false)
       expect(useAdminAuthStore.getState().canAccessAdminManagement()).toBe(false)
     })
 
@@ -185,46 +190,46 @@ describe('useAdminAuthStore', () => {
         isAuthenticated: false,
       })
 
-      expect(useAdminAuthStore.getState().hasPermission('course:create')).toBe(false)
-      expect(useAdminAuthStore.getState().hasAnyPermission(['course:create'])).toBe(false)
+      expect(useAdminAuthStore.getState().hasPermission('courses.create')).toBe(false)
+      expect(useAdminAuthStore.getState().hasAnyPermission(['courses.create'])).toBe(false)
     })
 
     it('should check hasAnyPermission correctly', () => {
       useAdminAuthStore.setState({
         user: {
-          id: 2,
+          id: '2',
           name: 'editor',
           email: 'editor@hercu.com',
           role: 'admin',
           level: 2,
-          permissions: ['course:create', 'course:edit'],
+          permissions: ['courses.create', 'courses.edit'],
           createdAt: '',
           isActive: true,
         },
         isAuthenticated: true,
       })
 
-      expect(useAdminAuthStore.getState().hasAnyPermission(['course:create', 'user:delete'])).toBe(true)
-      expect(useAdminAuthStore.getState().hasAnyPermission(['user:delete', 'system:config'])).toBe(false)
+      expect(useAdminAuthStore.getState().hasAnyPermission(['courses.create', 'users.delete'])).toBe(true)
+      expect(useAdminAuthStore.getState().hasAnyPermission(['users.delete', 'system.edit'])).toBe(false)
     })
 
     it('should check hasAllPermissions correctly', () => {
       useAdminAuthStore.setState({
         user: {
-          id: 2,
+          id: '2',
           name: 'editor',
           email: 'editor@hercu.com',
           role: 'admin',
           level: 2,
-          permissions: ['course:create', 'course:edit', 'course:view'],
+          permissions: ['courses.create', 'courses.edit', 'courses.view'],
           createdAt: '',
           isActive: true,
         },
         isAuthenticated: true,
       })
 
-      expect(useAdminAuthStore.getState().hasAllPermissions(['course:create', 'course:edit'])).toBe(true)
-      expect(useAdminAuthStore.getState().hasAllPermissions(['course:create', 'user:delete'])).toBe(false)
+      expect(useAdminAuthStore.getState().hasAllPermissions(['courses.create', 'courses.edit'])).toBe(true)
+      expect(useAdminAuthStore.getState().hasAllPermissions(['courses.create', 'users.delete'])).toBe(false)
     })
   })
 
@@ -232,7 +237,7 @@ describe('useAdminAuthStore', () => {
     it('should return user level when authenticated', () => {
       useAdminAuthStore.setState({
         user: {
-          id: 1,
+          id: '1',
           name: 'admin',
           email: 'admin@hercu.com',
           role: 'admin',

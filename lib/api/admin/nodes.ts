@@ -13,8 +13,8 @@ export interface NodeListItem {
   description: string | null;
   sequence: number;
   parent_id: number | null;
-  timeline_config: any;
-  unlock_condition: any;
+  timeline_config: Record<string, unknown>;
+  unlock_condition: Record<string, unknown>;
   created_at: string;
   updated_at: string | null;
 }
@@ -45,8 +45,8 @@ export interface NodeCreateData {
   description?: string;
   sequence?: number;
   parent_id?: number;
-  timeline_config?: any;
-  unlock_condition?: any;
+  timeline_config?: Record<string, unknown>;
+  unlock_condition?: Record<string, unknown>;
 }
 
 export interface NodeUpdateData {
@@ -57,8 +57,8 @@ export interface NodeUpdateData {
   description?: string;
   sequence?: number;
   parent_id?: number;
-  timeline_config?: any;
-  unlock_condition?: any;
+  timeline_config?: Record<string, unknown>;
+  unlock_condition?: Record<string, unknown>;
 }
 
 /**

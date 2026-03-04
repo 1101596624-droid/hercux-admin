@@ -8,6 +8,8 @@ from .models import (
     HTMLSimulatorSpec, HTMLSimulatorQualityStandards, HTMLSimulatorQualityScore
 )
 from .service import CourseGenerationService
+from .subject_classifier import SubjectClassifier
+from .template_manager import TemplateManager
 
 __all__ = [
     # Main service
@@ -17,6 +19,8 @@ __all__ = [
     'CourseSupervisor',
     'ChapterGenerator',
     'GeneratorPromptBuilder',
+    'SubjectClassifier',
+    'TemplateManager',
 
     # Models
     'GenerationState',

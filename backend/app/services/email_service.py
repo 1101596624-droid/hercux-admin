@@ -12,24 +12,30 @@ from email.utils import formataddr
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 import json
-import redis
+import logging
+from urllib.parse import urlparse
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Redis connection for verification codes
-_redis_client: Optional[redis.Redis] = None
+_redis_client = None
 
-def get_redis_client() -> redis.Redis:
-    """Get or create Redis client"""
+def get_redis_client():
+    """Get or create Redis client using settings.REDIS_URL"""
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
+        import redis
+        parsed = urlparse(settings.REDIS_URL)
+        _redis_client = redis.Redis(
+            host=parsed.hostname or '127.0.0.1',
+            port=parsed.port or 6379,
+            db=int(parsed.path.lstrip('/') or 0),
+            password=parsed.password,
+            decode_responses=True
+        )
     return _redis_client
-
-# QQ SMTP Configuration
-SMTP_SERVER = "smtp.qq.com"
-SMTP_PORT = 465  # SSL port
-SMTP_USER = "1101596624@qq.com"
-SMTP_PASSWORD = "tumuhuzzdqfwjhae"  # Authorization code
-SENDER_NAME = "HERCU 学习平台"
 
 # Code settings
 CODE_LENGTH = 6
@@ -121,7 +127,7 @@ def send_verification_email(email: str, code: str, purpose: str = "register") ->
         # Create message
         msg = MIMEMultipart('alternative')
         msg['Subject'] = Header(f"【HERCU】您的验证码是 {code}", 'utf-8')
-        msg['From'] = formataddr((str(Header(SENDER_NAME, 'utf-8')), SMTP_USER))
+        msg['From'] = formataddr((str(Header(settings.SMTP_SENDER_NAME, 'utf-8')), settings.SMTP_USER))
         msg['To'] = email
 
         # Purpose text
@@ -193,9 +199,9 @@ HERCU 学习平台
         msg.attach(part2)
 
         # Send email via SSL
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, email, msg.as_string())
+        with smtplib.SMTP_SSL(settings.SMTP_SERVER, settings.SMTP_PORT) as server:
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.sendmail(settings.SMTP_USER, email, msg.as_string())
 
         return True, ""
 

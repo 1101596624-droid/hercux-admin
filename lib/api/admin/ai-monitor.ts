@@ -85,6 +85,216 @@ export interface AIQuota {
   };
 }
 
+// UI fallback data for loading/error states
+export const mockAIOverview: AIOverviewData = {
+  today: {
+    call_count: 0,
+    total_tokens: 0,
+    total_cost: 0,
+    avg_latency_ms: 0,
+    error_rate: 0,
+  },
+  comparisons: {
+    calls_vs_yesterday: 0,
+    cost_vs_yesterday: 0,
+  },
+};
+
+export const mockAITrends: AITrendPoint[] = [
+  { time: '00:00', call_count: 0, tokens: 0, cost: 0 },
+  { time: '04:00', call_count: 0, tokens: 0, cost: 0 },
+  { time: '08:00', call_count: 0, tokens: 0, cost: 0 },
+  { time: '12:00', call_count: 0, tokens: 0, cost: 0 },
+  { time: '16:00', call_count: 0, tokens: 0, cost: 0 },
+  { time: '20:00', call_count: 0, tokens: 0, cost: 0 },
+];
+
+export const mockAICostBreakdown: AICostBreakdown = {
+  total_cost: 0,
+  budget: 0,
+  budget_usage: 0,
+  breakdown: [],
+  forecast: {
+    month_end_cost: 0,
+    will_exceed_budget: false,
+  },
+};
+
+export const mockAILogs: AILogEntry[] = [];
+
+export const mockAIAlerts: AIAlert[] = [];
+
+type AlertStats = { open: number; acknowledged: number; resolved: number };
+type LogsResponse = { data: AILogEntry[]; total: number };
+type AlertsResponse = { data: AIAlert[]; stats: AlertStats };
+
+const VALID_SCENES: AILogEntry['scene'][] = ['tutor', 'planner', 'voice', 'summary'];
+const VALID_LOG_STATUS: AILogEntry['status'][] = ['success', 'error', 'timeout'];
+const VALID_ALERT_SEVERITY: AIAlert['severity'][] = ['critical', 'warning', 'info'];
+const VALID_ALERT_STATUS: AIAlert['status'][] = ['open', 'acknowledged', 'resolved'];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const toNumber = (value: unknown, fallback = 0): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+};
+
+const toNonNegativeNumber = (value: unknown, fallback = 0): number =>
+  Math.max(0, toNumber(value, fallback));
+
+const toString = (value: unknown, fallback = ''): string =>
+  typeof value === 'string' ? value : fallback;
+
+const toBoolean = (value: unknown, fallback = false): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
+function toScene(value: unknown): AILogEntry['scene'] {
+  return VALID_SCENES.includes(value as AILogEntry['scene']) ? (value as AILogEntry['scene']) : 'tutor';
+}
+
+function toLogStatus(value: unknown): AILogEntry['status'] {
+  return VALID_LOG_STATUS.includes(value as AILogEntry['status']) ? (value as AILogEntry['status']) : 'success';
+}
+
+function toAlertSeverity(value: unknown): AIAlert['severity'] {
+  return VALID_ALERT_SEVERITY.includes(value as AIAlert['severity']) ? (value as AIAlert['severity']) : 'info';
+}
+
+function toAlertStatus(value: unknown): AIAlert['status'] {
+  return VALID_ALERT_STATUS.includes(value as AIAlert['status']) ? (value as AIAlert['status']) : 'open';
+}
+
+function normalizeOverview(raw: unknown): AIOverviewData {
+  const data = isRecord(raw) ? raw : {};
+  const today = isRecord(data.today) ? data.today : {};
+  const comparisons = isRecord(data.comparisons) ? data.comparisons : {};
+
+  return {
+    today: {
+      call_count: toNonNegativeNumber(today.call_count),
+      total_tokens: toNonNegativeNumber(today.total_tokens),
+      total_cost: toNonNegativeNumber(today.total_cost),
+      avg_latency_ms: toNonNegativeNumber(today.avg_latency_ms),
+      error_rate: clamp(toNonNegativeNumber(today.error_rate), 0, 1),
+    },
+    comparisons: {
+      calls_vs_yesterday: toNumber(comparisons.calls_vs_yesterday),
+      cost_vs_yesterday: toNumber(comparisons.cost_vs_yesterday),
+    },
+  };
+}
+
+function normalizeTrends(raw: unknown): AITrendPoint[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item, index) => {
+    const data = isRecord(item) ? item : {};
+    return {
+      time: toString(data.time, `T${index + 1}`),
+      call_count: toNonNegativeNumber(data.call_count),
+      tokens: toNonNegativeNumber(data.tokens),
+      cost: toNonNegativeNumber(data.cost),
+    };
+  });
+}
+
+function normalizeCosts(raw: unknown): AICostBreakdown {
+  const data = isRecord(raw) ? raw : {};
+  const breakdownRaw = Array.isArray(data.breakdown) ? data.breakdown : [];
+  const forecastRaw = isRecord(data.forecast) ? data.forecast : {};
+
+  return {
+    total_cost: toNonNegativeNumber(data.total_cost),
+    budget: toNonNegativeNumber(data.budget),
+    budget_usage: clamp(toNonNegativeNumber(data.budget_usage), 0, 1),
+    breakdown: breakdownRaw.map((item, index) => {
+      const entry = isRecord(item) ? item : {};
+      return {
+        model: toString(entry.model, `model-${index + 1}`),
+        call_count: toNonNegativeNumber(entry.call_count),
+        tokens: toNonNegativeNumber(entry.tokens),
+        cost: toNonNegativeNumber(entry.cost),
+        percentage: clamp(toNonNegativeNumber(entry.percentage), 0, 1),
+      };
+    }),
+    forecast: {
+      month_end_cost: toNonNegativeNumber(forecastRaw.month_end_cost),
+      will_exceed_budget: toBoolean(forecastRaw.will_exceed_budget),
+    },
+  };
+}
+
+function normalizeLog(raw: unknown, index: number): AILogEntry {
+  const data = isRecord(raw) ? raw : {};
+  const idValue = toString(data.id, `log_${index + 1}`);
+  return {
+    id: idValue,
+    user_id: toNonNegativeNumber(data.user_id),
+    user_name: toString(data.user_name, '匿名用户'),
+    scene: toScene(data.scene),
+    model: toString(data.model, 'unknown'),
+    input_tokens: toNonNegativeNumber(data.input_tokens),
+    output_tokens: toNonNegativeNumber(data.output_tokens),
+    latency_ms: toNonNegativeNumber(data.latency_ms),
+    status: toLogStatus(data.status),
+    error_code: toString(data.error_code) || undefined,
+    cost: toNonNegativeNumber(data.cost),
+    created_at: toString(data.created_at, new Date(0).toISOString()),
+  };
+}
+
+function normalizeLogsResponse(raw: unknown): LogsResponse {
+  const data = isRecord(raw) ? raw : {};
+  const rows = Array.isArray(data.data) ? data.data : [];
+  return {
+    data: rows.map((row, index) => normalizeLog(row, index)),
+    total: toNonNegativeNumber(data.total, rows.length),
+  };
+}
+
+function normalizeAlert(raw: unknown, index: number): AIAlert {
+  const data = isRecord(raw) ? raw : {};
+  return {
+    id: toNonNegativeNumber(data.id, index + 1),
+    alert_type: toString(data.alert_type, 'system'),
+    severity: toAlertSeverity(data.severity),
+    title: toString(data.title, '系统告警'),
+    message: toString(data.message),
+    metric_value: toNonNegativeNumber(data.metric_value),
+    threshold_value: toNonNegativeNumber(data.threshold_value),
+    status: toAlertStatus(data.status),
+    created_at: toString(data.created_at, new Date(0).toISOString()),
+    resolved_at: toString(data.resolved_at) || undefined,
+    resolution_note: toString(data.resolution_note) || undefined,
+  };
+}
+
+function normalizeAlertsResponse(raw: unknown): AlertsResponse {
+  const data = isRecord(raw) ? raw : {};
+  const rows = Array.isArray(data.data) ? data.data : [];
+  const normalizedData = rows.map((row, index) => normalizeAlert(row, index));
+
+  const statsRaw = isRecord(data.stats) ? data.stats : {};
+  const stats: AlertStats = {
+    open: toNonNegativeNumber(statsRaw.open),
+    acknowledged: toNonNegativeNumber(statsRaw.acknowledged),
+    resolved: toNonNegativeNumber(statsRaw.resolved),
+  };
+
+  return {
+    data: normalizedData,
+    stats,
+  };
+}
+
 // Cache configuration - 5 minutes
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
 
@@ -107,61 +317,6 @@ function setCachedData<T>(key: string, data: T): void {
   cache[key] = { data, timestamp: Date.now() };
 }
 
-// Mock data
-export const mockAIOverview: AIOverviewData = {
-  today: {
-    call_count: 15234,
-    total_tokens: 4523000,
-    total_cost: 287.45,
-    avg_latency_ms: 1250,
-    error_rate: 0.008,
-  },
-  comparisons: {
-    calls_vs_yesterday: 0.12,
-    cost_vs_yesterday: 0.08,
-  },
-};
-
-export const mockAITrends: AITrendPoint[] = [
-  { time: '00:00', call_count: 523, tokens: 152300, cost: 9.74 },
-  { time: '04:00', call_count: 312, tokens: 89200, cost: 5.82 },
-  { time: '08:00', call_count: 1245, tokens: 356800, cost: 22.45 },
-  { time: '12:00', call_count: 2156, tokens: 623400, cost: 39.87 },
-  { time: '16:00', call_count: 1890, tokens: 548200, cost: 35.12 },
-  { time: '20:00', call_count: 1678, tokens: 489300, cost: 31.24 },
-];
-
-export const mockAICostBreakdown: AICostBreakdown = {
-  total_cost: 3847.25,
-  budget: 5000,
-  budget_usage: 0.769,
-  breakdown: [
-    { model: 'claude-sonnet-4', call_count: 125000, tokens: 48200000, cost: 2890.00, percentage: 0.751 },
-    { model: 'claude-haiku-4', call_count: 89000, tokens: 12500000, cost: 312.00, percentage: 0.081 },
-    { model: 'gpt-4o', call_count: 8500, tokens: 3200000, cost: 245.00, percentage: 0.064 },
-    { model: 'whisper', call_count: 15200, tokens: 0, cost: 91.00, percentage: 0.024 },
-    { model: 'tts', call_count: 18500, tokens: 0, cost: 278.00, percentage: 0.072 },
-  ],
-  forecast: {
-    month_end_cost: 5200,
-    will_exceed_budget: true,
-  },
-};
-
-export const mockAILogs: AILogEntry[] = [
-  { id: 'log_001', user_id: 1, user_name: '张明远', scene: 'tutor', model: 'claude-sonnet-4', input_tokens: 1250, output_tokens: 890, latency_ms: 1340, status: 'success', cost: 0.0234, created_at: '2025-01-23T10:30:15Z' },
-  { id: 'log_002', user_id: 2, user_name: '李思琪', scene: 'planner', model: 'claude-sonnet-4', input_tokens: 2100, output_tokens: 1560, latency_ms: 2150, status: 'success', cost: 0.0412, created_at: '2025-01-23T10:28:42Z' },
-  { id: 'log_003', user_id: 4, user_name: '陈雨萱', scene: 'tutor', model: 'claude-haiku-4', input_tokens: 850, output_tokens: 620, latency_ms: 680, status: 'success', cost: 0.0089, created_at: '2025-01-23T10:25:18Z' },
-  { id: 'log_004', user_id: 5, user_name: '刘子轩', scene: 'voice', model: 'whisper', input_tokens: 0, output_tokens: 0, latency_ms: 3200, status: 'success', cost: 0.0180, created_at: '2025-01-23T10:22:05Z' },
-  { id: 'log_005', user_id: 1, user_name: '张明远', scene: 'tutor', model: 'claude-sonnet-4', input_tokens: 3500, output_tokens: 0, latency_ms: 5000, status: 'timeout', error_code: 'timeout', cost: 0.0105, created_at: '2025-01-23T10:18:33Z' },
-];
-
-export const mockAIAlerts: AIAlert[] = [
-  { id: 1, alert_type: 'cost_exceed', severity: 'critical', title: '日成本超过阈值', message: '今日 AI 成本已达 $320，超过设定阈值 $300', metric_value: 320, threshold_value: 300, status: 'open', created_at: '2025-01-23T14:30:00Z' },
-  { id: 2, alert_type: 'error_rate', severity: 'warning', title: '错误率上升', message: '过去1小时错误率达到 2.5%，超过阈值 1%', metric_value: 2.5, threshold_value: 1, status: 'acknowledged', created_at: '2025-01-23T12:15:00Z' },
-  { id: 3, alert_type: 'user_abuse', severity: 'info', title: '用户调用异常', message: '用户 ID:156 今日调用次数达 250 次', metric_value: 250, threshold_value: 200, status: 'resolved', created_at: '2025-01-23T09:45:00Z', resolved_at: '2025-01-23T10:30:00Z', resolution_note: '已确认为正常使用' },
-];
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
 
 // Helper function to get auth headers
@@ -175,58 +330,61 @@ export const aiMonitorAPI = {
   getOverview: async (): Promise<AIOverviewData> => {
     const cacheKey = 'ai_monitor_overview';
     const cached = getCachedData<AIOverviewData>(cacheKey);
-    if (cached) return cached;
+    if (cached !== null) return cached;
 
     try {
       const response = await fetch(`${API_BASE_URL}/admin/ai/overview`, {
         headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error('Failed to fetch AI overview');
-      const data = await response.json();
+      const data = normalizeOverview(await response.json());
       setCachedData(cacheKey, data);
       return data;
-    } catch {
-      return mockAIOverview;
+    } catch (error) {
+      console.error('Failed to fetch AI overview:', error);
+      throw error;
     }
   },
 
   getTrends: async (period: '24h' | '7d' | '30d' = '24h'): Promise<AITrendPoint[]> => {
     const cacheKey = `ai_monitor_trends_${period}`;
     const cached = getCachedData<AITrendPoint[]>(cacheKey);
-    if (cached) return cached;
+    if (cached !== null) return cached;
 
     try {
       const response = await fetch(`${API_BASE_URL}/admin/ai/trends?period=${period}`, {
         headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error('Failed to fetch AI trends');
-      const data = await response.json();
+      const data = normalizeTrends(await response.json());
       setCachedData(cacheKey, data);
       return data;
-    } catch {
-      return mockAITrends;
+    } catch (error) {
+      console.error('Failed to fetch AI trends:', error);
+      throw error;
     }
   },
 
   getCosts: async (): Promise<AICostBreakdown> => {
     const cacheKey = 'ai_monitor_costs';
     const cached = getCachedData<AICostBreakdown>(cacheKey);
-    if (cached) return cached;
+    if (cached !== null) return cached;
 
     try {
       const response = await fetch(`${API_BASE_URL}/admin/ai/costs`, {
         headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error('Failed to fetch AI costs');
-      const data = await response.json();
+      const data = normalizeCosts(await response.json());
       setCachedData(cacheKey, data);
       return data;
-    } catch {
-      return mockAICostBreakdown;
+    } catch (error) {
+      console.error('Failed to fetch AI costs:', error);
+      throw error;
     }
   },
 
-  getLogs: async (params?: { page?: number; limit?: number; scene?: string; status?: string }): Promise<{ data: AILogEntry[]; total: number }> => {
+  getLogs: async (params?: { page?: number; limit?: number; scene?: string; status?: string }): Promise<LogsResponse> => {
     // Logs are not cached as they need to be fresh
     try {
       const searchParams = new URLSearchParams();
@@ -239,16 +397,17 @@ export const aiMonitorAPI = {
         headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error('Failed to fetch AI logs');
-      return response.json();
-    } catch {
-      return { data: mockAILogs, total: mockAILogs.length };
+      return normalizeLogsResponse(await response.json());
+    } catch (error) {
+      console.error('Failed to fetch AI logs:', error);
+      throw error;
     }
   },
 
-  getAlerts: async (status?: string): Promise<{ data: AIAlert[]; stats: { open: number; acknowledged: number; resolved: number } }> => {
+  getAlerts: async (status?: string): Promise<AlertsResponse> => {
     const cacheKey = `ai_monitor_alerts_${status || 'all'}`;
-    const cached = getCachedData<{ data: AIAlert[]; stats: { open: number; acknowledged: number; resolved: number } }>(cacheKey);
-    if (cached) return cached;
+    const cached = getCachedData<AlertsResponse>(cacheKey);
+    if (cached !== null) return cached;
 
     try {
       const url = status
@@ -258,14 +417,12 @@ export const aiMonitorAPI = {
         headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error('Failed to fetch AI alerts');
-      const data = await response.json();
+      const data = normalizeAlertsResponse(await response.json());
       setCachedData(cacheKey, data);
       return data;
-    } catch {
-      return {
-        data: mockAIAlerts,
-        stats: { open: 1, acknowledged: 1, resolved: 1 },
-      };
+    } catch (error) {
+      console.error('Failed to fetch AI alerts:', error);
+      throw error;
     }
   },
 
@@ -277,17 +434,17 @@ export const aiMonitorAPI = {
     });
     if (!response.ok) throw new Error('Failed to update alert');
     // Clear alerts cache after update
-    Object.keys(cache).forEach(key => {
+    Object.keys(cache).forEach((key) => {
       if (key.startsWith('ai_monitor_alerts')) {
         delete cache[key];
       }
     });
-    return response.json();
+    return normalizeAlert(await response.json(), id);
   },
 
   // Force refresh - clears cache and fetches fresh data
   clearCache: () => {
-    Object.keys(cache).forEach(key => {
+    Object.keys(cache).forEach((key) => {
       if (key.startsWith('ai_monitor_')) {
         delete cache[key];
       }

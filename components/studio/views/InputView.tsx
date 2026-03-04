@@ -56,7 +56,9 @@ export function InputView({
         <div className="p-4 border-b border-slate-200">
           <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">素材来源</h2>
           <p className="text-xs text-slate-500 mt-1">
-            {sources.length > 0 ? `${sources.length} 个文件，${totalChars.toLocaleString()} 字符` : '上传文件或粘贴文本'}
+            {sources.length > 0
+              ? `${sources.length} 个素材，${totalChars.toLocaleString()} 字符（文件在生成时解析）`
+              : '上传文件或粘贴文本'}
           </p>
         </div>
 
@@ -87,7 +89,11 @@ export function InputView({
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-slate-900 truncate">{source.name}</p>
-                      <p className="text-xs text-slate-500">{source.charCount.toLocaleString()} 字符</p>
+                      <p className="text-xs text-slate-500">
+                        {source.type === 'file' && source.deferredParse
+                          ? `已上传，生成时解析${source.fileSize ? ` · ${(source.fileSize / 1024 / 1024).toFixed(2)} MB` : ''}`
+                          : `${source.charCount.toLocaleString()} 字符`}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
@@ -288,7 +294,9 @@ export function InputView({
                     <Eye size={14} className="text-slate-400 group-hover:text-red-500 transition-colors" />
                   </div>
                   <p className="text-xs text-slate-500 line-clamp-6 whitespace-pre-wrap">
-                    {source.text.slice(0, 500)}...
+                    {source.type === 'file' && source.deferredParse
+                      ? '文件已上传，开始生成后才会读取并解析文本。'
+                      : `${source.text.slice(0, 500)}...`}
                   </p>
                   <p className="text-xs text-red-500 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     点击查看完整内容

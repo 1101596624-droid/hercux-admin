@@ -165,11 +165,77 @@ export interface SkillAchievementUpdateInput {
   sort_order?: number;
 }
 
+// Internal API response types for data transformation
+interface StatsAPIResponse {
+  badges?: { total?: number; active?: number; totalUnlocked?: number };
+  skillTrees?: { total?: number; active?: number };
+  achievements?: { total?: number; active?: number; totalUnlocked?: number };
+  pendingDomains?: number;
+}
+
+interface BadgeAPIItem {
+  id: string;
+  name: string;
+  nameEn?: string;
+  name_en?: string;
+  icon: string;
+  description?: string;
+  category: BadgeCategory;
+  rarity: BadgeRarity;
+  points: number;
+  condition: Record<string, unknown>;
+  iconUrl?: string;
+  icon_url?: string;
+  unlockAnimation?: string;
+  unlock_animation?: string;
+  isActive?: boolean;
+  is_active?: number;
+  sortOrder?: number;
+  sort_order?: number;
+  createdAt?: string;
+  created_at?: string;
+  stats?: { unlockedCount?: number };
+  unlock_count?: number;
+}
+
+interface BadgesAPIResponse {
+  data?: BadgeAPIItem[];
+  pagination?: { total?: number; page?: number; pageSize?: number };
+}
+
+interface SkillTreeAPIItem {
+  id: string;
+  name: string;
+  nameEn?: string;
+  name_en?: string;
+  icon: string;
+  color: string;
+  description?: string;
+  matchRules?: Record<string, unknown>;
+  match_rules?: Record<string, unknown>;
+  levelThresholds?: number[];
+  level_thresholds?: number[];
+  prerequisites?: { treeId: string; requiredLevel: number }[];
+  unlocks?: string[];
+  isAdvanced?: boolean;
+  is_advanced?: number;
+  isActive?: boolean;
+  is_active?: number;
+  sortOrder?: number;
+  sort_order?: number;
+  stats?: { userCount?: number };
+  active_users?: number;
+}
+
+interface SkillTreesAPIResponse {
+  data?: SkillTreeAPIItem[];
+}
+
 // API Functions
 export const achievementCenterAPI = {
   // Stats
   getStats: async (): Promise<AchievementStats> => {
-    const { data } = await apiClient.get<any>('/admin/achievement-center/stats');
+    const { data } = await apiClient.get<StatsAPIResponse>('/admin/achievement-center/stats');
     // Transform backend response to frontend format
     return {
       total_badges: data.badges?.total || 0,
@@ -186,14 +252,14 @@ export const achievementCenterAPI = {
 
   // Badges
   getBadges: async (params?: { category?: BadgeCategory; is_active?: number; page?: number; page_size?: number }): Promise<{ badges: BadgeConfig[]; pagination: { total: number; page: number; pageSize: number } }> => {
-    const { data } = await apiClient.get<any>('/admin/achievement-center/badges', {
+    const { data } = await apiClient.get<BadgesAPIResponse>('/admin/achievement-center/badges', {
       params: { page: 1, page_size: 40, ...params }
     });
     // Transform backend response - backend returns { data: [...], pagination: {...} }
     const badges = data.data || data;
     const pagination = data.pagination || { total: 0, page: 1, pageSize: 40 };
     return {
-      badges: (Array.isArray(badges) ? badges : []).map((b: any) => ({
+      badges: (Array.isArray(badges) ? badges : []).map((b: BadgeAPIItem) => ({
         id: b.id,
         name: b.name,
         name_en: b.nameEn || b.name_en,
@@ -246,10 +312,10 @@ export const achievementCenterAPI = {
 
   // Skill Trees
   getSkillTrees: async (params?: { is_active?: number }): Promise<SkillTreeConfig[]> => {
-    const { data } = await apiClient.get<any>('/admin/achievement-center/skill-trees', { params });
+    const { data } = await apiClient.get<SkillTreesAPIResponse>('/admin/achievement-center/skill-trees', { params });
     // Transform backend response - backend returns { data: [...] }
     const trees = data.data || data;
-    return (Array.isArray(trees) ? trees : []).map((t: any) => ({
+    return (Array.isArray(trees) ? trees : []).map((t: SkillTreeAPIItem) => ({
       id: t.id,
       name: t.name,
       name_en: t.nameEn || t.name_en,
@@ -333,7 +399,7 @@ export const achievementCenterAPI = {
     badge?: BadgeCreateInput;
     error?: string;
   }> => {
-    const { data } = await apiClient.post<any>('/admin/achievement-center/generate-badge', {
+    const { data } = await apiClient.post<{ success: boolean; badge?: BadgeCreateInput; error?: string }>('/admin/achievement-center/generate-badge', {
       unlock_description: unlockDescription,
       badge_name: badgeName,
       badge_category: badgeCategory,
@@ -347,7 +413,7 @@ export const achievementCenterAPI = {
     animation_code?: string;
     error?: string;
   }> => {
-    const { data } = await apiClient.post<any>('/admin/achievement-center/generate-animation', {
+    const { data } = await apiClient.post<{ success: boolean; animation_code?: string; error?: string }>('/admin/achievement-center/generate-animation', {
       badge_name: badgeName,
       badge_description: badgeDescription,
       rarity: rarity,

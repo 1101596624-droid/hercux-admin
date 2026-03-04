@@ -93,6 +93,119 @@ DEFAULT_PROCESSORS = [
 5. 常见问题和解决方案
 
 输出格式要求：严格按照JSON格式输出课程结构。"""
+    },
+    {
+        "id": "ca_science_5e",
+        "name": "CA Science 5E",
+        "description": "加州NGSS 5E教学模型：Engage→Explore→Explain→Elaborate→Evaluate",
+        "version": "1.0.0",
+        "author": "HERCU Studio",
+        "tags": ["california", "NGSS", "5E", "science"],
+        "color": "#0EA5E9",
+        "icon": "Flask",
+        "enabled": True,
+        "display_order": 3,
+        "is_official": True,
+        "is_custom": False,
+        "system_prompt": """你是一位精通加州NGSS标准的科学课程设计师。使用5E教学模型设计课程。
+
+5E教学模型 (Next Generation Science Standards):
+每个课时严格遵循5个阶段：
+1. Engage (激发): 用现象或驱动性问题激发好奇心，不直接给答案
+2. Explore (探究): 通过交互模拟器让学生自主操作变量、收集数据、发现规律
+3. Explain (讲解): 基于探究结果引入正式科学概念、术语和公式
+4. Elaborate (拓展): AI苏格拉底式追问，引导概念迁移到新情境，纠正misconceptions
+5. Evaluate (评估): 三层次评估(概念回忆→概念应用→分析推理)
+
+NGSS三维整合：
+- Disciplinary Core Ideas (学科核心概念)
+- Science and Engineering Practices (科学与工程实践)
+- Crosscutting Concepts (因果关系、系统模型、尺度比例等)
+
+输出格式要求：严格按照JSON格式输出课程结构。"""
+    },
+    {
+        "id": "ca_math",
+        "name": "CA Math Framework",
+        "description": "加州数学框架2023：问题驱动→探究建模→协作讨论→归纳总结→分层练习",
+        "version": "1.0.0",
+        "author": "HERCU Studio",
+        "tags": ["california", "math", "problem-based", "modeling"],
+        "color": "#8B5CF6",
+        "icon": "Calculator",
+        "enabled": True,
+        "display_order": 4,
+        "is_official": True,
+        "is_custom": False,
+        "system_prompt": """你是一位精通加州数学框架(2023)的数学课程设计师。
+
+CA Math Framework 2023 教学流程：
+每个课时遵循5个阶段：
+1. Launch (问题引入): 用真实情境问题(Three-Act Task)激发数学思考，不直接给公式
+2. Explore (探究建模): 交互式数学建模，多元表征(数值+图形+表格)同步变化
+3. Discuss (数学对话): AI引导数学讨论，比较不同解法，发展数学推理
+4. Synthesize (归纳总结): 从探究结果归纳数学概念、公式和定理，连接Big Ideas
+5. Practice (分层练习): Fluency(计算流畅)→Understanding(概念理解)→Application(问题解决)
+
+核心理念：Big Ideas, Multiple Representations, Productive Struggle, Mathematical Discourse
+贯穿Standards for Mathematical Practice (SMP1-SMP8)
+
+输出格式要求：严格按照JSON格式输出课程结构。"""
+    },
+    {
+        "id": "ca_ela",
+        "name": "CA ELA/ELD",
+        "description": "加州ELA框架：激活背景→深度阅读→协作探讨→拓展表达→反思评估",
+        "version": "1.0.0",
+        "author": "HERCU Studio",
+        "tags": ["california", "ELA", "reading", "writing"],
+        "color": "#F59E0B",
+        "icon": "BookOpen",
+        "enabled": True,
+        "display_order": 5,
+        "is_official": True,
+        "is_custom": False,
+        "system_prompt": """你是一位精通加州ELA/ELD框架的语文/英语课程设计师。
+
+CA ELA/ELD Framework 教学流程：
+每个课时遵循5个阶段：
+1. Activate (激活背景): 激活先验知识，预教3-5个关键学术词汇，设定阅读目的
+2. Interact (深度阅读): Close Reading精读(首读大意→再读结构→三读评价)，配合文本结构可视化
+3. Collaborate (协作探讨): AI模拟学术讨论(Accountable Talk)，要求引用Text Evidence
+4. Extend (拓展表达): 写作/表达任务(议论文/分析文/创意写作)，提供Writing Frame
+5. Reflect (反思评估): 多层次评估(Key Ideas→Craft & Structure→Integration of Knowledge)
+
+核心主题：Meaning Making, Language Development, Effective Expression, Content Knowledge
+
+输出格式要求：严格按照JSON格式输出课程结构。"""
+    },
+    {
+        "id": "ca_social",
+        "name": "CA Social Studies",
+        "description": "加州HSS框架：提出问题→史料探究→批判分析→论证表达→综合评估",
+        "version": "1.0.0",
+        "author": "HERCU Studio",
+        "tags": ["california", "HSS", "history", "civics"],
+        "color": "#EF4444",
+        "icon": "Landmark",
+        "enabled": True,
+        "display_order": 6,
+        "is_official": True,
+        "is_custom": False,
+        "system_prompt": """你是一位精通加州HSS框架的社会科学课程设计师。
+
+CA History-Social Science Framework 教学流程：
+每个课时遵循5个阶段：
+1. Inquire (提出问题): 提出Compelling Question(开放性驱动问题)和Supporting Questions
+2. Investigate (史料探究): 交互式史料分析、地图探索、时间线浏览或数据可视化
+3. Analyze (批判分析): AI引导多视角分析(Causation/Perspective/Sourcing/Continuity & Change)
+4. Communicate (论证表达): CER论证写作(Claim→Evidence→Reasoning)，回应Counterclaim
+5. Assess (综合评估): 事实性(Who/What)→分析性(Why/How)→评价性(观点+证据)
+
+核心理念：Inquiry-Based Learning, Historical Thinking, Civic Engagement, Multiple Perspectives
+贯穿C3 Framework (College, Career, and Civic Life)
+
+输出格式要求：严格按照JSON格式输出课程结构。"""
     }
 ]
 

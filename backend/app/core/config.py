@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8001  # 统一端口为 8001
-    DEBUG: bool = True
+    DEBUG: bool = False
+    TEST_MODE: bool = False
     PROJECT_NAME: str = "HERCU API"  # 统一项目名称
     VERSION: str = "1.0.0"
     API_V1_PREFIX: str = "/api/v1"
@@ -20,6 +21,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DATABASE_POOL_SIZE: int = 20
     DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_TIMEOUT: int = 30
+    DATABASE_POOL_RECYCLE: int = 1800
+    DATABASE_POOL_USE_LIFO: bool = True
 
     # Redis
     REDIS_URL: str
@@ -65,14 +69,24 @@ class Settings(BaseSettings):
     GEMINI_BASE_URL: str = "https://hiapi.online/v1"
     GEMINI_MODEL: str = "gemini-3-pro-image-preview-2k"  # Gemini 模型名称
 
-    # Tavily Search API (网络搜索)
-    TAVILY_API_KEY: str = ""
 
     # AWS S3
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_NAME: str = ""
+
+    # Email (SMTP)
+    SMTP_SERVER: str = "smtp.qq.com"
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""  # SMTP authorization code
+    SMTP_SENDER_NAME: str = "HERCU 学习平台"
+
+    # AI Monitor
+    AI_MONTHLY_BUDGET: float = 5000.0  # 月度AI预算(美元)
+    AI_DAILY_COST_THRESHOLD: float = 300.0  # 日成本告警阈值(美元)
+    AI_USER_CALL_THRESHOLD: int = 100  # 单用户日调用告警阈值
 
     # CORS - 添加 Electron 应用支持
     CORS_ORIGINS: List[str] = [
@@ -86,8 +100,17 @@ class Settings(BaseSettings):
         "app://.",  # Electron 应用
     ]
 
+    # Concurrent Generation (2026-02-23)
+    # 并发课程生成配置 - 升配服务器只需改这些数字
+    MAX_CONCURRENT_GENERATIONS: int = 5       # 最大并发生成数 (4核8G=5, 8核16G=12-15)
+    GENERATION_QUEUE_MAX_SIZE: int = 50       # 队列最大长度
+    GENERATION_TASK_TIMEOUT: int = 2160       # 单个任务超时(秒), 默认36分钟（与 Agent 超时口径同步）
+    GENERATION_PROGRESS_TTL: int = 3600       # 进度数据Redis过期时间(秒)
+
     # Agent Learning System - Phase 3 (2026-02-13)
     # 智能学习系统配置
+    AGENT_BASE_URL: str = "http://127.0.0.1:8100"  # hercu-agent 服务地址
+    AGENT_MAX_CONCURRENT_SIMULATORS: int = 3  # Agent同时处理模拟器请求数
     ENABLE_AGENT_LEARNING: bool = True  # 启用Agent学习系统
     AGENT_EVAL_PROBABILITY_THRESHOLD: float = 0.5  # Agent评估触发概率阈值（0-1）
     DISTILLATION_TRIGGER_COUNT: int = 50  # 自动蒸馏触发阈值（轨迹数量）

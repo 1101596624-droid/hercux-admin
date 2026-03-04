@@ -1,0 +1,8 @@
+version: 1.0.0
+files:
+  - url: HERCU-Admin-Setup.exe
+    sha512: QruvCkbWZQ7yRkC4HBgPbOFMSaF5+L9rT8lo1oqPOYwT6yfkoo//SrMgE+cZavLtW2idq92oSxTLD1eBK6cwjw==
+    size: 181413361
+path: HERCU-Admin-Setup.exe
+sha512: QruvCkbWZQ7yRkC4HBgPbOFMSaF5+L9rT8lo1oqPOYwT6yfkoo//SrMgE+cZavLtW2idq92oSxTLD1eBK6cwjw==
+releaseDate: '2026-02-28T02:49:02.969Z'

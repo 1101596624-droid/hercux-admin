@@ -236,13 +236,14 @@ class PackageImporterV2:
         if difficulty not in valid_difficulties:
             difficulty = "intermediate"
 
-        await self.db.execute(
+        result = await self.db.execute(
             text("""
                 INSERT INTO courses (
                     name, description, difficulty, duration_hours,
                     instructor, thumbnail_url, is_published, created_at
                 )
                 VALUES (:name, :description, :difficulty, :duration_hours, :instructor, :thumbnail_url, :is_published, :created_at)
+                RETURNING id
             """),
             {
                 "name": package.meta.title,
@@ -251,14 +252,13 @@ class PackageImporterV2:
                 "duration_hours": package.meta.estimated_hours,
                 "instructor": instructor_name,
                 "thumbnail_url": package.meta.cover_url or None,
-                "is_published": 1,
-                "created_at": datetime.now().isoformat()
+                "is_published": 0,
+                "created_at": datetime.now()
             }
         )
 
         # 获取最后插入的 ID
-        course_id_result = await self.db.execute(text("SELECT last_insert_rowid()"))
-        course_id = course_id_result.fetchone()[0]
+        course_id = result.fetchone()[0]
 
         return course_id
 
@@ -293,6 +293,7 @@ class PackageImporterV2:
                         :course_id, :node_id, :type, :component_id, :title, :description,
                         :sequence, :content, :config, :created_at
                     )
+                    RETURNING id
                 """),
                 {
                     "course_id": course_id,
@@ -309,12 +310,12 @@ class PackageImporterV2:
                         "complexity_level": lesson.complexity_level,
                         "prerequisites": lesson.prerequisites
                     }, ensure_ascii=False),
-                    "created_at": datetime.now().isoformat()
+                    "created_at": datetime.now()
                 }
             )
 
             # 获取最后插入的 ID
-            result = await self.db.execute(text("SELECT last_insert_rowid()"))
+            result = await self.db.execute(text("SELECT currval('course_nodes_id_seq')"))
             hercu_node_id = result.fetchone()[0]
             node_id_map[lesson.lesson_id] = hercu_node_id
 
@@ -426,7 +427,7 @@ class PackageImporterV2:
                 "style": package.meta.style,
                 "package_data": json.dumps(package.model_dump(), ensure_ascii=False),
                 "imported_by": user_id,
-                "imported_at": datetime.now().isoformat()
+                "imported_at": datetime.now()
             }
         )
 

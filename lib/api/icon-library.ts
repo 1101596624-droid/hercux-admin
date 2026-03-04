@@ -47,7 +47,7 @@ export interface IconPreset {
   canvas_config?: {
     width: number;
     height: number;
-    background?: any;
+    background?: string | Record<string, unknown>;
   };
   category?: string;
   tags?: string[];
@@ -84,7 +84,7 @@ export interface IconPresetCreateData {
   canvas_config?: {
     width: number;
     height: number;
-    background?: any;
+    background?: string | Record<string, unknown>;
   };
   category?: string;
   tags?: string[];

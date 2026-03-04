@@ -11,6 +11,10 @@ import type {
   CoursePackageV2,
   GenerateRequestV2,
   UploadResponse,
+  UploadFileResponse,
+  UploadTaskCreateResponse,
+  UploadTaskStatusResponse,
+  Lesson,
 } from '@/types/studio';
 import { apiClient } from './admin/client';
 
@@ -62,18 +66,18 @@ class StudioApiClient {
     return response.json();
   }
 
-  async get<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
+  async get<T>(endpoint: string, params?: Record<string, string | number | boolean>): Promise<T> {
     return this.request<T>(endpoint, { method: 'GET', params });
   }
 
-  async post<T>(endpoint: string, data?: any): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async put<T>(endpoint: string, data?: any): Promise<T> {
+  async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -118,7 +122,7 @@ export const studioPackagesApi = {
    * 获取课程包列表
    */
   list: async (status?: string, limit: number = 50): Promise<{ packages: PackageListItem[]; total: number }> => {
-    const params: Record<string, any> = { limit };
+    const params: Record<string, string | number | boolean> = { limit };
     if (status) params.status = status;
     return studioApiClient.get('/api/v1/studio/packages', params);
   },
@@ -192,97 +196,203 @@ export const studioGenerateApi = {
    */
   generateStreamV3: (data: GenerateRequestV2, callbacks: V3StreamCallbacks): (() => void) => {
     const controller = new AbortController();
+    const CONNECT_MAX_ATTEMPTS = 3;
+    const CONNECT_RETRY_BASE_DELAY_MS = 800;
+    const STREAM_IDLE_TIMEOUT_MS = 120000;
+    const CHUNK_FLUSH_INTERVAL_MS = 80;
+    const RETRYABLE_HTTP_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
-    fetch(`${STUDIO_API_BASE_URL}/api/v1/studio/packages/generate-v3`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-      signal: controller.signal,
-    })
-      .then(async (response) => {
+    let stopRequested = false;
+    let errorEmitted = false;
+    let receivedComplete = false;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let chunkFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    let chunkBuffer = '';
+    let chunkMeta = { chapterIndex: 0, attempt: 1 };
+    let idleTimeoutTriggered = false;
+
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const clearIdleTimer = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+    };
+
+    const flushChunkBuffer = () => {
+      if (!chunkBuffer) return;
+      const content = chunkBuffer;
+      chunkBuffer = '';
+      callbacks.onChunk(content, chunkMeta.chapterIndex, chunkMeta.attempt);
+    };
+
+    const clearChunkFlushTimer = () => {
+      if (chunkFlushTimer) {
+        clearTimeout(chunkFlushTimer);
+        chunkFlushTimer = null;
+      }
+    };
+
+    const scheduleChunkFlush = () => {
+      if (chunkFlushTimer) return;
+      chunkFlushTimer = setTimeout(() => {
+        chunkFlushTimer = null;
+        flushChunkBuffer();
+      }, CHUNK_FLUSH_INTERVAL_MS);
+    };
+
+    const resetIdleTimer = () => {
+      clearIdleTimer();
+      idleTimer = setTimeout(() => {
+        if (stopRequested || receivedComplete) return;
+        idleTimeoutTriggered = true;
+        controller.abort();
+      }, STREAM_IDLE_TIMEOUT_MS);
+    };
+
+    const cleanupTimers = () => {
+      clearIdleTimer();
+      clearChunkFlushTimer();
+    };
+
+    const emitErrorOnce = (message: string) => {
+      if (stopRequested || receivedComplete || errorEmitted) return;
+      errorEmitted = true;
+      cleanupTimers();
+      callbacks.onError(message);
+    };
+
+    const normalizeError = (error: unknown, fallback = 'V3 流式生成失败') => {
+      if (error instanceof Error) return error;
+      return new Error(typeof error === 'string' ? error : fallback);
+    };
+
+    const streamOnce = async () => {
+      let attemptReceivedAnyEvent = false;
+      let buffer = '';
+      const decoder = new TextDecoder();
+      idleTimeoutTriggered = false;
+
+      const annotateAndThrow = (err: unknown, statusCode?: number) => {
+        const normalized = normalizeError(err);
+        const extra = normalized as Error & { statusCode?: number; receivedAnyEvent?: boolean };
+        extra.receivedAnyEvent = attemptReceivedAnyEvent;
+        if (statusCode !== undefined) {
+          extra.statusCode = statusCode;
+        }
+        throw normalized;
+      };
+
+      try {
+        const response = await fetch(`${STUDIO_API_BASE_URL}/api/v1/studio/packages/generate-v3`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+          signal: controller.signal,
+        });
+
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          annotateAndThrow(new Error(`HTTP error! status: ${response.status}`), response.status);
         }
 
         const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let receivedComplete = false;
+        if (!reader) {
+          throw new Error('响应流不可用');
+        }
 
         const processEvent = (eventType: string, dataStr: string) => {
-          if (!eventType || !dataStr) {
-            console.warn('[SSE V3] Empty event or data, skipping');
+          if (!eventType || !dataStr) return;
+
+          let eventData: Record<string, any>;
+          try {
+            eventData = JSON.parse(dataStr);
+          } catch (e) {
+            console.error(
+              `[SSE V3] Failed to parse ${eventType} event:`,
+              e,
+              'Data preview:',
+              dataStr.substring(0, 500)
+            );
             return;
           }
-          try {
-            const eventData = JSON.parse(dataStr);
 
-            switch (eventType) {
-              case 'phase':
-                callbacks.onPhase(eventData.phase, eventData.message, eventData.processor);
-                break;
-              case 'outline':
-                // V3 新事件：大纲生成完成
-                callbacks.onOutline(eventData.outline);
-                break;
-              case 'chapter_start':
-                callbacks.onChapterStart(
-                  eventData.index,
-                  eventData.total,
-                  eventData.title,
-                  eventData.attempt
-                );
-                break;
-              case 'chunk':
-                callbacks.onChunk(eventData.content, eventData.chapter_index, eventData.attempt);
-                break;
-              case 'chapter_review':
-                // V3 新事件：章节审核结果
-                callbacks.onChapterReview(
-                  eventData.index,
-                  eventData.status,
-                  eventData.score,
-                  eventData.issues,
-                  eventData.simulator_issues,
-                  eventData.comment
-                );
-                break;
-              case 'chapter_retry':
-                // V3 新事件：章节重试
-                callbacks.onChapterRetry(
-                  eventData.index,
-                  eventData.attempt,
-                  eventData.reason
-                );
-                break;
-              case 'chapter_complete':
-                callbacks.onChapterComplete(
-                  eventData.index,
-                  eventData.total,
-                  eventData.chapter,
-                  eventData.attempts
-                );
-                break;
-              case 'complete':
-                receivedComplete = true;
-                callbacks.onComplete(eventData.package, eventData.stats);
-                break;
-              case 'error':
-                callbacks.onError(eventData.message);
-                break;
-              case 'simulator_progress':
-                callbacks.onSimulatorProgress?.(
-                  eventData.simulator_name,
-                  eventData.step_index,
-                  eventData.round,
-                  eventData.max_rounds,
-                  eventData.stage,
-                  eventData.message
-                );
-                break;
-            }
-          } catch (e) {
-            console.error(`[SSE V3] Failed to parse ${eventType} event:`, e, 'Data preview:', dataStr.substring(0, 500));
+          attemptReceivedAnyEvent = true;
+          resetIdleTimer();
+
+          if (eventType !== 'chunk') {
+            flushChunkBuffer();
+          }
+
+          switch (eventType) {
+            case 'phase':
+              callbacks.onPhase(eventData.phase, eventData.message, eventData.processor);
+              break;
+            case 'outline':
+              callbacks.onOutline(eventData.outline);
+              break;
+            case 'chapter_start':
+              callbacks.onChapterStart(
+                eventData.index,
+                eventData.total,
+                eventData.title,
+                eventData.attempt
+              );
+              break;
+            case 'chunk':
+              if (typeof eventData.content === 'string' && eventData.content.length > 0) {
+                chunkBuffer += eventData.content;
+                chunkMeta = {
+                  chapterIndex: Number(eventData.chapter_index ?? chunkMeta.chapterIndex),
+                  attempt: Number(eventData.attempt ?? chunkMeta.attempt),
+                };
+                scheduleChunkFlush();
+              }
+              break;
+            case 'chapter_review':
+              callbacks.onChapterReview(
+                eventData.index,
+                eventData.status,
+                eventData.score,
+                eventData.issues,
+                eventData.simulator_issues,
+                eventData.comment
+              );
+              break;
+            case 'chapter_retry':
+              callbacks.onChapterRetry(
+                eventData.index,
+                eventData.attempt,
+                eventData.reason
+              );
+              break;
+            case 'chapter_complete':
+              callbacks.onChapterComplete(
+                eventData.index,
+                eventData.total,
+                eventData.chapter,
+                eventData.attempts
+              );
+              break;
+            case 'complete':
+              receivedComplete = true;
+              callbacks.onComplete(eventData.package, eventData.stats);
+              break;
+            case 'error':
+              annotateAndThrow(new Error(eventData.message || '生成失败'));
+              break;
+            case 'simulator_progress':
+              callbacks.onSimulatorProgress?.(
+                eventData.simulator_name,
+                eventData.step_index,
+                eventData.round,
+                eventData.max_rounds,
+                eventData.stage,
+                eventData.message
+              );
+              break;
+            default:
+              break;
           }
         };
 
@@ -295,7 +405,7 @@ export const studioGenerateApi = {
 
             const lines = eventBlock.split('\n');
             let currentEvent = '';
-            let dataLines: string[] = [];
+            const dataLines: string[] = [];
 
             for (const line of lines) {
               if (line.startsWith('event: ')) {
@@ -308,18 +418,19 @@ export const studioGenerateApi = {
             }
 
             if (currentEvent && dataLines.length > 0) {
-              const fullData = dataLines.join('');
-              processEvent(currentEvent, fullData);
+              processEvent(currentEvent, dataLines.join('\n'));
             }
           }
 
           return remaining;
         };
 
-        while (reader) {
+        resetIdleTimer();
+        while (!stopRequested) {
           const { done, value } = await reader.read();
 
           if (value) {
+            resetIdleTimer();
             buffer += decoder.decode(value, { stream: !done });
             buffer = processBuffer(buffer);
           }
@@ -328,21 +439,89 @@ export const studioGenerateApi = {
             if (buffer.trim()) {
               processBuffer(buffer + '\n\n');
             }
+            flushChunkBuffer();
             if (!receivedComplete) {
-              console.error('[SSE V3] Stream ended without complete event');
-              callbacks.onError('生成流意外中断，请重试');
+              annotateAndThrow(new Error('STREAM_ENDED_WITHOUT_COMPLETE'));
             }
             break;
           }
         }
-      })
-      .catch((error) => {
-        if (error.name !== 'AbortError') {
-          callbacks.onError(error.message || 'V3 流式生成失败');
+      } catch (err) {
+        const normalized = normalizeError(err);
+        const extra = normalized as Error & { statusCode?: number; receivedAnyEvent?: boolean };
+        if (extra.receivedAnyEvent === undefined) {
+          extra.receivedAnyEvent = attemptReceivedAnyEvent;
         }
-      });
+        if (idleTimeoutTriggered) {
+          normalized.message = 'STREAM_IDLE_TIMEOUT';
+        }
+        throw normalized;
+      } finally {
+        cleanupTimers();
+      }
+    };
 
-    return () => controller.abort();
+    const runWithRetry = async () => {
+      for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
+        try {
+          await streamOnce();
+          return;
+        } catch (err) {
+          const error = normalizeError(err);
+          const extra = error as Error & { statusCode?: number; receivedAnyEvent?: boolean };
+          const statusCode = extra.statusCode;
+          const hasReceivedEvents = Boolean(extra.receivedAnyEvent);
+          const isAbortError = error.name === 'AbortError';
+          const errorText = error.message || 'V3 流式生成失败';
+          const isNetworkLikeError =
+            error instanceof TypeError ||
+            /network|fetch|failed to fetch|load failed/i.test(errorText);
+
+          if (stopRequested || (isAbortError && !idleTimeoutTriggered)) {
+            return;
+          }
+
+          if (errorText === 'STREAM_IDLE_TIMEOUT') {
+            emitErrorOnce('生成连接超时，请检查网络后重试');
+            return;
+          }
+
+          const retryable =
+            !hasReceivedEvents &&
+            (isNetworkLikeError || (typeof statusCode === 'number' && RETRYABLE_HTTP_STATUS.has(statusCode)));
+
+          if (retryable && attempt < CONNECT_MAX_ATTEMPTS) {
+            const waitMs = CONNECT_RETRY_BASE_DELAY_MS * attempt;
+            console.warn(
+              `[SSE V3] Connect attempt ${attempt} failed, retrying in ${waitMs}ms:`,
+              errorText
+            );
+            await delay(waitMs);
+            continue;
+          }
+
+          if (errorText === 'STREAM_ENDED_WITHOUT_COMPLETE') {
+            emitErrorOnce('生成流意外中断，请重试');
+          } else {
+            emitErrorOnce(errorText || 'V3 流式生成失败');
+          }
+          return;
+        }
+      }
+    };
+
+    runWithRetry().catch((err) => {
+      const error = normalizeError(err);
+      if (error.name !== 'AbortError') {
+        emitErrorOnce(error.message || 'V3 流式生成失败');
+      }
+    });
+
+    return () => {
+      stopRequested = true;
+      cleanupTimers();
+      controller.abort();
+    };
   },
 };
 
@@ -350,7 +529,7 @@ export const studioGenerateApi = {
  * V3 流式生成回调接口
  */
 export interface V3StreamCallbacks {
-  onPhase: (phase: number, message: string, processor?: any) => void;
+  onPhase: (phase: number, message: string, processor?: ProcessorWithConfig) => void;
   onOutline: (outline: V3CourseOutline) => void;
   onChapterStart: (index: number, total: number, title: string, attempt: number) => void;
   onChunk: (content: string, chapterIndex: number, attempt: number) => void;
@@ -363,7 +542,7 @@ export interface V3StreamCallbacks {
     comment: string
   ) => void;
   onChapterRetry: (index: number, attempt: number, reason: string) => void;
-  onChapterComplete: (index: number, total: number, chapter: any, attempts: number) => void;
+  onChapterComplete: (index: number, total: number, chapter: Lesson, attempts: number) => void;
   onComplete: (pkg: CoursePackageV2, stats: V3GenerationStats) => void;
   onError: (message: string) => void;
   onSimulatorProgress?: (
@@ -464,6 +643,38 @@ export const studioProcessorsApi = {
 
 export const studioUploadApi = {
   /**
+   * 纯上传文件（不做解析）
+   */
+  uploadFileOnly: async (file: File): Promise<UploadFileResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return studioApiClient.postFormData('/api/v1/studio/upload/files', formData);
+  },
+
+  /**
+   * 删除已上传文件
+   */
+  deleteUploadedFile: async (uploadId: string): Promise<{ success: boolean; upload_id: string }> => {
+    return studioApiClient.delete(`/api/v1/studio/upload/files/${uploadId}`);
+  },
+
+  /**
+   * 创建异步上传提取任务
+   */
+  createUploadTask: async (file: File): Promise<UploadTaskCreateResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return studioApiClient.postFormData('/api/v1/studio/upload/tasks', formData);
+  },
+
+  /**
+   * 查询异步上传任务状态
+   */
+  getUploadTaskStatus: async (taskId: string): Promise<UploadTaskStatusResponse> => {
+    return studioApiClient.get(`/api/v1/studio/upload/tasks/${taskId}`);
+  },
+
+  /**
    * 上传文件并提取文本
    */
   uploadFile: async (file: File): Promise<UploadResponse> => {
@@ -485,6 +696,87 @@ export const studioHealthApi = {
     return studioApiClient.get('/api/v1/studio/health');
   },
 };
+
+// ============================================
+// Async Generation API (任务队列化并发生成)
+// ============================================
+
+export interface GenerationTaskInfo {
+  task_id: string;
+  course_title: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  progress_pct: number;
+  current_phase: string;
+  chapters_completed: number;
+  chapters_total: number;
+  package_id?: string;
+  error_message?: string;
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  queue_position?: number;
+}
+
+export interface QueueInfo {
+  queue_length: number;
+  running_count: number;
+  max_concurrent: number;
+  max_queue_size: number;
+}
+
+export const studioAsyncApi = {
+  /**
+   * 提交异步课程生成任务
+   */
+  submitGeneration: async (data: GenerateRequestV2, adminId: number = 1): Promise<{ success: boolean; task_id: string; queue_position: number }> => {
+    return studioApiClient.post(`/api/v1/studio/packages/generate-async?admin_id=${adminId}`, data);
+  },
+
+  /**
+   * 获取任务列表
+   */
+  listTasks: async (adminId?: number, limit: number = 20): Promise<{ tasks: GenerationTaskInfo[] }> => {
+    const params: Record<string, string | number | boolean> = { limit };
+    if (adminId !== undefined) params.admin_id = adminId;
+    return studioApiClient.get('/api/v1/studio/tasks', params);
+  },
+
+  /**
+   * 获取单个任务状态
+   */
+  getTaskStatus: async (taskId: string): Promise<GenerationTaskInfo> => {
+    return studioApiClient.get(`/api/v1/studio/tasks/${taskId}/status`);
+  },
+
+  /**
+   * 获取队列概况
+   */
+  getQueueInfo: async (): Promise<QueueInfo> => {
+    return studioApiClient.get('/api/v1/studio/tasks/queue-info');
+  },
+
+  /**
+   * 取消任务
+   */
+  cancelTask: async (taskId: string, adminId: number = 1): Promise<{ success: boolean; message: string }> => {
+    return studioApiClient.delete(`/api/v1/studio/tasks/${taskId}?admin_id=${adminId}`);
+  },
+
+  /**
+   * 删除任务记录
+   */
+  deleteTask: async (taskId: string, adminId: number = 1): Promise<{ success: boolean; message: string }> => {
+    return studioApiClient.delete(`/api/v1/studio/tasks/${taskId}/record?admin_id=${adminId}`);
+  },
+
+  /**
+   * 重试已取消/失败的任务
+   */
+  retryTask: async (taskId: string, adminId: number = 1): Promise<{ success: boolean; task_id: string; queue_position: number }> => {
+    return studioApiClient.post(`/api/v1/studio/tasks/${taskId}/retry?admin_id=${adminId}`);
+  },
+};
+
 
 // ============================================
 // Error Handling

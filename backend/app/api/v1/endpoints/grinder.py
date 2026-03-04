@@ -23,7 +23,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # 输入限制 (用户输入在前端限制，后端代理需要支持更长的内部调用如 SVG 监督者检查)
-MAX_MESSAGE_LENGTH = 50000
+from app.core.constants import MAX_MESSAGE_LENGTH_INTERNAL as MAX_MESSAGE_LENGTH
 
 
 def sanitize_text(text: str) -> str:

@@ -49,6 +49,31 @@ function mapStepTypeToComponentType(type: TeachingFormType): ComponentType {
  * Convert LessonStep to NodeConfig
  */
 function convertStepToNodeConfig(step: LessonStep): NodeConfig {
+  const extractContentText = (): string => {
+    if (!('content' in step) || !step.content || typeof step.content !== 'object') {
+      return '';
+    }
+    if ('body' in step.content && typeof step.content.body === 'string') {
+      return step.content.body;
+    }
+    if ('text' in step.content && typeof (step.content as { text?: unknown }).text === 'string') {
+      return (step.content as { text: string }).text;
+    }
+    return '';
+  };
+
+  const extractKeyPoints = (): string[] | undefined => {
+    if (!('content' in step) || !step.content || typeof step.content !== 'object') {
+      return undefined;
+    }
+    if ('key_points' in step.content && Array.isArray((step.content as { key_points?: unknown }).key_points)) {
+      return (step.content as { key_points: unknown[] }).key_points.filter(
+        (item): item is string => typeof item === 'string'
+      );
+    }
+    return undefined;
+  };
+
   const baseConfig: NodeConfig = {
     type: mapStepTypeToComponentType(step.type),
   };
@@ -57,29 +82,17 @@ function convertStepToNodeConfig(step: LessonStep): NodeConfig {
     case 'text_content':
     case 'practice':
       baseConfig.textConfig = {
-        content: typeof step.content === 'object' && 'body' in step.content
-          ? step.content.body
-          : typeof step.content === 'object' && 'text' in step.content
-            ? (step.content as { text: string }).text
-            : '',
+        content: extractContentText(),
         format: 'markdown',
-        keyPoints: typeof step.content === 'object' && 'key_points' in step.content
-          ? step.content.key_points
-          : undefined,
+        keyPoints: extractKeyPoints(),
       };
       break;
 
     case 'illustrated_content':
       baseConfig.textConfig = {
-        content: typeof step.content === 'object' && 'body' in step.content
-          ? step.content.body
-          : typeof step.content === 'object' && 'text' in step.content
-            ? (step.content as { text: string }).text
-            : '',
+        content: extractContentText(),
         format: 'markdown',
-        keyPoints: typeof step.content === 'object' && 'key_points' in step.content
-          ? step.content.key_points
-          : undefined,
+        keyPoints: extractKeyPoints(),
       };
       // 转换 diagram_spec 到 illustratedConfig
       if ('diagram_spec' in step && step.diagram_spec) {
@@ -162,7 +175,7 @@ function convertStepToNodeConfig(step: LessonStep): NodeConfig {
   }
 
   // Handle diagram if present
-  if (step.diagram_spec) {
+  if ('diagram_spec' in step && step.diagram_spec) {
     baseConfig.diagramConfig = {
       type: step.diagram_spec.type === 'flowchart' ? 'flowchart' : 'static',
       data: {

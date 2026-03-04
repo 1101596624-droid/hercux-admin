@@ -1,1 +1,185 @@
-[{"text": "\"\"\"\n\u753b\u5e03\u914d\u7f6eAPI\u7aef\u70b9\n\u7248\u672c: 1.0.0\n\u521b\u5efa\u65e5\u671f: 2026-02-10\n\"\"\"\n\nfrom typing import Dict, Any\nfrom app.services.course_generation.standards_loader import get_standards_loader\n\n\ndef get_canvas_config_for_frontend() -> Dict[str, Any]:\n    \"\"\"\n    \u83b7\u53d6\u753b\u5e03\u914d\u7f6e\uff08\u4f9b\u524d\u7aef\u4f7f\u7528\uff09\n\n    Returns:\n        \u753b\u5e03\u914d\u7f6e\u5b57\u5178\uff0c\u5305\u542b\u5b66\u751f\u7aef\u548c\u7ba1\u7406\u7aef\u914d\u7f6e\n    \"\"\"\n    loader = get_standards_loader()\n    canvas_config = loader.get_canvas_config()\n\n    # \u63d0\u53d6\u5173\u952e\u914d\u7f6e\n    return {\n        'version': canvas_config.get('version', '1.0.0'),\n        'student': {\n            'width': canvas_config['canvas_sizes']['student']['width'],\n            'height': canvas_config['canvas_sizes']['student']['height'],\n            'safeArea': {\n                'xMin': canvas_config['safe_area_student']['x_min'],\n                'xMax': canvas_config['safe_area_student']['x_max'],\n                'yMin': canvas_config['safe_area_student']['y_min'],\n                'yMax': canvas_config['safe_area_student']['y_max']\n            },\n            'mainContentArea': {\n                'x': canvas_config['safe_area_student']['main_content_area']['x'],\n                'y': canvas_config['safe_area_student']['main_content_area']['y']\n            }\n        },\n        'admin': {\n            'width': canvas_config['canvas_sizes']['admin']['width'],\n            'height': canvas_config['canvas_sizes']['admin']['height'],\n            'safeArea': {\n                'xMin': canvas_config['safe_area_admin']['x_min'],\n                'xMax': canvas_config['safe_area_admin']['x_max'],\n                'yMin': canvas_config['safe_area_admin']['y_min'],\n                'yMax': canvas_config['safe_area_admin']['y_max']\n            },\n            'mainContentArea': {\n                'x': canvas_config['safe_area_admin']['main_content_area']['x'],\n                'y': canvas_config['safe_area_admin']['main_content_area']['y']\n            }\n        },\n        'responsivePrinciples': canvas_config.get('responsive_principles', []),\n        'commonMistakes': canvas_config.get('common_mistakes', [])\n    }\n\n\ndef get_subject_color_schemes_for_frontend() -> Dict[str, Any]:\n    \"\"\"\n    \u83b7\u53d6\u5b66\u79d1\u914d\u8272\u65b9\u6848\uff08\u4f9b\u524d\u7aef\u4f7f\u7528\uff09\n\n    Returns:\n        \u5b66\u79d1\u914d\u8272\u65b9\u6848\u5b57\u5178\n    \"\"\"\n    loader = get_standards_loader()\n    color_systems = loader.get_color_systems()\n\n    schemes = {}\n    for scheme in color_systems.get('subject_color_schemes', []):\n        schemes[scheme['id']] = {\n            'name': scheme['name'],\n            'philosophy': scheme['philosophy'],\n            'colors': {\n                'primary': scheme['base_colors']['primary'],\n                'primaryName': scheme['base_colors']['primary_name'],\n                'secondary': scheme['base_colors']['secondary'],\n                'secondaryName': scheme['base_colors']['secondary_name'],\n                'accent': scheme['base_colors']['accent'],\n                'accentName': scheme['base_colors']['accent_name'],\n                'background': scheme['base_colors']['background'],\n                'text': scheme['base_colors']['text'],\n                'label': scheme['base_colors']['label']\n            },\n            'useCases': scheme.get('use_cases', {})\n        }\n\n    return {\n        'version': color_systems.get('version', '1.0.0'),\n        'schemes': schemes\n    }\n\n\ndef get_visualization_elements_for_frontend() -> Dict[str, Any]:\n    \"\"\"\n    \u83b7\u53d6\u53ef\u89c6\u5316\u5143\u7d20\u5e93\uff08\u4f9b\u524d\u7aef\u4f7f\u7528\uff09\n\n    Returns:\n        \u53ef\u89c6\u5316\u5143\u7d20\u5b57\u5178\n    \"\"\"\n    loader = get_standards_loader()\n    viz_elements = loader.get_visualization_elements()\n\n    elements = []\n    for elem in viz_elements.get('visualization_elements', []):\n        elements.append({\n            'id': elem['id'],\n            'name': elem['name'],\n            'description': elem['description'],\n            'apis': elem.get('apis', []),\n            'useCases': elem.get('use_cases', []),\n            'bestPractices': elem.get('best_practices', [])\n        })\n\n    return {\n        'version': viz_elements.get('version', '1.0.0'),\n        'elements': elements,\n        'recommendedCombinations': viz_elements.get('recommended_combinations', [])\n    }\n\n\ndef get_interaction_types_for_frontend() -> Dict[str, Any]:\n    \"\"\"\n    \u83b7\u53d6\u4ea4\u4e92\u7c7b\u578b\u5e93\uff08\u4f9b\u524d\u7aef\u4f7f\u7528\uff09\n\n    Returns:\n        \u4ea4\u4e92\u7c7b\u578b\u5b57\u5178\n    \"\"\"\n    loader = get_standards_loader()\n    interaction_types = loader.get_interaction_types()\n\n    types = []\n    for itype in interaction_types.get('interaction_types', []):\n        types.append({\n            'id': itype['id'],\n            'name': itype['name'],\n            'description': itype['description'],\n            'difficulty': itype.get('difficulty', 'medium'),\n            'useCases': itype.get('use_cases', [])\n        })\n\n    return {\n        'version': interaction_types.get('version', '1.0.0'),\n        'types': types\n    }\n\n\ndef get_animation_easing_for_frontend() -> Dict[str, Any]:\n    \"\"\"\n    \u83b7\u53d6\u52a8\u753b\u7f13\u52a8\u51fd\u6570\uff08\u4f9b\u524d\u7aef\u4f7f\u7528\uff09\n\n    Returns:\n        \u7f13\u52a8\u51fd\u6570\u5b57\u5178\n    \"\"\"\n    loader = get_standards_loader()\n    easing = loader.get_animation_easing()\n\n    functions = []\n    for func in easing.get('easing_functions', []):\n        functions.append({\n            'id': func['id'],\n            'name': func['name'],\n            'formula': func['formula'],\n            'description': func['description'],\n            'useCases': func.get('use_cases', [])\n        })\n\n    return {\n        'version': easing.get('version', '1.0.0'),\n        'functions': functions\n    }\n\n\ndef export_all_standards_for_frontend() -> Dict[str, Any]:\n    \"\"\"\n    \u5bfc\u51fa\u6240\u6709\u6807\u51c6\u914d\u7f6e\uff08\u4f9b\u524d\u7aef\u4e00\u6b21\u6027\u52a0\u8f7d\uff09\n\n    Returns:\n        \u5305\u542b\u6240\u6709\u6807\u51c6\u7684\u5b57\u5178\n    \"\"\"\n    return {\n        'canvas': get_canvas_config_for_frontend(),\n        'colors': get_subject_color_schemes_for_frontend(),\n        'visualization': get_visualization_elements_for_frontend(),\n        'interactions': get_interaction_types_for_frontend(),\n        'animations': get_animation_easing_for_frontend()\n    }\n", "type": "text"}]
+"""
+画布配置API端点
+版本: 1.0.0
+创建日期: 2026-02-10
+"""
+
+from typing import Dict, Any
+from app.services.course_generation.standards_loader import get_standards_loader
+
+
+def get_canvas_config_for_frontend() -> Dict[str, Any]:
+    """
+    获取画布配置（供前端使用）
+
+    Returns:
+        画布配置字典，包含学生端和管理端配置
+    """
+    loader = get_standards_loader()
+    canvas_config = loader.get_canvas_config()
+
+    # 提取关键配置
+    return {
+        'version': canvas_config.get('version', '1.0.0'),
+        'student': {
+            'width': canvas_config['canvas_sizes']['student']['width'],
+            'height': canvas_config['canvas_sizes']['student']['height'],
+            'safeArea': {
+                'xMin': canvas_config['safe_area_student']['x_min'],
+                'xMax': canvas_config['safe_area_student']['x_max'],
+                'yMin': canvas_config['safe_area_student']['y_min'],
+                'yMax': canvas_config['safe_area_student']['y_max']
+            },
+            'mainContentArea': {
+                'x': canvas_config['safe_area_student']['main_content_area']['x'],
+                'y': canvas_config['safe_area_student']['main_content_area']['y']
+            }
+        },
+        'admin': {
+            'width': canvas_config['canvas_sizes']['admin']['width'],
+            'height': canvas_config['canvas_sizes']['admin']['height'],
+            'safeArea': {
+                'xMin': canvas_config['safe_area_admin']['x_min'],
+                'xMax': canvas_config['safe_area_admin']['x_max'],
+                'yMin': canvas_config['safe_area_admin']['y_min'],
+                'yMax': canvas_config['safe_area_admin']['y_max']
+            },
+            'mainContentArea': {
+                'x': canvas_config['safe_area_admin']['main_content_area']['x'],
+                'y': canvas_config['safe_area_admin']['main_content_area']['y']
+            }
+        },
+        'responsivePrinciples': canvas_config.get('responsive_principles', []),
+        'commonMistakes': canvas_config.get('common_mistakes', [])
+    }
+
+
+def get_subject_color_schemes_for_frontend() -> Dict[str, Any]:
+    """
+    获取学科配色方案（供前端使用）
+
+    Returns:
+        学科配色方案字典
+    """
+    loader = get_standards_loader()
+    color_systems = loader.get_color_systems()
+
+    schemes = {}
+    for scheme in color_systems.get('subject_color_schemes', []):
+        schemes[scheme['id']] = {
+            'name': scheme['name'],
+            'philosophy': scheme['philosophy'],
+            'colors': {
+                'primary': scheme['base_colors']['primary'],
+                'primaryName': scheme['base_colors']['primary_name'],
+                'secondary': scheme['base_colors']['secondary'],
+                'secondaryName': scheme['base_colors']['secondary_name'],
+                'accent': scheme['base_colors']['accent'],
+                'accentName': scheme['base_colors']['accent_name'],
+                'background': scheme['base_colors']['background'],
+                'text': scheme['base_colors']['text'],
+                'label': scheme['base_colors']['label']
+            },
+            'useCases': scheme.get('use_cases', {})
+        }
+
+    return {
+        'version': color_systems.get('version', '1.0.0'),
+        'schemes': schemes
+    }
+
+
+def get_visualization_elements_for_frontend() -> Dict[str, Any]:
+    """
+    获取可视化元素库（供前端使用）
+
+    Returns:
+        可视化元素字典
+    """
+    loader = get_standards_loader()
+    viz_elements = loader.get_visualization_elements()
+
+    elements = []
+    for elem in viz_elements.get('visualization_elements', []):
+        elements.append({
+            'id': elem['id'],
+            'name': elem['name'],
+            'description': elem['description'],
+            'apis': elem.get('apis', []),
+            'useCases': elem.get('use_cases', []),
+            'bestPractices': elem.get('best_practices', [])
+        })
+
+    return {
+        'version': viz_elements.get('version', '1.0.0'),
+        'elements': elements,
+        'recommendedCombinations': viz_elements.get('recommended_combinations', [])
+    }
+
+
+def get_interaction_types_for_frontend() -> Dict[str, Any]:
+    """
+    获取交互类型库（供前端使用）
+
+    Returns:
+        交互类型字典
+    """
+    loader = get_standards_loader()
+    interaction_types = loader.get_interaction_types()
+
+    types = []
+    for itype in interaction_types.get('interaction_types', []):
+        types.append({
+            'id': itype['id'],
+            'name': itype['name'],
+            'description': itype['description'],
+            'difficulty': itype.get('difficulty', 'medium'),
+            'useCases': itype.get('use_cases', [])
+        })
+
+    return {
+        'version': interaction_types.get('version', '1.0.0'),
+        'types': types
+    }
+
+
+def get_animation_easing_for_frontend() -> Dict[str, Any]:
+    """
+    获取动画缓动函数（供前端使用）
+
+    Returns:
+        缓动函数字典
+    """
+    loader = get_standards_loader()
+    easing = loader.get_animation_easing()
+
+    functions = []
+    for func in easing.get('easing_functions', []):
+        functions.append({
+            'id': func['id'],
+            'name': func['name'],
+            'formula': func['formula'],
+            'description': func['description'],
+            'useCases': func.get('use_cases', [])
+        })
+
+    return {
+        'version': easing.get('version', '1.0.0'),
+        'functions': functions
+    }
+
+
+def export_all_standards_for_frontend() -> Dict[str, Any]:
+    """
+    导出所有标准配置（供前端一次性加载）
+
+    Returns:
+        包含所有标准的字典
+    """
+    return {
+        'canvas': get_canvas_config_for_frontend(),
+        'colors': get_subject_color_schemes_for_frontend(),
+        'visualization': get_visualization_elements_for_frontend(),
+        'interactions': get_interaction_types_for_frontend(),
+        'animations': get_animation_easing_for_frontend()
+    }

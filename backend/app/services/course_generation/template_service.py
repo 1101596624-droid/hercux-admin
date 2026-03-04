@@ -99,7 +99,7 @@ class TemplateService:
         structure_insights = []
 
         for template in templates:
-            metadata = template.metadata or {}
+            metadata = template.template_metadata or {}
 
             # Collect common APIs
             if "common_apis" in metadata:

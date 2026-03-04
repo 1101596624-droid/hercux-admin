@@ -1,0 +1,23 @@
+{
+  "name": "hercu-admin",
+  "version": "1.0.0",
+  "description": "HERCU 管理后台 - 课程、用户、进度管理",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "dependencies": {
+    "clsx": "^2.1.0",
+    "electron-updater": "^6.7.3",
+    "framer-motion": "^12.27.5",
+    "gsap": "^3.14.2",
+    "lucide-react": "^0.562.0",
+    "next": "^14.2.0",
+    "pixi.js": "^8.15.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "recharts": "^3.7.0",
+    "matter-js": "^0.20.0",
+    "three": "^0.183.1",
+    "tailwind-merge": "^2.2.0",
+    "zustand": "^4.5.0"
+  }
+}

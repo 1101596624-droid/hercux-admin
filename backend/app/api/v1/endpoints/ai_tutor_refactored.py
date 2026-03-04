@@ -18,7 +18,7 @@ from app.db.sync_manager import get_sync_db_manager
 router = APIRouter(tags=["AI Tutor"])
 
 # 输入限制
-MAX_MESSAGE_LENGTH = 2000
+from app.core.constants import MAX_MESSAGE_LENGTH_USER as MAX_MESSAGE_LENGTH
 
 
 def sanitize_text(text: str) -> str:

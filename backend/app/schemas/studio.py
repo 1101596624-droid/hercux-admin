@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Any, Literal
 from datetime import datetime
 import json
+from enum import Enum
 
 
 # ============================================
@@ -248,7 +249,8 @@ class PackageListItem(BaseModel):
 
 class GenerateRequestV2(BaseModel):
     """V2 generation request"""
-    source_material: str
+    source_material: str = ""
+    source_upload_ids: Optional[List[str]] = None
     course_title: str
     processor_id: str
     source_info: str = ""
@@ -272,6 +274,61 @@ class UploadResponse(BaseModel):
     word_count: Optional[int] = None
     reading_time_minutes: Optional[int] = None
     text: str
+
+
+class UploadFileResponse(BaseModel):
+    """Pure upload response (no extraction)"""
+    success: bool = True
+    upload_id: str
+    filename: str
+    file_type: Optional[str] = None
+    file_size: int
+    content_type: Optional[str] = None
+    created_at: str
+    expires_at: Optional[str] = None
+
+
+class UploadTaskState(str, Enum):
+    """Upload task state"""
+    queued = "queued"
+    extracting = "extracting"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
+class UploadTaskResult(BaseModel):
+    """Upload task result payload"""
+    success: bool = True
+    filename: str
+    file_type: Optional[str] = None
+    char_count: int
+    word_count: Optional[int] = None
+    reading_time_minutes: Optional[int] = None
+    text: str
+
+
+class UploadTaskCreateResponse(BaseModel):
+    """Upload task creation response"""
+    task_id: str
+    status: UploadTaskState
+    filename: str
+    file_size: int
+    created_at: str
+
+
+class UploadTaskStatusResponse(BaseModel):
+    """Upload task status response"""
+    task_id: str
+    status: UploadTaskState
+    filename: str
+    file_size: int
+    created_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    current_phase: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    result: Optional[UploadTaskResult] = None
 
 
 # ============================================

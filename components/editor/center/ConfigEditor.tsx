@@ -10,8 +10,8 @@ import type { ComponentType, NodeConfig, VideoConfig, QuizConfig, TextConfig, Qu
 import { Input } from '@/components/ui/Input';
 import { SimulatorConfigEditor } from './SimulatorConfigEditor';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-const BACKEND_ORIGIN = process.env.NEXT_PUBLIC_STUDIO_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+const BACKEND_ORIGIN = process.env.NEXT_PUBLIC_STUDIO_API_URL || 'http://localhost:8001';
 
 /** 将后端返回的相对路径解析为完整 URL */
 function resolveMediaUrl(url: string): string {

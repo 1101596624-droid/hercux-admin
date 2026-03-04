@@ -8,11 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Dict, Any
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.db.session import get_db
+from app.core.config import settings
 from fastapi import Depends
 
 router = APIRouter()
+
+AGENT_BASE_URL = settings.AGENT_BASE_URL
 
 
 @router.get("/stats")
@@ -43,7 +49,6 @@ async def get_agent_stats(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
                 SUM(CASE WHEN pattern_type = 'anti_pattern' THEN 1 ELSE 0 END) as anti_patterns,
                 AVG(confidence) as avg_confidence
             FROM generation_patterns
-            WHERE domain = 'simulator'
         """))
         pattern_row = pattern_result.first()
 
@@ -84,15 +89,14 @@ async def get_agent_stats(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
         # 5. 查询热门策略模式
         top_patterns_result = await db.execute(text("""
             SELECT
-                description,
+                pattern_description as description,
                 use_count,
                 CASE WHEN use_count > 0
                      THEN CAST(success_count AS FLOAT) / use_count
                      ELSE 0
                 END as success_rate
             FROM generation_patterns
-            WHERE domain = 'simulator'
-              AND use_count > 0
+            WHERE use_count > 0
             ORDER BY use_count DESC
             LIMIT 10
         """))
@@ -109,11 +113,11 @@ async def get_agent_stats(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
         agent_health = {'status': 'unknown', 'version': '0.1.0'}
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get('http://127.0.0.1:8100/health')
+                response = await client.get(f'{AGENT_BASE_URL}/health')
                 if response.status_code == 200:
                     agent_health = response.json()
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Agent health check failed: {e}")
 
         return {
             'templates': {
@@ -149,7 +153,7 @@ async def trigger_distill(domain: str = 'simulator'):
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                'http://127.0.0.1:8100/feedback/distill',
+                f'{AGENT_BASE_URL}/feedback/distill',
                 json={'domain': domain}
             )
             response.raise_for_status()
@@ -171,7 +175,7 @@ async def trigger_decay(domain: str = 'simulator', decay_factor: float = 0.95):
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
-                'http://127.0.0.1:8100/feedback/decay',
+                f'{AGENT_BASE_URL}/feedback/decay',
                 json={'domain': domain, 'decay_factor': decay_factor}
             )
             response.raise_for_status()
@@ -192,7 +196,7 @@ async def trigger_sync():
     """
     try:
         async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post('http://127.0.0.1:8100/sync')
+            response = await client.post(f'{AGENT_BASE_URL}/sync')
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as e:
@@ -210,17 +214,22 @@ async def get_current_provider():
     获取当前LLM提供商信息
     """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get('http://127.0.0.1:8100/llm/provider')
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f'{AGENT_BASE_URL}/llm/provider')
             response.raise_for_status()
             return response.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=e.response.status_code,
-            detail=f"Agent 返回错误: {e.response.text}"
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取提供商信息失败: {str(e)}")
+    except Exception:
+        # Agent 服务未运行时返回默认值
+        return {
+            'current_provider': 'deepseek',
+            'supported_providers': ['claude', 'deepseek', 'qwen'],
+            'models': {
+                'claude': 'claude-sonnet-4-20250514',
+                'deepseek': 'deepseek-chat',
+                'qwen': 'qwen-plus'
+            },
+            'status': 'offline'
+        }
 
 
 @router.post("/llm/provider")
@@ -232,7 +241,7 @@ async def switch_provider(provider: str):
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                'http://127.0.0.1:8100/llm/provider',
+                f'{AGENT_BASE_URL}/llm/provider',
                 json={'provider': provider}
             )
             response.raise_for_status()
@@ -259,7 +268,7 @@ async def analyze_course(course_id: int):
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                'http://127.0.0.1:8100/course/analyze',
+                f'{AGENT_BASE_URL}/course/analyze',
                 json={'course_id': course_id}
             )
             response.raise_for_status()
@@ -277,9 +286,22 @@ async def analyze_course(course_id: int):
 # 模拟器模板管理 API
 # ============================================
 
+@router.get("/templates/pending/count")
+async def pending_template_count(db: AsyncSession = Depends(get_db)):
+    """获取待审核模板数量"""
+    try:
+        result = await db.execute(text(
+            "SELECT COUNT(*) FROM simulator_templates WHERE status = 'pending'"
+        ))
+        return {"count": result.scalar() or 0}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取待审核数量失败: {str(e)}")
+
+
 @router.get("/templates")
 async def list_templates(
     subject: str = None,
+    status: str = None,
     min_score: float = None,
     page: int = 1,
     page_size: int = 20,
@@ -292,6 +314,9 @@ async def list_templates(
         if subject:
             conditions.append("subject = :subject")
             params["subject"] = subject
+        if status:
+            conditions.append("status = :status")
+            params["status"] = status
         if min_score is not None:
             conditions.append("quality_score >= :min_score")
             params["min_score"] = min_score
@@ -308,10 +333,10 @@ async def list_templates(
 
         result = await db.execute(text(f"""
             SELECT id, subject, topic, quality_score, line_count,
-                   visual_elements, created_at, updated_at
+                   visual_elements, status, created_at, updated_at
             FROM simulator_templates
             {where}
-            ORDER BY quality_score DESC, id DESC
+            ORDER BY id DESC
             LIMIT :limit OFFSET :offset
         """), params)
 
@@ -323,6 +348,7 @@ async def list_templates(
                 "qualityScore": float(row.quality_score or 0),
                 "lineCount": row.line_count,
                 "visualElements": row.visual_elements,
+                "status": row.status,
                 "createdAt": str(row.created_at) if row.created_at else None,
             }
             for row in result.fetchall()
@@ -331,6 +357,18 @@ async def list_templates(
         return {"templates": templates, "total": total, "page": page, "pageSize": page_size}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取模板列表失败: {str(e)}")
+
+
+@router.get("/templates/subjects/list")
+async def list_subjects(db: AsyncSession = Depends(get_db)):
+    """获取所有学科分类（仅统计已入库模板）"""
+    try:
+        result = await db.execute(text(
+            "SELECT DISTINCT subject, COUNT(*) as count FROM simulator_templates WHERE status = 'approved' GROUP BY subject ORDER BY count DESC"
+        ))
+        return [{"subject": row.subject, "count": row.count} for row in result.fetchall()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取学科列表失败: {str(e)}")
 
 
 @router.get("/templates/{template_id}")
@@ -351,6 +389,7 @@ async def get_template(template_id: int, db: AsyncSession = Depends(get_db)):
             "qualityScore": float(row.quality_score or 0),
             "lineCount": row.line_count,
             "visualElements": row.visual_elements,
+            "status": row.status,
             "createdAt": str(row.created_at) if row.created_at else None,
         }
     except HTTPException:
@@ -381,13 +420,26 @@ async def delete_template(template_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"删除模板失败: {str(e)}")
 
 
-@router.get("/templates/subjects/list")
-async def list_subjects(db: AsyncSession = Depends(get_db)):
-    """获取所有学科分类"""
+@router.put("/templates/{template_id}/approve")
+async def approve_template(template_id: int, db: AsyncSession = Depends(get_db)):
+    """审核通过模拟器模板"""
     try:
         result = await db.execute(text(
-            "SELECT DISTINCT subject, COUNT(*) as count FROM simulator_templates GROUP BY subject ORDER BY count DESC"
-        ))
-        return [{"subject": row.subject, "count": row.count} for row in result.fetchall()]
+            "SELECT id, status FROM simulator_templates WHERE id = :id"
+        ), {"id": template_id})
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="模板不存在")
+        if row.status == 'approved':
+            return {"success": True, "message": "模板已是入库状态"}
+
+        await db.execute(text(
+            "UPDATE simulator_templates SET status = 'approved' WHERE id = :id"
+        ), {"id": template_id})
+        await db.commit()
+        return {"success": True, "message": f"模板 {template_id} 已入库"}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取学科列表失败: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"审核模板失败: {str(e)}")

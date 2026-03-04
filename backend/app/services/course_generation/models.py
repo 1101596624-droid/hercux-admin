@@ -953,6 +953,10 @@ class GenerationState:
     last_json_error: Optional[str] = None
     json_fix_guidance: Optional[str] = None
 
+    # 步骤重试错误信息（用于监督者给出针对性重试指导）
+    last_step_error: Optional[str] = None
+    step_fix_guidance: Optional[str] = None
+
     # 监督者对话状态
     supervisor_conversation_id: Optional[str] = None
     supervisor_context_compressed: bool = False

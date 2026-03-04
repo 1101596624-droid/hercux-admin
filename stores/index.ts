@@ -1,20 +1,10 @@
 /**
  * Zustand Stores Index
- * Central export point for all stores
+ * Central export point for available stores.
  */
 
-export { useWorkstationStore } from './useWorkstationStore';
-export type { CanvasMode, AIModeType } from './useWorkstationStore';
-
-export { useCourseStore } from './useCourseStore';
-
-export { useUserStore } from './useUserStore';
-
-export { useTrainingStore } from './useTrainingStore';
-
-// Studio Store
+export { useAuthStore } from './useAuthStore';
+export { useSceneStore } from './useSceneStore';
+export { useAdminAuthStore } from './admin/useAdminAuthStore';
 export { useStudioStore } from './studio/useStudioStore';
-export type { } from './studio/useStudioStore';
-
-// Editor Store
 export { useEditorStore } from './editor/useEditorStore';

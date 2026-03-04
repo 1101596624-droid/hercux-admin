@@ -1,1 +1,1 @@
-[{"text": "# Tests for course generation module\n", "type": "text"}]
+# Tests for course generation module

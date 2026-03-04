@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { StatCard } from '@/components/admin';
 import { LineChart, BarChart, PieChart } from '@/components/admin/charts';
 
@@ -57,6 +58,7 @@ export default function AgentMonitorPage() {
   const [isDecaying, setIsDecaying] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const fetchStats = async () => {
     try {
@@ -93,12 +95,27 @@ export default function AgentMonitorPage() {
     }
   };
 
+  const fetchPendingCount = async () => {
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+      const response = await fetch(`${API_URL}/agent/templates/pending/count`);
+      if (response.ok) {
+        const data = await response.json();
+        setPendingCount(data.count || 0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch pending count:', err);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
     fetchProvider();
+    fetchPendingCount();
     const interval = setInterval(() => {
       fetchStats();
       fetchProvider();
+      fetchPendingCount();
     }, 30000); // 每30秒刷新
     return () => clearInterval(interval);
   }, []);
@@ -225,6 +242,17 @@ export default function AgentMonitorPage() {
           <p className="text-gray-600 mt-1">HERCU Agent 经验晶化智能体系统</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/admin/agent-monitor/templates"
+            className="relative px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            📚 模板库
+            {pendingCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full text-xs font-bold bg-red-500 text-white">
+                {pendingCount}
+              </span>
+            )}
+          </Link>
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
             stats.health.status === 'ok'
               ? 'bg-green-100 text-green-700'

@@ -9,7 +9,7 @@ import {
 } from '@/lib/api/admin/courses';
 import { useAdminAuthStore } from '@/stores/admin/useAdminAuthStore';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
 
 // 权限不足弹窗
 function PermissionDeniedAlert({ message, onClose }: { message: string; onClose: () => void }) {
@@ -373,7 +373,7 @@ export default function AdminCoursesPage() {
                     <img
                       src={course.thumbnail_url}
                       alt={course.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      className="w-full h-full object-fill group-hover:scale-105 transition-transform duration-300"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">

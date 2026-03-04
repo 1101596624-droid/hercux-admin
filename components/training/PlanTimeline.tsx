@@ -2,8 +2,10 @@
 
 import { Card, CardHeader, CardContent, Badge } from '@/components/ui';
 
+import type { TrainingPlan } from '@/lib/api/training';
+
 interface PlanTimelineProps {
-  plan: any;
+  plan: TrainingPlan;
 }
 
 export function PlanTimeline({ plan }: PlanTimelineProps) {

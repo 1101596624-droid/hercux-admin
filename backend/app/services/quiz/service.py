@@ -216,7 +216,7 @@ class QuizService:
                 if node['learning_objectives']:
                     try:
                         learning_objectives = json.loads(node['learning_objectives'])
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         pass
 
                 content = node['content_l1'] or node['content_l2'] or ""

@@ -268,6 +268,7 @@ class UnlockService:
             progress_map[progress.node_id] = {
                 "status": status_value,
                 "completion_percentage": progress.completion_percentage,
+                "current_step_index": progress.current_step_index or 0,
                 "last_accessed": progress.last_accessed,
                 "completed_at": progress.completed_at
             }
@@ -280,6 +281,7 @@ class UnlockService:
                 progress_map[node.id] = {
                     "status": NodeStatus.UNLOCKED.value if can_unlock else NodeStatus.LOCKED.value,
                     "completion_percentage": 0.0,
+                    "current_step_index": 0,
                     "last_accessed": None,
                     "completed_at": None
                 }

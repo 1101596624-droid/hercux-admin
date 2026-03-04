@@ -177,7 +177,7 @@ def calculate_statistics(lessons: List[Lesson]) -> PackageStatistics:
                         parts = step.video_spec.duration.split(":")
                         minutes = int(parts[0])
                         resources.video_minutes += minutes
-                    except:
+                    except (ValueError, IndexError):
                         pass
             elif step.type == TeachingFormType.SIMULATOR.value:
                 form_dist.simulator += 1

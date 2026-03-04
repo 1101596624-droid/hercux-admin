@@ -1,6 +1,6 @@
 """
 StandardsLoader 测试文件
-版本: 1.0.0
+版本: v3
 创建日期: 2026-02-10
 """
 
@@ -38,8 +38,33 @@ class TestStandardsLoader:
 
         assert standards is not None
         assert 'version' in standards
+        assert standards.get('version') == 'v3'
         assert 'course_level' in standards
         assert 'chapter_level' in standards
+
+    def test_course_standards_hard_constraints_only(self):
+        """课程标准仅保留硬约束，不应包含 recommended 字段"""
+        standards = get_course_standards()
+        course_level = standards.get('course_level', {})
+
+        assert standards.get('standard_name') == 'v3'
+        assert course_level.get('min_chapters') == 2
+        assert 'max_chapters' not in course_level
+
+        def has_recommended_key(value):
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    if 'recommended' in str(k).lower():
+                        return True
+                    if has_recommended_key(v):
+                        return True
+            elif isinstance(value, list):
+                for item in value:
+                    if has_recommended_key(item):
+                        return True
+            return False
+
+        assert not has_recommended_key(standards), "course_standards.yaml should not contain recommended fields"
 
     def test_load_visualization_elements(self):
         """测试加载可视化元素"""

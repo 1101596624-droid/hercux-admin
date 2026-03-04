@@ -6,11 +6,14 @@ DeepSeek API 集成服务
 import os
 import json
 import ssl
+import logging
 import certifi
 from typing import List, Dict, Optional, AsyncGenerator
 import httpx
 from pydantic import BaseModel
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # 创建使用 certifi 证书的 SSL 上下文
@@ -75,6 +78,14 @@ class DeepSeekService:
                 json=payload
             )
 
+            if response.is_error:
+                error_preview = response.text.replace("\n", " ").strip()[:800]
+                logger.error(
+                    "DeepSeek chat/completions failed status=%s model=%s body=%s",
+                    response.status_code,
+                    self.model,
+                    error_preview,
+                )
             response.raise_for_status()
             return response.json()
 
@@ -302,6 +313,15 @@ class DeepSeekService:
                 headers=headers,
                 json=payload
             ) as response:
+                if response.is_error:
+                    body = (await response.aread()).decode("utf-8", errors="replace")
+                    error_preview = body.replace("\n", " ").strip()[:800]
+                    logger.error(
+                        "DeepSeek stream chat/completions failed status=%s model=%s body=%s",
+                        response.status_code,
+                        self.model,
+                        error_preview,
+                    )
                 response.raise_for_status()
 
                 async for line in response.aiter_lines():

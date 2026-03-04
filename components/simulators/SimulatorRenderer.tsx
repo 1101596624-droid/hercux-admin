@@ -111,11 +111,12 @@ export function SimulatorRenderer({ config, readOnly = false, compact = false }:
             )}
 
             {/* 模拟器画布 */}
-            <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: '16/9' }}>
+            <div className="relative w-full flex justify-center overflow-hidden rounded-lg">
               <HTMLSimulatorRenderer
                 key={key}
                 htmlContent={htmlContent}
-                height={900}
+                width={946}
+                height={554}
                 showBorder={true}
               />
             </div>

@@ -1,1 +1,740 @@
-[{"text": "# HERCU \u4ea4\u4e92\u7c7b\u578b\u5e93\n# \u7248\u672c: 1.0.0\n# \u66f4\u65b0: 2026-02-10\n\nversion: \"1.0.0\"\n\n# 12\u79cd\u4ea4\u4e92\u7c7b\u578b\ninteraction_types:\n  # ==== 1. Click (\u70b9\u51fb) ====\n  - id: \"click\"\n    name: \"\u70b9\u51fb\u4ea4\u4e92\"\n    description: \"\u7528\u6237\u70b9\u51fb\u67d0\u4e2a\u5143\u7d20\u89e6\u53d1\u4e8b\u4ef6\"\n    difficulty: \"\u7b80\u5355\"\n    use_cases:\n      - \"\u6309\u94ae\u70b9\u51fb\"\n      - \"\u5f00\u5173\u5207\u6362\"\n      - \"\u5143\u7d20\u9009\u62e9\"\n      - \"\u89e6\u53d1\u52a8\u753b\"\n    implementation_note: \"\u5f53\u524d CustomRenderer \u4e0d\u652f\u6301\u76f4\u63a5\u70b9\u51fb\u4e8b\u4ef6\uff0c\u53ef\u7528\u53d8\u91cf\u6a21\u62df\"\n\n    example:\n      description: \"\u70b9\u51fb\u5207\u6362\u5143\u7d20\u72b6\u6001\"\n      code: |\n        // \u4f7f\u7528\u53d8\u91cf\u6a21\u62df\u70b9\u51fb\n        const isActive = ctx.getVar('toggle');  // 0 \u6216 1\n\n        // \u6839\u636e\u72b6\u6001\u663e\u793a\u4e0d\u540c\u89c6\u89c9\n        const color = isActive > 0.5 ? '#10B981' : '#6B7280';\n        const size = isActive > 0.5 ? 25 : 20;\n\n        const button = ctx.createCircle(\n          width * 0.5, height * 0.5,\n          size, color, 0\n        );\n\n        if (isActive > 0.5) {\n          ctx.setGlow(button, {color: '#10B981', blur: 12});\n        }\n\n        const label = ctx.createText(\n          isActive > 0.5 ? 'ON' : 'OFF',\n          width * 0.5, height * 0.6,\n          {fontSize: 16, color, align: 'center', fontWeight: 'bold'}\n        );\n\n    best_practices:\n      - \"\u89c6\u89c9\u53cd\u9988\u660e\u663e\uff08\u989c\u8272/\u5927\u5c0f\u53d8\u5316\uff09\"\n      - \"\u72b6\u6001\u5207\u6362\u5e73\u6ed1\"\n      - \"\u6dfb\u52a0\u53d1\u5149\u6548\u679c\u589e\u5f3a\u53cd\u9988\"\n\n  # ==== 2. Drag (\u62d6\u62fd) ====\n  - id: \"drag\"\n    name: \"\u62d6\u62fd\u4ea4\u4e92\"\n    description: \"\u7528\u6237\u62d6\u62fd\u5143\u7d20\u79fb\u52a8\u4f4d\u7f6e\"\n    difficulty: \"\u4e2d\u7b49\"\n    use_cases:\n      - \"\u5143\u7d20\u4f4d\u7f6e\u8c03\u6574\"\n      - \"\u62d6\u62fd\u6392\u5e8f\"\n      - \"\u81ea\u7531\u7ed8\u5236\"\n      - \"\u7269\u7406\u6a21\u62df\uff08\u62bd\u62c9\u5f39\u7c27\uff09\"\n    implementation_note: \"\u4f7f\u7528\u4e24\u4e2a\u53d8\u91cf (positionX, positionY) \u6a21\u62df\u62d6\u62fd\"\n\n    example:\n      description: \"\u62d6\u62fd\u7269\u4f53\u79fb\u52a8\"\n      code: |\n        // \u4f7f\u7528\u53d8\u91cf\u63a7\u5236\u4f4d\u7f6e\n        const posX = ctx.getVar('positionX');  // 0-1 \u8303\u56f4\n        const posY = ctx.getVar('positionY');  // 0-1 \u8303\u56f4\n\n        // \u8f6c\u6362\u4e3a\u753b\u5e03\u5750\u6807\n        const x = ctx.math.clamp(\n          width * 0.1 + posX * width * 0.8,\n          width * 0.1,\n          width * 0.9\n        );\n        const y = ctx.math.clamp(\n          height * 0.2 + posY * height * 0.6,\n          height * 0.2,\n          height * 0.8\n        );\n\n        // \u7ed8\u5236\u53ef\u62d6\u62fd\u5143\u7d20\n        const draggable = ctx.createCircle(x, y, 20, '#3B82F6', 0);\n        ctx.setGlow(draggable, {color: '#3B82F6', blur: 8});\n\n        // \u663e\u793a\u5750\u6807\n        const coordLabel = ctx.createText(\n          `(${posX.toFixed(2)}, ${posY.toFixed(2)})`,\n          x, y + 35,\n          {fontSize: 12, color: '#6B7280', align: 'center'}\n        );\n\n    best_practices:\n      - \"\u5fc5\u987b\u4f7f\u7528 clamp \u9650\u5236\u8fb9\u754c\"\n      - \"\u663e\u793a\u5f53\u524d\u5750\u6807\u6216\u6570\u503c\"\n      - \"\u62d6\u62fd\u5143\u7d20\u8981\u6709\u660e\u663e\u89c6\u89c9\u63d0\u793a\"\n      - \"\u7559\u51fa\u5b89\u5168\u8fb9\u8ddd\"\n\n  # ==== 3. Hover (\u60ac\u505c) ====\n  - id: \"hover\"\n    name: \"\u60ac\u505c\u4ea4\u4e92\"\n    description: \"\u9f20\u6807\u60ac\u505c\u5728\u5143\u7d20\u4e0a\u663e\u793a\u4fe1\u606f\"\n    difficulty: \"\u7b80\u5355\"\n    use_cases:\n      - \"\u663e\u793a\u8be6\u7ec6\u4fe1\u606f\"\n      - \"\u9ad8\u4eae\u63d0\u793a\"\n      - \"\u9884\u89c8\u6548\u679c\"\n    implementation_note: \"\u4f7f\u7528\u53d8\u91cf\u6a21\u62df\u60ac\u505c\u72b6\u6001\"\n\n    example:\n      description: \"\u60ac\u505c\u663e\u793a\u8be6\u7ec6\u4fe1\u606f\"\n      code: |\n        const hoverState = ctx.getVar('hover');  // 0 \u6216 1\n\n        // \u6b63\u5e38\u5143\u7d20\n        const normalColor = '#6B7280';\n        const hoverColor = '#3B82F6';\n        const color = hoverState > 0.5 ? hoverColor : normalColor;\n\n        const element = ctx.createCircle(\n          width * 0.5, height * 0.5,\n          25, color, 0\n        );\n\n        // \u60ac\u505c\u65f6\u663e\u793a\u989d\u5916\u4fe1\u606f\n        if (hoverState > 0.5) {\n          // \u53d1\u5149\u6548\u679c\n          ctx.setGlow(element, {color: hoverColor, blur: 15});\n\n          // \u5de5\u5177\u63d0\u793a\u6846\n          const tooltipBg = ctx.createRect(\n            width * 0.5 - 60, height * 0.5 - 60,\n            120, 30,\n            'rgba(0,0,0,0.8)', 4\n          );\n\n          const tooltipText = ctx.createText(\n            '\u8be6\u7ec6\u4fe1\u606f',\n            width * 0.5, height * 0.5 - 45,\n            {fontSize: 12, color: '#fff', align: 'center'}\n          );\n        }\n\n    best_practices:\n      - \"\u60ac\u505c\u53cd\u9988\u8981\u8fc5\u901f\"\n      - \"\u4f7f\u7528\u989c\u8272\u6df1\u6d45\u6216\u53d1\u5149\u533a\u5206\"\n      - \"\u5de5\u5177\u63d0\u793a\u6846\u80cc\u666f\u4f7f\u7528\u534a\u900f\u660e\u9ed1\u8272\"\n      - \"\u907f\u514d\u906e\u6321\u4e3b\u8981\u5143\u7d20\"\n\n  # ==== 4. Double Click (\u53cc\u51fb) ====\n  - id: \"double_click\"\n    name: \"\u53cc\u51fb\u4ea4\u4e92\"\n    description: \"\u5feb\u901f\u70b9\u51fb\u4e24\u6b21\u89e6\u53d1\u7279\u6b8a\u64cd\u4f5c\"\n    difficulty: \"\u7b80\u5355\"\n    use_cases:\n      - \"\u5feb\u6377\u64cd\u4f5c\"\n      - \"\u8fdb\u5165\u7f16\u8f91\u6a21\u5f0f\"\n      - \"\u653e\u5927/\u7f29\u5c0f\"\n    implementation_note: \"\u4f7f\u7528\u53d8\u91cf + \u8ba1\u65f6\u5668\u6a21\u62df\"\n\n    example:\n      description: \"\u53cc\u51fb\u653e\u5927\u5143\u7d20\"\n      code: |\n        const doubleClick = ctx.getVar('doubleClick');  // 0 \u6216 1\n\n        // \u7f29\u653e\u6bd4\u4f8b\n        const scale = doubleClick > 0.5 ? 1.5 : 1.0;\n        const radius = 20 * scale;\n\n        const element = ctx.createCircle(\n          width * 0.5, height * 0.5,\n          radius, '#8B5CF6', 0\n        );\n\n        // \u653e\u5927\u65f6\u663e\u793a\u8be6\u60c5\n        if (doubleClick > 0.5) {\n          ctx.setGlow(element, {color: '#8B5CF6', blur: 20});\n\n          const detailText = ctx.createText(\n            '\u5df2\u653e\u5927',\n            width * 0.5, height * 0.65,\n            {fontSize: 14, color: '#8B5CF6', align: 'center'}\n          );\n        }\n\n    best_practices:\n      - \"\u53cc\u51fb\u4e0e\u5355\u51fb\u529f\u80fd\u8981\u6709\u660e\u663e\u533a\u522b\"\n      - \"\u653e\u5927\u52a8\u753b\u8981\u5e73\u6ed1\"\n      - \"\u63d0\u4f9b\u89c6\u89c9\u53cd\u9988\"\n\n  # ==== 5. Key Press (\u6309\u952e) ====\n  - id: \"key_press\"\n    name: \"\u6309\u952e\u4ea4\u4e92\"\n    description: \"\u952e\u76d8\u6309\u952e\u63a7\u5236\"\n    difficulty: \"\u4e2d\u7b49\"\n    use_cases:\n      - \"\u65b9\u5411\u952e\u63a7\u5236\"\n      - \"\u5feb\u6377\u952e\u64cd\u4f5c\"\n      - \"\u6e38\u620f\u63a7\u5236\"\n    implementation_note: \"\u4f7f\u7528\u591a\u4e2a\u53d8\u91cf\u4ee3\u8868\u4e0d\u540c\u6309\u952e\"\n\n    example:\n      description: \"\u7bad\u5934\u952e\u63a7\u5236\u79fb\u52a8\"\n      code: |\n        // \u4f7f\u7528\u53d8\u91cf\u6a21\u62df\u6309\u952e\u72b6\u6001\n        const arrowUp = ctx.getVar('arrowUp');\n        const arrowDown = ctx.getVar('arrowDown');\n        const arrowLeft = ctx.getVar('arrowLeft');\n        const arrowRight = ctx.getVar('arrowRight');\n\n        // \u8ba1\u7b97\u4f4d\u7f6e\uff08\u57fa\u4e8e\u6309\u952e\u72b6\u6001\uff09\n        let posX = 0.5 + (arrowRight - arrowLeft) * 0.01;\n        let posY = 0.5 + (arrowDown - arrowUp) * 0.01;\n\n        const x = ctx.math.clamp(posX * width, width * 0.1, width * 0.9);\n        const y = ctx.math.clamp(posY * height, height * 0.2, height * 0.8);\n\n        // \u7ed8\u5236\u63a7\u5236\u5bf9\u8c61\n        const player = ctx.createCircle(x, y, 15, '#10B981', 0);\n        ctx.setGlow(player, {color: '#10B981', blur: 8});\n\n        // \u663e\u793a\u63d0\u793a\n        const hint = ctx.createText(\n          '\u4f7f\u7528\u7bad\u5934\u952e\u79fb\u52a8',\n          width * 0.5, height * 0.9,\n          {fontSize: 12, color: '#6B7280', align: 'center'}\n        );\n\n    best_practices:\n      - \"\u663e\u793a\u6309\u952e\u63d0\u793a\"\n      - \"\u4f4d\u7f6e\u9650\u5236\u5728\u5b89\u5168\u533a\u57df\"\n      - \"\u591a\u6309\u952e\u540c\u65f6\u652f\u6301\"\n\n  # ==== 6. Text Input (\u6587\u672c\u8f93\u5165) ====\n  - id: \"text_input\"\n    name: \"\u6587\u672c\u8f93\u5165\"\n    description: \"\u7528\u6237\u8f93\u5165\u6587\u672c\u5185\u5bb9\"\n    difficulty: \"\u4e2d\u7b49\"\n    use_cases:\n      - \"\u8f93\u5165\u516c\u5f0f\"\n      - \"\u8f93\u5165\u53c2\u6570\"\n      - \"\u7b54\u9898\u8f93\u5165\"\n    implementation_note: \"\u4f7f\u7528\u53d8\u91cf\u4f20\u9012\u6570\u503c\uff0c\u6587\u672c\u663e\u793a\"\n\n    example:\n      description: \"\u8f93\u5165\u6570\u503c\u53c2\u6570\"\n      code: |\n        const inputValue = ctx.getVar('input');  // \u6570\u503c\u8f93\u5165\n\n        // \u8f93\u5165\u6846\u80cc\u666f\n        const inputBox = ctx.createRect(\n          width * 0.3, height * 0.4,\n          width * 0.4, 40,\n          '#F3F4F6', 4, 2, '#3B82F6'\n        );\n\n        // \u663e\u793a\u8f93\u5165\u503c\n        const valueText = ctx.createText(\n          inputValue.toFixed(1),\n          width * 0.5, height * 0.42,\n          {fontSize: 18, color: '#1E293B', align: 'center'}\n        );\n\n        // \u6807\u7b7e\n        const label = ctx.createText(\n          '\u8f93\u5165\u503c:',\n          width * 0.3, height * 0.35,\n          {fontSize: 14, color: '#6B7280'}\n        );\n\n        // \u5b9e\u65f6\u9884\u89c8\u7ed3\u679c\n        const result = inputValue * 2;  // \u793a\u4f8b\u8ba1\u7b97\n        const resultText = ctx.createText(\n          `\u7ed3\u679c: ${result.toFixed(1)}`,\n          width * 0.5, height * 0.55,\n          {fontSize: 16, color: '#10B981', align: 'center'}\n        );\n\n    best_practices:\n      - \"\u8f93\u5165\u6846\u8981\u6709\u660e\u663e\u8fb9\u6846\"\n      - \"\u663e\u793a\u5f53\u524d\u8f93\u5165\u503c\"\n      - \"\u5b9e\u65f6\u9884\u89c8\u8ba1\u7b97\u7ed3\u679c\"\n      - \"\u6dfb\u52a0\u8f93\u5165\u63d0\u793a\u6587\u672c\"\n\n  # ==== 7. Dropdown Select (\u4e0b\u62c9\u9009\u62e9) ====\n  - id: \"dropdown_select\"\n    name: \"\u4e0b\u62c9\u9009\u62e9\"\n    description: \"\u4ece\u591a\u4e2a\u9009\u9879\u4e2d\u9009\u62e9\u4e00\u4e2a\"\n    difficulty: \"\u4e2d\u7b49\"\n    use_cases:\n      - \"\u5207\u6362\u6a21\u5f0f\"\n      - \"\u9009\u62e9\u7c7b\u578b\"\n      - \"\u5207\u6362\u573a\u666f\"\n    implementation_note: \"\u4f7f\u7528\u79bb\u6563\u53d8\u91cf (0,1,2,3...)\"\n\n    example:\n      description: \"\u9009\u62e9\u4e0d\u540c\u7c92\u5b50\u7c7b\u578b\"\n      code: |\n        const selectedType = Math.floor(ctx.getVar('particleType'));  // 0,1,2\n\n        const types = [\n          {name: '\u7535\u5b50', color: '#3B82F6', size: 8},\n          {name: '\u8d28\u5b50', color: '#DC2626', size: 12},\n          {name: '\u4e2d\u5b50', color: '#6B7280', size: 10}\n        ];\n\n        const selected = types[selectedType % types.length];\n\n        // \u663e\u793a\u9009\u4e2d\u7684\u7c92\u5b50\n        const particle = ctx.createCircle(\n          width * 0.5, height * 0.5,\n          selected.size, selected.color, 0\n        );\n        ctx.setGlow(particle, {color: selected.color, blur: 10});\n\n        // \u9009\u9879\u5217\u8868\n        types.forEach((type, i) => {\n          const y = height * 0.2 + i * 40;\n          const isSelected = i === selectedType;\n\n          // \u9009\u9879\u80cc\u666f\n          const optionBg = ctx.createRect(\n            width * 0.1, y - 15,\n            120, 30,\n            isSelected ? '#3B82F6' : '#F3F4F6',\n            4\n          );\n\n          // \u9009\u9879\u6587\u672c\n          const optionText = ctx.createText(\n            type.name,\n            width * 0.1 + 10, y,\n            {fontSize: 14, color: isSelected ? '#fff' : '#6B7280'}\n          );\n        });\n\n    best_practices:\n      - \"\u9009\u4e2d\u9879\u8981\u9ad8\u4eae\u663e\u793a\"\n      - \"\u663e\u793a\u6240\u6709\u53ef\u9009\u9879\"\n      - \"\u5b9e\u65f6\u66f4\u65b0\u89c6\u89c9\u53cd\u9988\"\n\n  # ==== 8. Play/Pause (\u64ad\u653e/\u6682\u505c) ====\n  - id: \"play_pause\"\n    name: \"\u64ad\u653e/\u6682\u505c\"\n    description: \"\u63a7\u5236\u52a8\u753b\u64ad\u653e\u72b6\u6001\"\n    difficulty: \"\u7b80\u5355\"\n    use_cases:\n      - \"\u63a7\u5236\u52a8\u753b\"\n      - \"\u6a21\u62df\u64ad\u653e\"\n      - \"\u8fdb\u7a0b\u63a7\u5236\"\n    implementation_note: \"\u4f7f\u7528\u5e03\u5c14\u53d8\u91cf\u63a7\u5236\"\n\n    example:\n      description: \"\u64ad\u653e/\u6682\u505c\u52a8\u753b\"\n      code: |\n        const isPlaying = ctx.getVar('play') > 0.5;\n\n        // \u6839\u636e\u64ad\u653e\u72b6\u6001\u66f4\u65b0\u65f6\u95f4\n        const t = isPlaying ? ctx.getTime() * 0.001 : 0;\n\n        // \u79fb\u52a8\u7269\u4f53\n        const x = width * 0.3 + Math.sin(t) * 100;\n        const y = height * 0.5;\n\n        const ball = ctx.createCircle(x, y, 20, '#10B981', 0);\n\n        // \u64ad\u653e/\u6682\u505c\u6309\u94ae\n        const buttonX = width * 0.5;\n        const buttonY = height * 0.8;\n\n        const button = ctx.createCircle(\n          buttonX, buttonY, 30,\n          isPlaying ? '#DC2626' : '#10B981',\n          0\n        );\n\n        // \u6309\u94ae\u56fe\u6807\uff08\u4e09\u89d2\u5f62\u6216\u77e9\u5f62\uff09\n        if (isPlaying) {\n          // \u6682\u505c\u56fe\u6807\uff08\u4e24\u4e2a\u77e9\u5f62\uff09\n          ctx.createRect(buttonX - 8, buttonY - 10, 5, 20, '#fff', 0);\n          ctx.createRect(buttonX + 3, buttonY - 10, 5, 20, '#fff', 0);\n        } else {\n          // \u64ad\u653e\u56fe\u6807\uff08\u4e09\u89d2\u5f62\uff09\n          const triangle = ctx.createPolygon([\n            [buttonX - 5, buttonY - 10],\n            [buttonX - 5, buttonY + 10],\n            [buttonX + 10, buttonY]\n          ], '#fff', 0);\n        }\n\n        const label = ctx.createText(\n          isPlaying ? '\u64ad\u653e\u4e2d' : '\u5df2\u6682\u505c',\n          buttonX, buttonY + 50,\n          {fontSize: 14, color: '#6B7280', align: 'center'}\n        );\n\n    best_practices:\n      - \"\u6309\u94ae\u8981\u6709\u6e05\u6670\u56fe\u6807\"\n      - \"\u989c\u8272\u533a\u5206\u72b6\u6001\uff08\u7eff=\u64ad\u653e\uff0c\u7ea2=\u6682\u505c\uff09\"\n      - \"\u663e\u793a\u5f53\u524d\u72b6\u6001\u6587\u672c\"\n\n  # ==== 9. Timeline Scrub (\u65f6\u95f4\u8f74\u62d6\u62fd) ====\n  - id: \"timeline_scrub\"\n    name: \"\u65f6\u95f4\u8f74\u62d6\u62fd\"\n    description: \"\u62d6\u62fd\u65f6\u95f4\u8f74\u67e5\u770b\u4e0d\u540c\u65f6\u523b\"\n    difficulty: \"\u4e2d\u7b49\"\n    use_cases:\n      - \"\u52a8\u753b\u56de\u653e\"\n      - \"\u65f6\u95f4\u63a7\u5236\"\n      - \"\u8fc7\u7a0b\u6f14\u793a\"\n    implementation_note: \"\u4f7f\u7528\u53d8\u91cf\u63a7\u5236\u65f6\u95f4 (0-1)\"\n\n    example:\n      description: \"\u62d6\u62fd\u65f6\u95f4\u8f74\u67e5\u770b\u8fd0\u52a8\"\n      code: |\n        const timeProgress = ctx.getVar('time');  // 0-1\n\n        // \u65f6\u95f4\u8f74\n        const timelineY = height * 0.8;\n        const timelineStartX = width * 0.2;\n        const timelineEndX = width * 0.8;\n\n        // \u65f6\u95f4\u8f74\u80cc\u666f\n        const timeline = ctx.createLine(\n          timelineStartX, timelineY,\n          timelineEndX, timelineY,\n          '#D1D5DB', 4\n        );\n\n        // \u8fdb\u5ea6\u6761\n        const progressX = timelineStartX + (timelineEndX - timelineStartX) * timeProgress;\n        const progress = ctx.createLine(\n          timelineStartX, timelineY,\n          progressX, timelineY,\n          '#3B82F6', 4\n        );\n\n        // \u62d6\u62fd\u624b\u67c4\n        const handle = ctx.createCircle(progressX, timelineY, 12, '#3B82F6', 0);\n        ctx.setGlow(handle, {color: '#3B82F6', blur: 8});\n\n        // \u65f6\u95f4\u6807\u7b7e\n        const timeLabel = ctx.createText(\n          `${(timeProgress * 100).toFixed(0)}%`,\n          progressX, timelineY - 25,\n          {fontSize: 12, color: '#3B82F6', align: 'center'}\n        );\n\n        // \u6839\u636e\u65f6\u95f4\u663e\u793a\u7269\u4f53\u4f4d\u7f6e\n        const objectX = width * 0.2 + timeProgress * width * 0.6;\n        const object = ctx.createCircle(\n          objectX, height * 0.4,\n          20, '#10B981', 0\n        );\n\n    best_practices:\n      - \"\u65f6\u95f4\u8f74\u8981\u6709\u80cc\u666f\u7ebf\u548c\u8fdb\u5ea6\u7ebf\"\n      - \"\u62d6\u62fd\u624b\u67c4\u8981\u660e\u663e\"\n      - \"\u663e\u793a\u5f53\u524d\u65f6\u95f4\u767e\u5206\u6bd4\"\n      - \"\u5b9e\u65f6\u66f4\u65b0\u89c6\u89c9\u6548\u679c\"\n\n  # ==== 10. Pinch Zoom (\u53cc\u6307\u7f29\u653e) ====\n  - id: \"pinch_zoom\"\n    name: \"\u53cc\u6307\u7f29\u653e\"\n    description: \"\u53cc\u6307\u624f\u52bf\u653e\u5927/\u7f29\u5c0f\"\n    difficulty: \"\u7b80\u5355\"\n    use_cases:\n      - \"\u56fe\u50cf\u7f29\u653e\"\n      - \"\u5730\u56fe\u7f29\u653e\"\n      - \"\u7ec6\u8282\u67e5\u770b\"\n    implementation_note: \"\u4f7f\u7528\u53d8\u91cf\u63a7\u5236\u7f29\u653e\u7ea7\u522b\"\n\n    example:\n      description: \"\u7f29\u653e\u67e5\u770b\u7ec6\u8282\"\n      code: |\n        const zoomLevel = ctx.getVar('zoom');  // 1.0 - 3.0\n\n        // \u7f29\u653e\u4e2d\u5fc3\n        const centerX = width * 0.5;\n        const centerY = height * 0.5;\n\n        // \u7ed8\u5236\u7f29\u653e\u5143\u7d20\n        const baseSize = 30;\n        const zoomedSize = baseSize * zoomLevel;\n\n        const element = ctx.createCircle(\n          centerX, centerY,\n          zoomedSize, '#8B5CF6', 0\n        );\n\n        // \u7f29\u653e\u7ea7\u522b\u663e\u793a\n        const zoomText = ctx.createText(\n          `${zoomLevel.toFixed(1)}x`,\n          centerX, centerY,\n          {fontSize: 16 * Math.min(zoomLevel, 2), color: '#fff', align: 'center'}\n        );\n\n        // \u7f29\u653e\u63a7\u5236\u6761\n        const scaleBarY = height * 0.85;\n        ctx.createRect(\n          width * 0.3, scaleBarY - 2,\n          width * 0.4, 4,\n          '#D1D5DB', 2\n        );\n\n        const scaleIndicator = ctx.createRect(\n          width * 0.3 + (zoomLevel - 1) / 2 * width * 0.4 - 3,\n          scaleBarY - 8,\n          6, 16,\n          '#8B5CF6', 2\n        );\n\n    best_practices:\n      - \"\u7f29\u653e\u8303\u56f4\u9650\u5236\u5728\u5408\u7406\u8303\u56f4 (1-3x)\"\n      - \"\u663e\u793a\u5f53\u524d\u7f29\u653e\u500d\u6570\"\n      - \"\u7f29\u653e\u8fc7\u7a0b\u5e73\u6ed1\"\n      - \"\u6dfb\u52a0\u7f29\u653e\u63a7\u5236\u6761\"\n\n  # ==== 11. Rotate (\u65cb\u8f6c) ====\n  - id: \"rotate\"\n    name: \"\u65cb\u8f6c\u4ea4\u4e92\"\n    description: \"\u65cb\u8f6c\u5143\u7d20\u67e5\u770b\u4e0d\u540c\u89d2\u5ea6\"\n    difficulty: \"\u4e2d\u7b49\"\n    use_cases:\n      - \"3D\u6a21\u578b\u65cb\u8f6c\"\n      - \"\u89d2\u5ea6\u8c03\u6574\"\n      - \"\u65b9\u5411\u63a7\u5236\"\n    implementation_note: \"\u4f7f\u7528\u53d8\u91cf\u63a7\u5236\u89d2\u5ea6 (0-360\u00b0)\"\n\n    example:\n      description: \"\u65cb\u8f6c\u77e2\u91cf\"\n      code: |\n        const angle = ctx.getVar('angle') * Math.PI * 2;  // 0-2\u03c0\n\n        const centerX = width * 0.5;\n        const centerY = height * 0.5;\n        const length = 80;\n\n        // \u8ba1\u7b97\u7ec8\u70b9\n        const endX = centerX + Math.cos(angle) * length;\n        const endY = centerY + Math.sin(angle) * length;\n\n        // \u77e2\u91cf\u7ebf\n        const line = ctx.createLine(\n          centerX, centerY, endX, endY,\n          '#F59E0B', 4\n        );\n\n        // \u7bad\u5934\n        const arrowSize = 12;\n        const arrow = ctx.createPolygon([\n          [endX, endY],\n          [\n            endX - arrowSize * Math.cos(angle - Math.PI / 6),\n            endY - arrowSize * Math.sin(angle - Math.PI / 6)\n          ],\n          [\n            endX - arrowSize * Math.cos(angle + Math.PI / 6),\n            endY - arrowSize * Math.sin(angle + Math.PI / 6)\n          ]\n        ], '#F59E0B', 0);\n\n        // \u89d2\u5ea6\u663e\u793a\n        const degreeLabel = ctx.createText(\n          `${(angle * 180 / Math.PI).toFixed(0)}\u00b0`,\n          centerX, centerY + 50,\n          {fontSize: 16, color: '#F59E0B', align: 'center', fontWeight: 'bold'}\n        );\n\n        // \u53c2\u8003\u5706\n        const circle = ctx.createCircle(\n          centerX, centerY, length,\n          'transparent', 1, 'rgba(107,114,128,0.3)'\n        );\n\n    best_practices:\n      - \"\u663e\u793a\u53c2\u8003\u5706\u6216\u7f51\u683c\"\n      - \"\u663e\u793a\u5f53\u524d\u89d2\u5ea6\u6570\u503c\"\n      - \"\u4f7f\u7528\u4e09\u89d2\u51fd\u6570\u8ba1\u7b97\u5750\u6807\"\n      - \"\u65cb\u8f6c\u8981\u5e73\u6ed1\"\n\n  # ==== 12. Swipe (\u6ed1\u52a8) ====\n  - id: \"swipe\"\n    name: \"\u6ed1\u52a8\u4ea4\u4e92\"\n    description: \"\u624b\u6307\u6ed1\u52a8\u5207\u6362\u5185\u5bb9\"\n    difficulty: \"\u4e2d\u7b49\"\n    use_cases:\n      - \"\u5207\u6362\u9875\u9762\"\n      - \"\u7ffb\u9605\u5185\u5bb9\"\n      - \"\u6eda\u52a8\u5217\u8868\"\n    implementation_note: \"\u4f7f\u7528\u53d8\u91cf\u63a7\u5236\u504f\u79fb\u91cf\"\n\n    example:\n      description: \"\u6ed1\u52a8\u5207\u6362\u5361\u7247\"\n      code: |\n        const swipeOffset = ctx.getVar('swipe');  // -1 \u5230 1\n\n        // 3\u5f20\u5361\u7247\n        const cards = [\n          {color: '#3B82F6', label: '\u5361\u72471'},\n          {color: '#10B981', label: '\u5361\u72472'},\n          {color: '#F59E0B', label: '\u5361\u72473'}\n        ];\n\n        const cardWidth = width * 0.6;\n        const cardHeight = height * 0.5;\n        const centerX = width * 0.5;\n        const centerY = height * 0.5;\n\n        // \u7ed8\u5236\u6240\u6709\u5361\u7247\n        cards.forEach((card, i) => {\n          const offset = (i - 1 - swipeOffset) * cardWidth * 1.1;\n          const x = centerX + offset;\n\n          // \u5361\u7247\u80cc\u666f\n          const cardBg = ctx.createRect(\n            x - cardWidth / 2, centerY - cardHeight / 2,\n            cardWidth, cardHeight,\n            card.color, 8\n          );\n\n          // \u5361\u7247\u6807\u7b7e\n          const cardLabel = ctx.createText(\n            card.label,\n            x, centerY,\n            {fontSize: 24, color: '#fff', align: 'center', fontWeight: 'bold'}\n          );\n\n          // \u5f53\u524d\u5361\u7247\u53d1\u5149\n          if (Math.abs(offset) < cardWidth * 0.3) {\n            ctx.setGlow(cardBg, {color: card.color, blur: 15});\n          }\n        });\n\n        // \u6307\u793a\u5668\n        const indicatorY = height * 0.85;\n        cards.forEach((_, i) => {\n          const indicatorX = width * 0.5 + (i - 1) * 30;\n          const isCurrent = Math.abs(i - 1 - swipeOffset) < 0.3;\n\n          ctx.createCircle(\n            indicatorX, indicatorY,\n            isCurrent ? 8 : 6,\n            isCurrent ? '#3B82F6' : '#D1D5DB',\n            0\n          );\n        });\n\n    best_practices:\n      - \"\u663e\u793a\u591a\u4e2a\u5185\u5bb9\u9879\"\n      - \"\u5f53\u524d\u9879\u9ad8\u4eae\u663e\u793a\"\n      - \"\u6dfb\u52a0\u6307\u793a\u5668\u663e\u793a\u4f4d\u7f6e\"\n      - \"\u6ed1\u52a8\u8fc7\u6e21\u5e73\u6ed1\"\n\n# \u4ea4\u4e92\u8bbe\u8ba1\u539f\u5219\ninteraction_design_principles:\n  feedback:\n    - principle: \"\u5373\u65f6\u53cd\u9988\"\n      description: \"\u4ea4\u4e92\u540e\u7acb\u5373\u7ed9\u51fa\u89c6\u89c9\u53cd\u9988\"\n\n    - principle: \"\u660e\u663e\u53d8\u5316\"\n      description: \"\u989c\u8272\u3001\u5927\u5c0f\u3001\u4f4d\u7f6e\u7684\u53d8\u5316\u8981\u660e\u663e\"\n\n    - principle: \"\u591a\u901a\u9053\u53cd\u9988\"\n      description: \"\u7ed3\u5408\u989c\u8272\u3001\u52a8\u753b\u3001\u6587\u672c\u53cd\u9988\"\n\n  usability:\n    - principle: \"\u76f4\u89c2\u6613\u7528\"\n      description: \"\u4e0d\u9700\u8bf4\u660e\u5c31\u80fd\u7406\u89e3\u5982\u4f55\u4ea4\u4e92\"\n\n    - principle: \"\u63d0\u4f9b\u63d0\u793a\"\n      description: \"\u663e\u793a\u4ea4\u4e92\u65b9\u5f0f\u63d0\u793a\u6587\u672c\"\n\n    - principle: \"\u9632\u8bef\u8bbe\u8ba1\"\n      description: \"\u4f7f\u7528 clamp \u9632\u6b62\u8d8a\u754c\u9519\u8bef\"\n\n  performance:\n    - principle: \"\u6d41\u7545\u54cd\u5e94\"\n      description: \"\u4ea4\u4e92\u8fc7\u7a0b\u4e0d\u5361\u987f\uff0c\u5e73\u6ed1\u8fc7\u6e21\"\n\n    - principle: \"\u9650\u5236\u9891\u7387\"\n      description: \"\u9ad8\u9891\u4ea4\u4e92\u8981\u9650\u5236\u66f4\u65b0\u9891\u7387\"\n\n# \u4ea4\u4e92\u7ec4\u5408\u63a8\u8350\nrecommended_combinations:\n  basic_control:\n    interactions: [\"click\", \"hover\"]\n    description: \"\u57fa\u7840\u4ea4\u4e92\uff0c\u9002\u5408\u7b80\u5355\u6a21\u62df\u5668\"\n\n  advanced_manipulation:\n    interactions: [\"drag\", \"rotate\", \"pinch_zoom\"]\n    description: \"\u9ad8\u7ea7\u64cd\u4f5c\uff0c\u9002\u54083D\u6a21\u578b\u6216\u590d\u6742\u573a\u666f\"\n\n  media_player:\n    interactions: [\"play_pause\", \"timeline_scrub\"]\n    description: \"\u5a92\u4f53\u64ad\u653e\u63a7\u5236\uff0c\u9002\u5408\u52a8\u753b\u6f14\u793a\"\n\n  data_input:\n    interactions: [\"text_input\", \"dropdown_select\", \"key_press\"]\n    description: \"\u6570\u636e\u8f93\u5165\uff0c\u9002\u5408\u8ba1\u7b97\u5668\u6216\u8868\u5355\"\n\n  gallery_browse:\n    interactions: [\"swipe\", \"click\", \"pinch_zoom\"]\n    description: \"\u5185\u5bb9\u6d4f\u89c8\uff0c\u9002\u5408\u56fe\u5e93\u6216\u591a\u9875\u5185\u5bb9\"\n\n# \u53d8\u91cf\u547d\u540d\u89c4\u8303\nvariable_naming:\n  conventions:\n    - type: \"click\"\n      names: [\"toggle\", \"switch\", \"activate\"]\n\n    - type: \"drag\"\n      names: [\"positionX\", \"positionY\", \"dragX\", \"dragY\"]\n\n    - type: \"hover\"\n      names: [\"hover\", \"mouseOver\", \"highlight\"]\n\n    - type: \"key_press\"\n      names: [\"arrowUp\", \"arrowDown\", \"arrowLeft\", \"arrowRight\"]\n\n    - type: \"text_input\"\n      names: [\"input\", \"value\", \"userInput\"]\n\n    - type: \"dropdown\"\n      names: [\"selectedType\", \"mode\", \"option\"]\n\n    - type: \"play_pause\"\n      names: [\"play\", \"isPlaying\", \"paused\"]\n\n    - type: \"timeline\"\n      names: [\"time\", \"progress\", \"timeline\"]\n\n    - type: \"zoom\"\n      names: [\"zoom\", \"scale\", \"zoomLevel\"]\n\n    - type: \"rotate\"\n      names: [\"angle\", \"rotation\", \"direction\"]\n\n    - type: \"swipe\"\n      names: [\"swipe\", \"scroll\", \"offset\"]\n", "type": "text"}]
+# HERCU 交互类型库
+# 版本: 1.0.0
+# 更新: 2026-02-10
+
+version: "v3"
+
+# 12种交互类型
+interaction_types:
+  # ==== 1. Click (点击) ====
+  - id: "click"
+    name: "点击交互"
+    description: "用户点击某个元素触发事件"
+    difficulty: "简单"
+    use_cases:
+      - "按钮点击"
+      - "开关切换"
+      - "元素选择"
+      - "触发动画"
+    implementation_note: "当前 CustomRenderer 不支持直接点击事件，可用变量模拟"
+
+    example:
+      description: "点击切换元素状态"
+      code: |
+        // 使用变量模拟点击
+        const isActive = ctx.getVar('toggle');  // 0 或 1
+
+        // 根据状态显示不同视觉
+        const color = isActive > 0.5 ? '#10B981' : '#6B7280';
+        const size = isActive > 0.5 ? 25 : 20;
+
+        const button = ctx.createCircle(
+          width * 0.5, height * 0.5,
+          size, color, 0
+        );
+
+        if (isActive > 0.5) {
+          ctx.setGlow(button, {color: '#10B981', blur: 12});
+        }
+
+        const label = ctx.createText(
+          isActive > 0.5 ? 'ON' : 'OFF',
+          width * 0.5, height * 0.6,
+          {fontSize: 16, color, align: 'center', fontWeight: 'bold'}
+        );
+
+    best_practices:
+      - "视觉反馈明显（颜色/大小变化）"
+      - "状态切换平滑"
+      - "添加发光效果增强反馈"
+
+  # ==== 2. Drag (拖拽) ====
+  - id: "drag"
+    name: "拖拽交互"
+    description: "用户拖拽元素移动位置"
+    difficulty: "中等"
+    use_cases:
+      - "元素位置调整"
+      - "拖拽排序"
+      - "自由绘制"
+      - "物理模拟（抽拉弹簧）"
+    implementation_note: "使用两个变量 (positionX, positionY) 模拟拖拽"
+
+    example:
+      description: "拖拽物体移动"
+      code: |
+        // 使用变量控制位置
+        const posX = ctx.getVar('positionX');  // 0-1 范围
+        const posY = ctx.getVar('positionY');  // 0-1 范围
+
+        // 转换为画布坐标
+        const x = ctx.math.clamp(
+          width * 0.1 + posX * width * 0.8,
+          width * 0.1,
+          width * 0.9
+        );
+        const y = ctx.math.clamp(
+          height * 0.2 + posY * height * 0.6,
+          height * 0.2,
+          height * 0.8
+        );
+
+        // 绘制可拖拽元素
+        const draggable = ctx.createCircle(x, y, 20, '#3B82F6', 0);
+        ctx.setGlow(draggable, {color: '#3B82F6', blur: 8});
+
+        // 显示坐标
+        const coordLabel = ctx.createText(
+          `(${posX.toFixed(2)}, ${posY.toFixed(2)})`,
+          x, y + 35,
+          {fontSize: 12, color: '#6B7280', align: 'center'}
+        );
+
+    best_practices:
+      - "必须使用 clamp 限制边界"
+      - "显示当前坐标或数值"
+      - "拖拽元素要有明显视觉提示"
+      - "留出安全边距"
+
+  # ==== 3. Hover (悬停) ====
+  - id: "hover"
+    name: "悬停交互"
+    description: "鼠标悬停在元素上显示信息"
+    difficulty: "简单"
+    use_cases:
+      - "显示详细信息"
+      - "高亮提示"
+      - "预览效果"
+    implementation_note: "使用变量模拟悬停状态"
+
+    example:
+      description: "悬停显示详细信息"
+      code: |
+        const hoverState = ctx.getVar('hover');  // 0 或 1
+
+        // 正常元素
+        const normalColor = '#6B7280';
+        const hoverColor = '#3B82F6';
+        const color = hoverState > 0.5 ? hoverColor : normalColor;
+
+        const element = ctx.createCircle(
+          width * 0.5, height * 0.5,
+          25, color, 0
+        );
+
+        // 悬停时显示额外信息
+        if (hoverState > 0.5) {
+          // 发光效果
+          ctx.setGlow(element, {color: hoverColor, blur: 15});
+
+          // 工具提示框
+          const tooltipBg = ctx.createRect(
+            width * 0.5 - 60, height * 0.5 - 60,
+            120, 30,
+            'rgba(0,0,0,0.8)', 4
+          );
+
+          const tooltipText = ctx.createText(
+            '详细信息',
+            width * 0.5, height * 0.5 - 45,
+            {fontSize: 12, color: '#fff', align: 'center'}
+          );
+        }
+
+    best_practices:
+      - "悬停反馈要迅速"
+      - "使用颜色深浅或发光区分"
+      - "工具提示框背景使用半透明黑色"
+      - "避免遮挡主要元素"
+
+  # ==== 4. Double Click (双击) ====
+  - id: "double_click"
+    name: "双击交互"
+    description: "快速点击两次触发特殊操作"
+    difficulty: "简单"
+    use_cases:
+      - "快捷操作"
+      - "进入编辑模式"
+      - "放大/缩小"
+    implementation_note: "使用变量 + 计时器模拟"
+
+    example:
+      description: "双击放大元素"
+      code: |
+        const doubleClick = ctx.getVar('doubleClick');  // 0 或 1
+
+        // 缩放比例
+        const scale = doubleClick > 0.5 ? 1.5 : 1.0;
+        const radius = 20 * scale;
+
+        const element = ctx.createCircle(
+          width * 0.5, height * 0.5,
+          radius, '#8B5CF6', 0
+        );
+
+        // 放大时显示详情
+        if (doubleClick > 0.5) {
+          ctx.setGlow(element, {color: '#8B5CF6', blur: 20});
+
+          const detailText = ctx.createText(
+            '已放大',
+            width * 0.5, height * 0.65,
+            {fontSize: 14, color: '#8B5CF6', align: 'center'}
+          );
+        }
+
+    best_practices:
+      - "双击与单击功能要有明显区别"
+      - "放大动画要平滑"
+      - "提供视觉反馈"
+
+  # ==== 5. Key Press (按键) ====
+  - id: "key_press"
+    name: "按键交互"
+    description: "键盘按键控制"
+    difficulty: "中等"
+    use_cases:
+      - "方向键控制"
+      - "快捷键操作"
+      - "游戏控制"
+    implementation_note: "使用多个变量代表不同按键"
+
+    example:
+      description: "箭头键控制移动"
+      code: |
+        // 使用变量模拟按键状态
+        const arrowUp = ctx.getVar('arrowUp');
+        const arrowDown = ctx.getVar('arrowDown');
+        const arrowLeft = ctx.getVar('arrowLeft');
+        const arrowRight = ctx.getVar('arrowRight');
+
+        // 计算位置（基于按键状态）
+        let posX = 0.5 + (arrowRight - arrowLeft) * 0.01;
+        let posY = 0.5 + (arrowDown - arrowUp) * 0.01;
+
+        const x = ctx.math.clamp(posX * width, width * 0.1, width * 0.9);
+        const y = ctx.math.clamp(posY * height, height * 0.2, height * 0.8);
+
+        // 绘制控制对象
+        const player = ctx.createCircle(x, y, 15, '#10B981', 0);
+        ctx.setGlow(player, {color: '#10B981', blur: 8});
+
+        // 显示提示
+        const hint = ctx.createText(
+          '使用箭头键移动',
+          width * 0.5, height * 0.9,
+          {fontSize: 12, color: '#6B7280', align: 'center'}
+        );
+
+    best_practices:
+      - "显示按键提示"
+      - "位置限制在安全区域"
+      - "多按键同时支持"
+
+  # ==== 6. Text Input (文本输入) ====
+  - id: "text_input"
+    name: "文本输入"
+    description: "用户输入文本内容"
+    difficulty: "中等"
+    use_cases:
+      - "输入公式"
+      - "输入参数"
+      - "答题输入"
+    implementation_note: "使用变量传递数值，文本显示"
+
+    example:
+      description: "输入数值参数"
+      code: |
+        const inputValue = ctx.getVar('input');  // 数值输入
+
+        // 输入框背景
+        const inputBox = ctx.createRect(
+          width * 0.3, height * 0.4,
+          width * 0.4, 40,
+          '#F3F4F6', 4, 2, '#3B82F6'
+        );
+
+        // 显示输入值
+        const valueText = ctx.createText(
+          inputValue.toFixed(1),
+          width * 0.5, height * 0.42,
+          {fontSize: 18, color: '#1E293B', align: 'center'}
+        );
+
+        // 标签
+        const label = ctx.createText(
+          '输入值:',
+          width * 0.3, height * 0.35,
+          {fontSize: 14, color: '#6B7280'}
+        );
+
+        // 实时预览结果
+        const result = inputValue * 2;  // 示例计算
+        const resultText = ctx.createText(
+          `结果: ${result.toFixed(1)}`,
+          width * 0.5, height * 0.55,
+          {fontSize: 16, color: '#10B981', align: 'center'}
+        );
+
+    best_practices:
+      - "输入框要有明显边框"
+      - "显示当前输入值"
+      - "实时预览计算结果"
+      - "添加输入提示文本"
+
+  # ==== 7. Dropdown Select (下拉选择) ====
+  - id: "dropdown_select"
+    name: "下拉选择"
+    description: "从多个选项中选择一个"
+    difficulty: "中等"
+    use_cases:
+      - "切换模式"
+      - "选择类型"
+      - "切换场景"
+    implementation_note: "使用离散变量 (0,1,2,3...)"
+
+    example:
+      description: "选择不同粒子类型"
+      code: |
+        const selectedType = Math.floor(ctx.getVar('particleType'));  // 0,1,2
+
+        const types = [
+          {name: '电子', color: '#3B82F6', size: 8},
+          {name: '质子', color: '#DC2626', size: 12},
+          {name: '中子', color: '#6B7280', size: 10}
+        ];
+
+        const selected = types[selectedType % types.length];
+
+        // 显示选中的粒子
+        const particle = ctx.createCircle(
+          width * 0.5, height * 0.5,
+          selected.size, selected.color, 0
+        );
+        ctx.setGlow(particle, {color: selected.color, blur: 10});
+
+        // 选项列表
+        types.forEach((type, i) => {
+          const y = height * 0.2 + i * 40;
+          const isSelected = i === selectedType;
+
+          // 选项背景
+          const optionBg = ctx.createRect(
+            width * 0.1, y - 15,
+            120, 30,
+            isSelected ? '#3B82F6' : '#F3F4F6',
+            4
+          );
+
+          // 选项文本
+          const optionText = ctx.createText(
+            type.name,
+            width * 0.1 + 10, y,
+            {fontSize: 14, color: isSelected ? '#fff' : '#6B7280'}
+          );
+        });
+
+    best_practices:
+      - "选中项要高亮显示"
+      - "显示所有可选项"
+      - "实时更新视觉反馈"
+
+  # ==== 8. Play/Pause (播放/暂停) ====
+  - id: "play_pause"
+    name: "播放/暂停"
+    description: "控制动画播放状态"
+    difficulty: "简单"
+    use_cases:
+      - "控制动画"
+      - "模拟播放"
+      - "进程控制"
+    implementation_note: "使用布尔变量控制"
+
+    example:
+      description: "播放/暂停动画"
+      code: |
+        const isPlaying = ctx.getVar('play') > 0.5;
+
+        // 根据播放状态更新时间
+        const t = isPlaying ? ctx.getTime() * 0.001 : 0;
+
+        // 移动物体
+        const x = width * 0.3 + Math.sin(t) * 100;
+        const y = height * 0.5;
+
+        const ball = ctx.createCircle(x, y, 20, '#10B981', 0);
+
+        // 播放/暂停按钮
+        const buttonX = width * 0.5;
+        const buttonY = height * 0.8;
+
+        const button = ctx.createCircle(
+          buttonX, buttonY, 30,
+          isPlaying ? '#DC2626' : '#10B981',
+          0
+        );
+
+        // 按钮图标（三角形或矩形）
+        if (isPlaying) {
+          // 暂停图标（两个矩形）
+          ctx.createRect(buttonX - 8, buttonY - 10, 5, 20, '#fff', 0);
+          ctx.createRect(buttonX + 3, buttonY - 10, 5, 20, '#fff', 0);
+        } else {
+          // 播放图标（三角形）
+          const triangle = ctx.createPolygon([
+            [buttonX - 5, buttonY - 10],
+            [buttonX - 5, buttonY + 10],
+            [buttonX + 10, buttonY]
+          ], '#fff', 0);
+        }
+
+        const label = ctx.createText(
+          isPlaying ? '播放中' : '已暂停',
+          buttonX, buttonY + 50,
+          {fontSize: 14, color: '#6B7280', align: 'center'}
+        );
+
+    best_practices:
+      - "按钮要有清晰图标"
+      - "颜色区分状态（绿=播放，红=暂停）"
+      - "显示当前状态文本"
+
+  # ==== 9. Timeline Scrub (时间轴拖拽) ====
+  - id: "timeline_scrub"
+    name: "时间轴拖拽"
+    description: "拖拽时间轴查看不同时刻"
+    difficulty: "中等"
+    use_cases:
+      - "动画回放"
+      - "时间控制"
+      - "过程演示"
+    implementation_note: "使用变量控制时间 (0-1)"
+
+    example:
+      description: "拖拽时间轴查看运动"
+      code: |
+        const timeProgress = ctx.getVar('time');  // 0-1
+
+        // 时间轴
+        const timelineY = height * 0.8;
+        const timelineStartX = width * 0.2;
+        const timelineEndX = width * 0.8;
+
+        // 时间轴背景
+        const timeline = ctx.createLine(
+          timelineStartX, timelineY,
+          timelineEndX, timelineY,
+          '#D1D5DB', 4
+        );
+
+        // 进度条
+        const progressX = timelineStartX + (timelineEndX - timelineStartX) * timeProgress;
+        const progress = ctx.createLine(
+          timelineStartX, timelineY,
+          progressX, timelineY,
+          '#3B82F6', 4
+        );
+
+        // 拖拽手柄
+        const handle = ctx.createCircle(progressX, timelineY, 12, '#3B82F6', 0);
+        ctx.setGlow(handle, {color: '#3B82F6', blur: 8});
+
+        // 时间标签
+        const timeLabel = ctx.createText(
+          `${(timeProgress * 100).toFixed(0)}%`,
+          progressX, timelineY - 25,
+          {fontSize: 12, color: '#3B82F6', align: 'center'}
+        );
+
+        // 根据时间显示物体位置
+        const objectX = width * 0.2 + timeProgress * width * 0.6;
+        const object = ctx.createCircle(
+          objectX, height * 0.4,
+          20, '#10B981', 0
+        );
+
+    best_practices:
+      - "时间轴要有背景线和进度线"
+      - "拖拽手柄要明显"
+      - "显示当前时间百分比"
+      - "实时更新视觉效果"
+
+  # ==== 10. Pinch Zoom (双指缩放) ====
+  - id: "pinch_zoom"
+    name: "双指缩放"
+    description: "双指扏势放大/缩小"
+    difficulty: "简单"
+    use_cases:
+      - "图像缩放"
+      - "地图缩放"
+      - "细节查看"
+    implementation_note: "使用变量控制缩放级别"
+
+    example:
+      description: "缩放查看细节"
+      code: |
+        const zoomLevel = ctx.getVar('zoom');  // 1.0 - 3.0
+
+        // 缩放中心
+        const centerX = width * 0.5;
+        const centerY = height * 0.5;
+
+        // 绘制缩放元素
+        const baseSize = 30;
+        const zoomedSize = baseSize * zoomLevel;
+
+        const element = ctx.createCircle(
+          centerX, centerY,
+          zoomedSize, '#8B5CF6', 0
+        );
+
+        // 缩放级别显示
+        const zoomText = ctx.createText(
+          `${zoomLevel.toFixed(1)}x`,
+          centerX, centerY,
+          {fontSize: 16 * Math.min(zoomLevel, 2), color: '#fff', align: 'center'}
+        );
+
+        // 缩放控制条
+        const scaleBarY = height * 0.85;
+        ctx.createRect(
+          width * 0.3, scaleBarY - 2,
+          width * 0.4, 4,
+          '#D1D5DB', 2
+        );
+
+        const scaleIndicator = ctx.createRect(
+          width * 0.3 + (zoomLevel - 1) / 2 * width * 0.4 - 3,
+          scaleBarY - 8,
+          6, 16,
+          '#8B5CF6', 2
+        );
+
+    best_practices:
+      - "缩放范围限制在合理范围 (1-3x)"
+      - "显示当前缩放倍数"
+      - "缩放过程平滑"
+      - "添加缩放控制条"
+
+  # ==== 11. Rotate (旋转) ====
+  - id: "rotate"
+    name: "旋转交互"
+    description: "旋转元素查看不同角度"
+    difficulty: "中等"
+    use_cases:
+      - "3D模型旋转"
+      - "角度调整"
+      - "方向控制"
+    implementation_note: "使用变量控制角度 (0-360°)"
+
+    example:
+      description: "旋转矢量"
+      code: |
+        const angle = ctx.getVar('angle') * Math.PI * 2;  // 0-2π
+
+        const centerX = width * 0.5;
+        const centerY = height * 0.5;
+        const length = 80;
+
+        // 计算终点
+        const endX = centerX + Math.cos(angle) * length;
+        const endY = centerY + Math.sin(angle) * length;
+
+        // 矢量线
+        const line = ctx.createLine(
+          centerX, centerY, endX, endY,
+          '#F59E0B', 4
+        );
+
+        // 箭头
+        const arrowSize = 12;
+        const arrow = ctx.createPolygon([
+          [endX, endY],
+          [
+            endX - arrowSize * Math.cos(angle - Math.PI / 6),
+            endY - arrowSize * Math.sin(angle - Math.PI / 6)
+          ],
+          [
+            endX - arrowSize * Math.cos(angle + Math.PI / 6),
+            endY - arrowSize * Math.sin(angle + Math.PI / 6)
+          ]
+        ], '#F59E0B', 0);
+
+        // 角度显示
+        const degreeLabel = ctx.createText(
+          `${(angle * 180 / Math.PI).toFixed(0)}°`,
+          centerX, centerY + 50,
+          {fontSize: 16, color: '#F59E0B', align: 'center', fontWeight: 'bold'}
+        );
+
+        // 参考圆
+        const circle = ctx.createCircle(
+          centerX, centerY, length,
+          'transparent', 1, 'rgba(107,114,128,0.3)'
+        );
+
+    best_practices:
+      - "显示参考圆或网格"
+      - "显示当前角度数值"
+      - "使用三角函数计算坐标"
+      - "旋转要平滑"
+
+  # ==== 12. Swipe (滑动) ====
+  - id: "swipe"
+    name: "滑动交互"
+    description: "手指滑动切换内容"
+    difficulty: "中等"
+    use_cases:
+      - "切换页面"
+      - "翻阅内容"
+      - "滚动列表"
+    implementation_note: "使用变量控制偏移量"
+
+    example:
+      description: "滑动切换卡片"
+      code: |
+        const swipeOffset = ctx.getVar('swipe');  // -1 到 1
+
+        // 3张卡片
+        const cards = [
+          {color: '#3B82F6', label: '卡片1'},
+          {color: '#10B981', label: '卡片2'},
+          {color: '#F59E0B', label: '卡片3'}
+        ];
+
+        const cardWidth = width * 0.6;
+        const cardHeight = height * 0.5;
+        const centerX = width * 0.5;
+        const centerY = height * 0.5;
+
+        // 绘制所有卡片
+        cards.forEach((card, i) => {
+          const offset = (i - 1 - swipeOffset) * cardWidth * 1.1;
+          const x = centerX + offset;
+
+          // 卡片背景
+          const cardBg = ctx.createRect(
+            x - cardWidth / 2, centerY - cardHeight / 2,
+            cardWidth, cardHeight,
+            card.color, 8
+          );
+
+          // 卡片标签
+          const cardLabel = ctx.createText(
+            card.label,
+            x, centerY,
+            {fontSize: 24, color: '#fff', align: 'center', fontWeight: 'bold'}
+          );
+
+          // 当前卡片发光
+          if (Math.abs(offset) < cardWidth * 0.3) {
+            ctx.setGlow(cardBg, {color: card.color, blur: 15});
+          }
+        });
+
+        // 指示器
+        const indicatorY = height * 0.85;
+        cards.forEach((_, i) => {
+          const indicatorX = width * 0.5 + (i - 1) * 30;
+          const isCurrent = Math.abs(i - 1 - swipeOffset) < 0.3;
+
+          ctx.createCircle(
+            indicatorX, indicatorY,
+            isCurrent ? 8 : 6,
+            isCurrent ? '#3B82F6' : '#D1D5DB',
+            0
+          );
+        });
+
+    best_practices:
+      - "显示多个内容项"
+      - "当前项高亮显示"
+      - "添加指示器显示位置"
+      - "滑动过渡平滑"
+
+# 交互设计原则
+interaction_design_principles:
+  feedback:
+    - principle: "即时反馈"
+      description: "交互后立即给出视觉反馈"
+
+    - principle: "明显变化"
+      description: "颜色、大小、位置的变化要明显"
+
+    - principle: "多通道反馈"
+      description: "结合颜色、动画、文本反馈"
+
+  usability:
+    - principle: "直观易用"
+      description: "不需说明就能理解如何交互"
+
+    - principle: "提供提示"
+      description: "显示交互方式提示文本"
+
+    - principle: "防误设计"
+      description: "使用 clamp 防止越界错误"
+
+  performance:
+    - principle: "流畅响应"
+      description: "交互过程不卡顿，平滑过渡"
+
+    - principle: "限制频率"
+      description: "高频交互要限制更新频率"
+
+# 交互组合推荐
+recommended_combinations:
+  basic_control:
+    interactions: ["click", "hover"]
+    description: "基础交互，适合简单模拟器"
+
+  advanced_manipulation:
+    interactions: ["drag", "rotate", "pinch_zoom"]
+    description: "高级操作，适合3D模型或复杂场景"
+
+  media_player:
+    interactions: ["play_pause", "timeline_scrub"]
+    description: "媒体播放控制，适合动画演示"
+
+  data_input:
+    interactions: ["text_input", "dropdown_select", "key_press"]
+    description: "数据输入，适合计算器或表单"
+
+  gallery_browse:
+    interactions: ["swipe", "click", "pinch_zoom"]
+    description: "内容浏览，适合图库或多页内容"
+
+# 变量命名规范
+variable_naming:
+  conventions:
+    - type: "click"
+      names: ["toggle", "switch", "activate"]
+
+    - type: "drag"
+      names: ["positionX", "positionY", "dragX", "dragY"]
+
+    - type: "hover"
+      names: ["hover", "mouseOver", "highlight"]
+
+    - type: "key_press"
+      names: ["arrowUp", "arrowDown", "arrowLeft", "arrowRight"]
+
+    - type: "text_input"
+      names: ["input", "value", "userInput"]
+
+    - type: "dropdown"
+      names: ["selectedType", "mode", "option"]
+
+    - type: "play_pause"
+      names: ["play", "isPlaying", "paused"]
+
+    - type: "timeline"
+      names: ["time", "progress", "timeline"]
+
+    - type: "zoom"
+      names: ["zoom", "scale", "zoomLevel"]
+
+    - type: "rotate"
+      names: ["angle", "rotation", "direction"]
+
+    - type: "swipe"
+      names: ["swipe", "scroll", "offset"]

@@ -4,7 +4,7 @@ import { twMerge } from 'tailwind-merge';
 /**
  * API 服务器基础 URL
  */
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://106.14.180.66:8001';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 /**
  * Merge class names with Tailwind CSS support
@@ -17,7 +17,7 @@ export function cn(...inputs: ClassValue[]) {
  * 获取服务器基础 URL（不含 /api 后缀）
  */
 function getServerBaseUrl(): string {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://106.14.180.66:8001';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
   // 移除 /api 或 /api/v1 后缀，获取纯服务器地址
   return apiUrl.replace(/\/api(\/v\d+)?$/, '');
 }

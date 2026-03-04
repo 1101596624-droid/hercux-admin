@@ -71,12 +71,14 @@ export interface DiagramSpec {
   diagram_id: string;
   type: DiagramType;
   description: string;
+  image_url?: string;
+  image_generated?: boolean;
   annotations?: DiagramAnnotation[];
   design_notes?: string;
   data_series?: Array<{
     name: string;
     trend?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   }>;
 }
 
@@ -288,11 +290,12 @@ export interface SimulatorSpec {
   description: string;
   type: SimulatorType;
 
-  // 模式：sdl（默认）或 custom（自定义代码）
-  mode?: 'sdl' | 'custom';
+  // 模式：sdl（默认）或 custom/html（自定义代码）
+  mode?: 'sdl' | 'custom' | 'html';
 
   // 自定义代码模式
   custom_code?: string;
+  html_content?: string;
   variables?: Array<{
     id?: string;
     name: string;
@@ -306,6 +309,8 @@ export interface SimulatorSpec {
 
   // 预设模拟器 ID
   preset_id?: string;
+  // 兼容 camelCase 字段
+  presetId?: string;
 
   // SDL 模板 ID (用于从模板库加载)
   template_id?: string;
@@ -324,9 +329,21 @@ export interface SimulatorSpec {
   iframe_url?: string;
   iframe_width?: number;
   iframe_height?: number;
+  // 兼容 camelCase 字段
+  iframeUrl?: string;
 
   // 场景说明
   instructions?: string[];
+  scenario?: {
+    description?: string;
+    [key: string]: unknown;
+  };
+  sdl?: Record<string, unknown>;
+  parameters?: Record<string, unknown>[];
+  initialState?: Record<string, unknown>;
+  interface_spec?: Record<string, unknown>;
+  evaluation_logic?: Record<string, unknown>;
+  pixi_config?: Record<string, unknown>;
 
   // 评估配置
   evaluation?: {
@@ -409,6 +426,7 @@ export type LessonStep =
 export interface Lesson {
   lesson_id: string;
   title: string;
+  description?: string;
   order: number;
   total_steps: number;
   rationale: string;
@@ -417,6 +435,8 @@ export interface Lesson {
   complexity_level: ComplexityLevel;
   prerequisites?: string[];
   steps: LessonStep[];  // 课程标准统一使用steps字段
+  // V3 生成兼容字段：服务端可附带完整已完成章节快照
+  all_completed_chapters?: Lesson[];
 }
 
 // ============================================
@@ -427,6 +447,8 @@ export interface Lesson {
 export interface PackageMeta {
   title: string;
   description: string;
+  difficulty?: string;
+  tags?: string[] | string;
   cover_url?: string;
   source_info?: string;
   total_lessons: number;

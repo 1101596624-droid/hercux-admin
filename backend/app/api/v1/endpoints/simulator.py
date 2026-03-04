@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.db.session import get_db
 from app.models.models import SimulatorResult, CourseNode, User
 from app.core.security import get_current_user, require_admin
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -60,6 +61,73 @@ class GenerateCodeResponse(BaseModel):
     variables: List[dict]
     name: str
     description: str
+
+
+class GenerateCodeTaskCreateResponse(BaseModel):
+    """异步生成任务创建响应"""
+    task_id: str
+    status: str
+    queue_depth: int
+    retry_of: Optional[str] = None
+
+
+class GenerateCodeTaskStatusResponse(BaseModel):
+    """异步生成任务状态响应"""
+    task_id: str
+    status: str
+    created_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    current_stage: Optional[str] = None
+    stage_message: Optional[str] = None
+    stage_updated_at: Optional[str] = None
+    stage_history: Optional[List[dict]] = None
+    queue_wait_seconds: Optional[float] = None
+    running_seconds: Optional[float] = None
+    total_elapsed_seconds: Optional[float] = None
+    cancel_requested_at: Optional[str] = None
+    result: Optional[GenerateCodeResponse] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+def _build_variables_list(variables: Optional[List[VariableSpec]]) -> Optional[List[dict]]:
+    if not variables:
+        return None
+    return [
+        {"name": v.name, "min": v.min, "max": v.max, "default": v.default}
+        for v in variables
+    ]
+
+
+def _build_generate_response(
+    prompt: str,
+    agent_result: dict,
+    variables_list: Optional[List[dict]],
+) -> GenerateCodeResponse:
+    code = (agent_result.get("code") or "").strip()
+    if not code:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="HERCU Agent 返回空代码",
+        )
+
+    quality_score = float(agent_result.get("quality_score") or 0.0)
+
+    if not variables_list:
+        from app.services.studio.custom_code_generator import extract_variables_from_code
+        used_vars = extract_variables_from_code(code)
+        variables_list = [
+            {"name": v, "label": v, "min": 0, "max": 100, "default": 50, "step": 1}
+            for v in used_vars
+        ]
+
+    return GenerateCodeResponse(
+        custom_code=code,
+        variables=variables_list or [],
+        name=prompt[:50],
+        description=f"{prompt} (质量分: {quality_score:.2f})",
+    )
 
 
 @router.post("/results", response_model=SimulatorResultResponse)
@@ -193,15 +261,10 @@ async def generate_simulator_code(
     import httpx
 
     # 构建变量列表
-    variables_list = None
-    if request.variables:
-        variables_list = [
-            {"name": v.name, "min": v.min, "max": v.max, "default": v.default}
-            for v in request.variables
-        ]
+    variables_list = _build_variables_list(request.variables)
 
     # 调用 HERCU Agent API
-    agent_url = "http://127.0.0.1:8100/enhance/simulator"
+    agent_url = f"{settings.AGENT_BASE_URL}/enhance/simulator"
     payload = {
         "topic": request.prompt,
         "subject": "通用",
@@ -214,24 +277,10 @@ async def generate_simulator_code(
             response.raise_for_status()
             result = response.json()
 
-        # 提取生成的代码
-        code = result["code"]
-        quality_score = result["quality_score"]
-
-        # 从代码中提取变量（如果未提供）
-        if not variables_list:
-            from app.services.studio.custom_code_generator import extract_variables_from_code
-            used_vars = extract_variables_from_code(code)
-            variables_list = [
-                {"name": v, "label": v, "min": 0, "max": 100, "default": 50, "step": 1}
-                for v in used_vars
-            ]
-
-        return GenerateCodeResponse(
-            custom_code=code,
-            variables=variables_list or [],
-            name=request.prompt[:50],
-            description=f"{request.prompt} (质量分: {quality_score:.2f})",
+        return _build_generate_response(
+            prompt=request.prompt,
+            agent_result=result,
+            variables_list=variables_list,
         )
 
     except httpx.HTTPStatusError as e:
@@ -248,4 +297,238 @@ async def generate_simulator_code(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"代码生成失败: {str(e)}"
+        )
+
+
+@router.post("/generate-code/tasks", response_model=GenerateCodeTaskCreateResponse)
+async def create_simulator_code_task(
+    request: GenerateCodeRequest,
+    current_user: User = Depends(require_admin),
+):
+    """
+    创建模拟器代码异步生成任务（Admin only）
+    """
+    import httpx
+
+    variables_list = _build_variables_list(request.variables)
+    agent_url = f"{settings.AGENT_BASE_URL}/enhance/simulator/tasks"
+    payload = {
+        "topic": request.prompt,
+        "subject": "通用",
+        "variables": variables_list,
+    }
+
+    try:
+        timeout = httpx.Timeout(connect=10.0, read=20.0, write=20.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(agent_url, json=payload)
+            response.raise_for_status()
+            result = response.json()
+
+        return GenerateCodeTaskCreateResponse(
+            task_id=result["task_id"],
+            status=result.get("status", "queued"),
+            queue_depth=int(result.get("queue_depth", 0)),
+            retry_of=result.get("retry_of"),
+        )
+
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"HERCU Agent 返回错误: {e.response.text}"
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="任务创建超时，请稍后重试"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"任务创建失败: {str(e)}"
+        )
+
+
+@router.get("/generate-code/tasks/{task_id}", response_model=GenerateCodeTaskStatusResponse)
+async def get_simulator_code_task_status(
+    task_id: str,
+    current_user: User = Depends(require_admin),
+):
+    """
+    查询模拟器代码异步生成任务状态（Admin only）
+    """
+    import httpx
+
+    agent_url = f"{settings.AGENT_BASE_URL}/enhance/simulator/tasks/{task_id}"
+
+    try:
+        timeout = httpx.Timeout(connect=10.0, read=20.0, write=20.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(agent_url)
+            response.raise_for_status()
+            task_data = response.json()
+
+        prompt = (task_data.get("request") or {}).get("topic") or "模拟器生成"
+        task_vars = (task_data.get("request") or {}).get("variables")
+        variables_list = task_vars if isinstance(task_vars, list) else None
+
+        result_payload = None
+        raw_result = task_data.get("result")
+        if isinstance(raw_result, dict) and raw_result.get("code"):
+            result_payload = _build_generate_response(
+                prompt=prompt,
+                agent_result=raw_result,
+                variables_list=variables_list,
+            )
+
+        return GenerateCodeTaskStatusResponse(
+            task_id=task_data["task_id"],
+            status=task_data.get("status", "queued"),
+            created_at=task_data.get("created_at", ""),
+            started_at=task_data.get("started_at"),
+            finished_at=task_data.get("finished_at"),
+            current_stage=task_data.get("current_stage"),
+            stage_message=task_data.get("stage_message"),
+            stage_updated_at=task_data.get("stage_updated_at"),
+            stage_history=task_data.get("stage_history"),
+            queue_wait_seconds=task_data.get("queue_wait_seconds"),
+            running_seconds=task_data.get("running_seconds"),
+            total_elapsed_seconds=task_data.get("total_elapsed_seconds"),
+            cancel_requested_at=task_data.get("cancel_requested_at"),
+            result=result_payload,
+            error_code=task_data.get("error_code"),
+            error_message=task_data.get("error_message"),
+        )
+
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"HERCU Agent 返回错误: {e.response.text}"
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="任务状态查询超时，请稍后重试"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"任务状态查询失败: {str(e)}"
+        )
+
+
+@router.post("/generate-code/tasks/{task_id}/cancel", response_model=GenerateCodeTaskStatusResponse)
+async def cancel_simulator_code_task(
+    task_id: str,
+    current_user: User = Depends(require_admin),
+):
+    """
+    取消模拟器代码异步生成任务（Admin only）
+    """
+    import httpx
+
+    agent_url = f"{settings.AGENT_BASE_URL}/enhance/simulator/tasks/{task_id}/cancel"
+
+    try:
+        timeout = httpx.Timeout(connect=10.0, read=20.0, write=20.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(agent_url)
+            response.raise_for_status()
+            task_data = response.json()
+
+        prompt = (task_data.get("request") or {}).get("topic") or "模拟器生成"
+        task_vars = (task_data.get("request") or {}).get("variables")
+        variables_list = task_vars if isinstance(task_vars, list) else None
+
+        result_payload = None
+        raw_result = task_data.get("result")
+        if isinstance(raw_result, dict) and raw_result.get("code"):
+            result_payload = _build_generate_response(
+                prompt=prompt,
+                agent_result=raw_result,
+                variables_list=variables_list,
+            )
+
+        return GenerateCodeTaskStatusResponse(
+            task_id=task_data["task_id"],
+            status=task_data.get("status", "queued"),
+            created_at=task_data.get("created_at", ""),
+            started_at=task_data.get("started_at"),
+            finished_at=task_data.get("finished_at"),
+            current_stage=task_data.get("current_stage"),
+            stage_message=task_data.get("stage_message"),
+            stage_updated_at=task_data.get("stage_updated_at"),
+            stage_history=task_data.get("stage_history"),
+            queue_wait_seconds=task_data.get("queue_wait_seconds"),
+            running_seconds=task_data.get("running_seconds"),
+            total_elapsed_seconds=task_data.get("total_elapsed_seconds"),
+            cancel_requested_at=task_data.get("cancel_requested_at"),
+            result=result_payload,
+            error_code=task_data.get("error_code"),
+            error_message=task_data.get("error_message"),
+        )
+
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"HERCU Agent 返回错误: {e.response.text}"
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="任务取消请求超时，请稍后重试"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"任务取消失败: {str(e)}"
+        )
+
+
+@router.post("/generate-code/tasks/{task_id}/retry", response_model=GenerateCodeTaskCreateResponse)
+async def retry_simulator_code_task(
+    task_id: str,
+    current_user: User = Depends(require_admin),
+):
+    """
+    重试已结束的模拟器代码异步任务（Admin only）
+    """
+    import httpx
+
+    agent_url = f"{settings.AGENT_BASE_URL}/enhance/simulator/tasks/{task_id}/retry"
+
+    try:
+        timeout = httpx.Timeout(connect=10.0, read=20.0, write=20.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(agent_url)
+            response.raise_for_status()
+            result = response.json()
+
+        return GenerateCodeTaskCreateResponse(
+            task_id=result["task_id"],
+            status=result.get("status", "queued"),
+            queue_depth=int(result.get("queue_depth", 0)),
+            retry_of=result.get("retry_of"),
+        )
+
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"HERCU Agent 返回错误: {e.response.text}"
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="任务重试请求超时，请稍后重试"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"任务重试失败: {str(e)}"
         )

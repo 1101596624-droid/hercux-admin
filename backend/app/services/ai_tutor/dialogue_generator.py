@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.services.learning.template_service import UnifiedTemplateService
 from app.services.learning.quality_scorers import TutorDialogueScorer
+from app.core.constants import QUALITY_TEMPLATE_SAVE, TEMPLATE_RETRIEVE_LIMIT_DEFAULT
 
 
 class DialogueGenerator:
@@ -25,7 +26,7 @@ class DialogueGenerator:
         base_prompt: str,
         subject: str,
         topic: str,
-        min_quality: float = 85.0,
+        min_quality: float = QUALITY_TEMPLATE_SAVE,
     ) -> str:
         """
         Enhance system prompt with learning context from high-quality templates
@@ -83,7 +84,7 @@ Aim to achieve or exceed the following quality benchmarks:
         subject: str,
         topic: str,
         node_id: int,
-        save_threshold: float = 85.0,
+        save_threshold: float = QUALITY_TEMPLATE_SAVE,
     ) -> Dict[str, Any]:
         """
         Evaluate dialogue quality and save as template if it meets the threshold

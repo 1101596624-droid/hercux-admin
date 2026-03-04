@@ -60,7 +60,8 @@ const HTMLSimulatorRenderer: React.FC<HTMLSimulatorRendererProps> = ({
       className={`html-simulator-wrapper ${className}`}
       style={{
         width: width || '100%',
-        aspectRatio: '16/9',
+        height: height || 'auto',
+        aspectRatio: height ? undefined : '16/9',
         border: showBorder ? '2px solid #334155' : 'none',
         borderRadius: '8px',
         overflow: 'hidden',

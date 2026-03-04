@@ -242,6 +242,10 @@ async def update_node_progress(
     # Update last_accessed timestamp
     progress.last_accessed = datetime.now(timezone.utc)
 
+    # Save current step index if provided
+    if progress_update.current_step_index is not None:
+        progress.current_step_index = progress_update.current_step_index
+
     # If status changed to IN_PROGRESS, mark as such
     if progress_update.status == NodeStatus.IN_PROGRESS and get_enum_value(progress.status) == NodeStatus.UNLOCKED.value:
         progress.status = NodeStatus.IN_PROGRESS
@@ -322,6 +326,7 @@ async def get_course_map(
             "parent_id": node.parent_id,
             "status": progress_info.get("status", NodeStatus.LOCKED.value),
             "completion_percentage": progress_info.get("completion_percentage", 0.0),
+            "current_step_index": progress_info.get("current_step_index", 0),
             "unlock_condition": node.unlock_condition or {},
             "content": content,  # Include lesson content (parsed)
             "config": config,    # Include node config (parsed)

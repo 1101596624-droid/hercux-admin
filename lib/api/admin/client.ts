@@ -3,11 +3,11 @@
  * Fetch-based client for admin API calls with authentication
  */
 
-// 支持环境变量配置，默认使用统一后端端口 8000
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+// 支持环境变量配置，默认使用统一后端端口 8001
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
 
 interface RequestConfig {
-  params?: Record<string, any>;
+  params?: Record<string, string | number | boolean>;
   headers?: Record<string, string>;
 }
 
@@ -26,10 +26,10 @@ class AdminAPIClient {
     };
   }
 
-  private async request<T>(
+  private async request<T = any>(
     endpoint: string,
     method: string,
-    data?: any,
+    data?: unknown,
     config?: RequestConfig
   ): Promise<{ data: T }> {
     let url = `${this.baseURL}${endpoint}`;
@@ -90,11 +90,11 @@ class AdminAPIClient {
     return this.request<T>(url, 'GET', undefined, config);
   }
 
-  async post<T = any>(url: string, data?: any, config?: RequestConfig) {
+  async post<T = any>(url: string, data?: unknown, config?: RequestConfig) {
     return this.request<T>(url, 'POST', data, config);
   }
 
-  async put<T = any>(url: string, data?: any, config?: RequestConfig) {
+  async put<T = any>(url: string, data?: unknown, config?: RequestConfig) {
     return this.request<T>(url, 'PUT', data, config);
   }
 
@@ -102,7 +102,7 @@ class AdminAPIClient {
     return this.request<T>(url, 'DELETE', undefined, config);
   }
 
-  async patch<T = any>(url: string, data?: any, config?: RequestConfig) {
+  async patch<T = any>(url: string, data?: unknown, config?: RequestConfig) {
     return this.request<T>(url, 'PATCH', data, config);
   }
 }

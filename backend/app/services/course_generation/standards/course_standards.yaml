@@ -1,14 +1,14 @@
 # HERCU 课程质量标准
-# 版本: 1.0.0
-# 更新: 2026-02-10
+# 命名: v3
+# 版本: v3
+# 更新: 2026-03-03
 
-version: "1.0.0"
+version: "v3"
+standard_name: "v3"
 
 # 课程整体标准
 course_level:
-  min_chapters: 4
-  max_chapters: 8
-  recommended_chapters: 6
+  min_chapters: 2
   estimated_hours_range: [2, 6]
 
   difficulty_levels:
@@ -26,15 +26,11 @@ chapter_level:
   # 步骤数量
   min_steps: 7
   max_steps: 12
-  recommended_steps: 9
 
   # 内容质量
   min_text_length_per_step: 200      # 每步最少字数
-  recommended_text_length: 250       # 推荐字数
   min_key_points_per_step: 4         # 每步最少要点数
-  recommended_key_points: 5          # 推荐要点数
   min_total_words: 1500              # 整章最少总字数
-  recommended_total_words: 2200      # 推荐总字数
 
   # 结构要求
   must_have_components:
@@ -57,7 +53,6 @@ chapter_level:
   # 测验标准
   assessment:
     min_questions: 3
-    recommended_questions: 4
     question_types:
       - single_choice
       - multiple_choice
@@ -69,7 +64,6 @@ chapter_level:
   # 学习目标
   learning_objectives:
     min_count: 3
-    recommended_count: 4
     format: "动词开头（掌握、理解、应用）"
     examples:
       - "理解牛顿第二定律的物理意义"
@@ -79,7 +73,6 @@ chapter_level:
   # 设计理念
   rationale:
     min_length: 50
-    recommended_length: 80
     purpose: "说明本章节的教学设计思路和目标"
 
 # 内容防重复标准
@@ -99,7 +92,6 @@ balance:
 # 图文内容标准
 illustrated_content:
   min_description_length: 80
-  recommended_description_length: 100
   image_purpose: "辅助理解，非装饰"
 
   layout_types:

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from app.db.session import get_db
 from app.models.models import User, TokenUsage, ChatHistory
 from app.core.security import get_current_admin_user
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -102,12 +103,21 @@ async def get_ai_overview(
     calls_change = ((today_calls - yesterday_calls) / max(yesterday_calls, 1))
     cost_change = ((today_cost - yesterday_cost) / max(yesterday_cost, 0.01))
 
-    # Error rate (simplified - count failed requests if we had status tracking)
-    # For now, assume 0.8% error rate as placeholder
-    error_rate = 0.008
+    # Error rate: calculate from actual data
+    # Count records with 0 output tokens as potential failures
+    error_result = await db.execute(
+        select(func.count()).where(
+            TokenUsage.created_at >= today_start,
+            TokenUsage.output_tokens == 0
+        )
+    )
+    error_count = error_result.scalar() or 0
+    error_rate = round(error_count / max(today_calls, 1), 4)
 
-    # Average latency (placeholder - would need latency tracking)
-    avg_latency = 1250
+    # Average latency: estimate from token counts (no latency column yet)
+    # ~50 tokens/sec for typical LLM, so latency ≈ output_tokens / 50 * 1000 ms
+    avg_output_per_call = today_output_tokens / max(today_calls, 1)
+    avg_latency = int(avg_output_per_call / 50 * 1000) if today_calls > 0 else 0
 
     return {
         "today": {
@@ -164,8 +174,15 @@ async def get_ai_trends(
             input_t = row[2] or 0
             output_t = row[3] or 0
 
-            # Calculate cost for this period
-            cost = (input_t * 3.0 / 1_000_000) + (output_t * 15.0 / 1_000_000)
+            # Calculate cost for this period using model-aware pricing
+            period_cost_result = await db.execute(
+                select(TokenUsage.model, TokenUsage.input_tokens, TokenUsage.output_tokens)
+                .where(
+                    TokenUsage.created_at >= hour_start,
+                    TokenUsage.created_at < hour_end
+                )
+            )
+            cost = sum(calculate_cost(r[0], r[1], r[2]) for r in period_cost_result.all())
 
             trend_data.append({
                 "time": hour_start.strftime("%H:00"),
@@ -197,7 +214,14 @@ async def get_ai_trends(
             input_t = row[2] or 0
             output_t = row[3] or 0
 
-            cost = (input_t * 3.0 / 1_000_000) + (output_t * 15.0 / 1_000_000)
+            period_cost_result = await db.execute(
+                select(TokenUsage.model, TokenUsage.input_tokens, TokenUsage.output_tokens)
+                .where(
+                    TokenUsage.created_at >= day_start,
+                    TokenUsage.created_at < day_end
+                )
+            )
+            cost = sum(calculate_cost(r[0], r[1], r[2]) for r in period_cost_result.all())
 
             trend_data.append({
                 "time": day_start.strftime("%m/%d"),
@@ -263,8 +287,8 @@ async def get_ai_costs(
     # Sort by cost descending
     breakdown.sort(key=lambda x: x["cost"], reverse=True)
 
-    # Budget settings (could be from config)
-    budget = 5000.0
+    # Budget settings from config
+    budget = settings.AI_MONTHLY_BUDGET
     budget_usage = total_cost / budget
 
     # Forecast month-end cost
@@ -336,7 +360,7 @@ async def get_ai_logs(
             "model": token_usage.model,
             "input_tokens": token_usage.input_tokens,
             "output_tokens": token_usage.output_tokens,
-            "latency_ms": 1200,  # Placeholder - would need latency tracking
+            "latency_ms": int((token_usage.output_tokens or 0) / 50 * 1000) if token_usage.output_tokens else 0,
             "status": "success",
             "cost": cost,
             "created_at": token_usage.created_at.isoformat() if token_usage.created_at else None
@@ -366,20 +390,14 @@ async def get_ai_alerts(
 
     alerts = []
 
-    # Check today's cost
-    cost_result = await db.execute(
-        select(
-            func.sum(TokenUsage.input_tokens),
-            func.sum(TokenUsage.output_tokens)
-        ).where(TokenUsage.created_at >= today_start)
-    )
-    cost_row = cost_result.one()
-    today_input = cost_row[0] or 0
-    today_output = cost_row[1] or 0
-    today_cost = (today_input * 3.0 / 1_000_000) + (today_output * 15.0 / 1_000_000)
+    # Check today's cost using model-aware pricing
+    today_cost = sum(calculate_cost(r[0], r[1], r[2]) for r in (await db.execute(
+        select(TokenUsage.model, TokenUsage.input_tokens, TokenUsage.output_tokens)
+        .where(TokenUsage.created_at >= today_start)
+    )).all())
 
-    # Cost threshold alert
-    cost_threshold = 300.0
+    # Cost threshold alert from config
+    cost_threshold = settings.AI_DAILY_COST_THRESHOLD
     if today_cost > cost_threshold:
         alerts.append({
             "id": 1,
@@ -401,7 +419,7 @@ async def get_ai_alerts(
         ).where(
             TokenUsage.created_at >= today_start,
             TokenUsage.user_id.isnot(None)
-        ).group_by(TokenUsage.user_id).having(func.count() > 100)
+        ).group_by(TokenUsage.user_id).having(func.count() > settings.AI_USER_CALL_THRESHOLD)
     )
     high_usage_users = high_usage_result.all()
 
@@ -413,7 +431,7 @@ async def get_ai_alerts(
             "title": "用户调用异常",
             "message": f"用户 ID:{user_id} 今日调用次数达 {call_count} 次",
             "metric_value": call_count,
-            "threshold_value": 100,
+            "threshold_value": settings.AI_USER_CALL_THRESHOLD,
             "status": "open",
             "created_at": now.isoformat()
         })

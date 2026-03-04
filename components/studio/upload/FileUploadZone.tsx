@@ -88,13 +88,18 @@ export function FileUploadZone({ sources, onSourcesChange, className }: FileUplo
       }
 
       try {
-        const result = await studioUploadApi.uploadFile(file);
+        const uploaded = await studioUploadApi.uploadFileOnly(file);
+        setUploadProgress(`已上传 ${file.name} (${i + 1}/${files.length})`);
+
         newSources.push({
-          id: `file-${Date.now()}-${i}`,
-          name: result.filename,
-          charCount: result.char_count,
-          text: result.text,
+          id: `file-${uploaded.upload_id}`,
+          name: uploaded.filename,
+          charCount: 0,
+          text: '',
           type: 'file',
+          uploadId: uploaded.upload_id,
+          fileSize: uploaded.file_size,
+          deferredParse: true,
         });
       } catch (err) {
         errors.push(`${file.name}: ${getStudioErrorMessage(err)}`);
@@ -182,7 +187,11 @@ export function FileUploadZone({ sources, onSourcesChange, className }: FileUplo
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-slate-700 truncate">{source.name}</p>
-                <p className="text-xs text-slate-500">{source.charCount.toLocaleString()} 字符</p>
+                <p className="text-xs text-slate-500">
+                  {source.type === 'file' && source.deferredParse
+                    ? `已上传，生成时解析${source.fileSize ? ` · ${(source.fileSize / 1024 / 1024).toFixed(2)} MB` : ''}`
+                    : `${source.charCount.toLocaleString()} 字符`}
+                </p>
               </div>
               <button
                 onClick={() => handleRemoveSource(source.id)}

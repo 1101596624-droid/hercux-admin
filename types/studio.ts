@@ -74,6 +74,9 @@ export interface UploadedSource {
   charCount: number;
   text: string;
   type: 'file' | 'text' | 'paste';
+  uploadId?: string;
+  fileSize?: number;
+  deferredParse?: boolean;
 }
 
 // Generated Lesson (for result view)
@@ -100,6 +103,7 @@ export interface LessonOutline {
   index?: number;
   recommended_forms?: string[];
   complexity_level?: ComplexityLevel;
+  suggested_simulator?: string | null;
 }
 
 // Generation Progress
@@ -116,14 +120,15 @@ export interface GenerationProgress {
 // Generate Request
 export interface GenerateRequestV2 {
   source_material: string;
+  source_upload_ids?: string[];
   course_title: string;
   processor_id: string;
   source_info: string;
   // 断点续传支持
   resume_from_lesson?: number;  // 从第几个课时继续（0-indexed）
-  completed_lessons?: any[];    // 已完成的课时数据
-  lessons_outline?: any[];      // 课程大纲（续传时使用）
-  meta?: any;                   // 课程元数据（续传时使用）
+  completed_lessons?: Lesson[];    // 已完成的课时数据
+  lessons_outline?: LessonOutline[];      // 课程大纲（续传时使用）
+  meta?: PackageMetaV2;                   // 课程元数据（续传时使用）
 }
 
 // Stream Callbacks
@@ -143,7 +148,7 @@ export interface V2StreamCallbacks {
     complexityLevel?: ComplexityLevel
   ) => void;
   onChunk: (content: string, phase: number, lessonIndex?: number) => void;
-  onStepComplete?: (lessonIndex: number, stepIndex: number, step: Step, totalSteps: number) => void;
+  onStepComplete?: (lessonIndex: number, stepIndex: number, step: LessonStep, totalSteps: number) => void;
   onLessonComplete: (index: number, total: number, lesson: Lesson, warning?: string) => void;
   onComplete: (pkg: CoursePackageV2) => void;
   onError: (error: string) => void;
@@ -158,6 +163,41 @@ export interface UploadResponse {
   file_type?: string;
   word_count?: number;
   reading_time_minutes?: number;
+}
+
+export interface UploadFileResponse {
+  success: boolean;
+  upload_id: string;
+  filename: string;
+  file_type?: string;
+  file_size: number;
+  content_type?: string;
+  created_at: string;
+  expires_at?: string;
+}
+
+export type UploadTaskState = 'queued' | 'extracting' | 'succeeded' | 'failed';
+
+export interface UploadTaskCreateResponse {
+  task_id: string;
+  status: UploadTaskState;
+  filename: string;
+  file_size: number;
+  created_at: string;
+}
+
+export interface UploadTaskStatusResponse {
+  task_id: string;
+  status: UploadTaskState;
+  filename: string;
+  file_size: number;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  current_phase?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  result?: UploadResponse | null;
 }
 
 // Processor Config Update

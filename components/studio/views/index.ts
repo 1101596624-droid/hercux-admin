@@ -5,3 +5,4 @@
 export { InputView } from './InputView';
 export { GeneratingView } from './GeneratingView';
 export { ResultView } from './ResultView';
+export { TaskListView } from './TaskListView';

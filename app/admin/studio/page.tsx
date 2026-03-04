@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Sparkles, ArrowLeft } from 'lucide-react';
+import { X, Sparkles, ArrowLeft, ListOrdered } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useStudioStore, getTotalCharCount, getAllSourceMaterial, canGenerate } from '@/stores/studio/useStudioStore';
+import { useStudioStore, getTotalCharCount, getAllSourceMaterial, getUploadSourceIds, canGenerate } from '@/stores/studio/useStudioStore';
 import { useEditorStore } from '@/stores/editor/useEditorStore';
-import { studioProcessorsApi, studioPackagesApi } from '@/lib/api/studio';
+import { studioProcessorsApi, studioPackagesApi, studioAsyncApi } from '@/lib/api/studio';
 import { studioGenerationService } from '@/lib/services/studioGenerationService';
-import { InputView, GeneratingView, ResultView } from '@/components/studio/views';
+import { InputView, GeneratingView, ResultView, TaskListView } from '@/components/studio/views';
 import type { ProcessorWithConfig, UploadedSource, LessonOutline } from '@/types/studio';
 
 export default function StudioPage() {
@@ -55,6 +55,8 @@ export default function StudioPage() {
   const [previewSource, setPreviewSource] = useState<UploadedSource | null>(null);
   const [copiedJson, setCopiedJson] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showTaskList, setShowTaskList] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const streamContainerRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +205,29 @@ export default function StudioPage() {
     router.push('/admin/editor/new');
   }, [generatedPackage, router, reset]);
 
+  // Handle async generation - submit to queue
+  const handleAsyncGenerate = useCallback(async () => {
+    if (!canStartGenerate() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const result = await studioAsyncApi.submitGeneration({
+        course_title: courseTitle,
+        source_material: getAllSourceMaterial(sources),
+        source_upload_ids: getUploadSourceIds(sources),
+        source_info: sourceInfo,
+        processor_id: selectedProcessorId,
+      });
+      if (result.success) {
+        setShowTaskList(true);
+      }
+    } catch (error) {
+      console.error('提交生成任务失败:', error);
+      alert(error instanceof Error ? error.message : '提交失败');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [courseTitle, sources, sourceInfo, selectedProcessorId, isSubmitting]);
+
   // Get selected lesson
   const selectedLesson = generatedPackage?.lessons.find(l => l.lesson_id === selectedLessonId) || null;
 
@@ -219,19 +244,38 @@ export default function StudioPage() {
             <p className="text-sm text-slate-500">AI 课程生成工具</p>
           </div>
         </div>
-        {currentView !== 'input' && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={handleReset}
-            className="flex items-center gap-2 px-4 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+            onClick={() => setShowTaskList(!showTaskList)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors",
+              showTaskList
+                ? "bg-blue-100 text-blue-700"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+            )}
           >
-            <ArrowLeft size={16} />
-            返回
+            <ListOrdered size={16} />
+            生成任务
           </button>
-        )}
+          {currentView !== 'input' && (
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 px-4 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <ArrowLeft size={16} />
+              返回
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}
-      {currentView === 'input' && (
+      {showTaskList ? (
+        <div className="flex-1 overflow-auto px-6 py-4">
+          <TaskListView adminId={1} />
+        </div>
+      ) : currentView === 'input' ? (
+        <>
         <InputView
           sources={sources}
           setSources={setSources}
@@ -251,9 +295,19 @@ export default function StudioPage() {
           canGenerate={canStartGenerate}
           handleGenerate={handleGenerate}
         />
-      )}
-
-      {currentView === 'generating' && (
+        {/* 提交到队列按钮 */}
+        <div className="flex-shrink-0 px-6 py-3 border-t border-slate-200 bg-white">
+          <button
+            onClick={handleAsyncGenerate}
+            disabled={!canStartGenerate() || isSubmitting}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+          >
+            <ListOrdered size={16} />
+            {isSubmitting ? '提交中...' : '提交到生成队列（后台异步生成）'}
+          </button>
+        </div>
+        </>
+      ) : currentView === 'generating' ? (
         <GeneratingView
           generationPhase={generationPhase}
           currentLessonIndex={currentLessonIndex}
@@ -274,9 +328,7 @@ export default function StudioPage() {
           handlePause={handlePause}
           handleResume={handleResume}
         />
-      )}
-
-      {currentView === 'result' && generatedPackage && (
+      ) : currentView === 'result' && generatedPackage ? (
         <ResultView
           generatedPackage={generatedPackage}
           selectedLessonId={selectedLessonId}
@@ -290,7 +342,7 @@ export default function StudioPage() {
           handleSaveToDatabase={handleSaveToDatabase}
           isSaving={isSaving}
         />
-      )}
+      ) : null}
 
       {/* Preview Modal */}
       {previewSource && (
@@ -306,7 +358,13 @@ export default function StudioPage() {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4">
-              <pre className="whitespace-pre-wrap text-sm text-slate-700">{previewSource.text}</pre>
+              {previewSource.type === 'file' && previewSource.deferredParse ? (
+                <div className="text-sm text-slate-600">
+                  文件已上传，当前阶段不读取内容。选择风格并点击生成后，服务端会开始解析该文件。
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap text-sm text-slate-700">{previewSource.text}</pre>
+              )}
             </div>
           </div>
         </div>

@@ -8,7 +8,10 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import os
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -256,8 +259,8 @@ async def get_system_info():
 
             if os.path.exists(db_path):
                 db_size = os.path.getsize(db_path) / (1024 * 1024)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"DB size calculation failed: {e}")
 
     return SystemInfo(
         version=settings.VERSION,
@@ -302,8 +305,8 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
                 if f.is_file():
                     storage_used += f.stat().st_size
             storage_used = storage_used / (1024 * 1024)  # 转换为 MB
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Storage calculation failed: {e}")
 
     return SystemStats(
         total_users=total_users,

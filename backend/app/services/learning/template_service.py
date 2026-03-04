@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, select
 from sentence_transformers import SentenceTransformer
 from app.models.models import ContentTemplate, QualityEvaluation, GenerationPattern, PatternApplication
+from app.core.constants import QUALITY_BASELINE, TEMPLATE_RETRIEVE_LIMIT_DEFAULT
 
 
 class UnifiedTemplateService:
@@ -37,8 +38,8 @@ class UnifiedTemplateService:
         template_type: str,
         subject: str,
         topic: str = None,
-        min_quality: float = 75.0,
-        limit: int = 3,
+        min_quality: float = QUALITY_BASELINE,
+        limit: int = TEMPLATE_RETRIEVE_LIMIT_DEFAULT,
         difficulty_level: str = None,
     ) -> List[ContentTemplate]:
         """

@@ -5,6 +5,13 @@
 
 import { apiClient } from './client';
 
+/** Flexible API response that may nest data differently */
+interface FlexibleResponse<T> {
+  data?: { achievements?: T[]; [key: string]: unknown };
+  achievements?: T[];
+  [key: string]: unknown;
+}
+
 export interface Achievement {
   id: number;
   name: string;
@@ -44,16 +51,16 @@ export const achievementsAPI = {
    * Get all available achievements
    */
   async getAllAchievements(): Promise<Achievement[]> {
-    const response: any = await apiClient.get('/v1/achievements');
-    return response?.data?.achievements || response?.achievements || [];
+    const data = await apiClient.get<FlexibleResponse<Achievement>>('/v1/achievements');
+    return data?.data?.achievements || data?.achievements || [];
   },
 
   /**
    * Get user's unlocked achievements
    */
   async getUserAchievements(): Promise<UserAchievement[]> {
-    const response: any = await apiClient.get('/v1/achievements/user');
-    return response?.data?.achievements || response?.achievements || [];
+    const data = await apiClient.get<FlexibleResponse<UserAchievement>>('/v1/achievements/user');
+    return data?.data?.achievements || data?.achievements || [];
   },
 
   /**
@@ -65,8 +72,13 @@ export const achievementsAPI = {
     requirement_value: number;
     is_unlocked: boolean;
   }> {
-    const response: any = await apiClient.get(`/v1/achievements/${achievementId}/progress`);
-    return response?.data || response;
+    const data = await apiClient.get<Record<string, unknown>>(`/v1/achievements/${achievementId}/progress`);
+    return ((data as Record<string, unknown>)?.data || data) as {
+      achievement_id: number;
+      progress: number;
+      requirement_value: number;
+      is_unlocked: boolean;
+    };
   },
 
   /**
@@ -91,9 +103,9 @@ export const achievementsAPI = {
   /**
    * Get skill tree data
    */
-  async getSkillTree(): Promise<any> {
-    const response: any = await apiClient.get('/v1/achievements/skill-tree');
-    return response?.data || response;
+  async getSkillTree(): Promise<Record<string, unknown>> {
+    const data = await apiClient.get<Record<string, unknown>>('/v1/achievements/skill-tree');
+    return ((data as Record<string, unknown>)?.data || data) as Record<string, unknown>;
   },
 
   /**

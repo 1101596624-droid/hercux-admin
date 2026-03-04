@@ -77,7 +77,7 @@ class QuizGeneratorService:
             if current_batch_size <= 0:
                 break
 
-            print(f"    生成第 {batch_idx + 1}/{batches_needed} 批 ({current_batch_size}道{difficulty_cn}题)...")
+            logger.info(f"    生成第 {batch_idx + 1}/{batches_needed} 批 ({current_batch_size}道{difficulty_cn}题)...")
 
             batch_questions = await self._generate_single_batch(
                 node_title=node_title,
@@ -167,11 +167,11 @@ class QuizGeneratorService:
                     q["difficulty"] = difficulty
                 return questions
             else:
-                print(f"      批次{batch_num}解析失败，使用默认题目")
+                logger.warning(f"      批次{batch_num}解析失败，使用默认题目")
                 return self._generate_default_questions(node_title, batch_size, difficulty)
 
         except Exception as e:
-            print(f"      批次{batch_num}生成失败: {e}")
+            logger.error(f"      批次{batch_num}生成失败: {e}")
             return self._generate_default_questions(node_title, batch_size, difficulty)
 
     def _parse_quiz_response(self, response: str) -> List[dict]:
@@ -201,7 +201,7 @@ class QuizGeneratorService:
             if match:
                 array_str = match.group(1)
                 return json.loads(array_str)
-        except:
+        except (json.JSONDecodeError, ValueError):
             pass
 
         # 方法3: 直接匹配数组
@@ -209,7 +209,7 @@ class QuizGeneratorService:
             match = re.search(r'\[[\s\S]*\]', response)
             if match:
                 return json.loads(match.group())
-        except:
+        except (json.JSONDecodeError, ValueError):
             pass
 
         return []
@@ -240,7 +240,7 @@ class QuizGeneratorService:
         # 每个难度生成13道题，共39道
         for difficulty in ["easy", "medium", "hard"]:
             difficulty_cn = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "简单")
-            print(f"  开始生成{difficulty_cn}难度题目...")
+            logger.info(f"  开始生成{difficulty_cn}难度题目...")
 
             questions = await self.generate_quiz_bank_by_difficulty(
                 node_title=node_title,
@@ -250,7 +250,7 @@ class QuizGeneratorService:
                 num_questions=13
             )
             quiz_bank[difficulty] = questions
-            print(f"  {difficulty_cn}���度完成: {len(questions)}道题")
+            logger.info(f"  {difficulty_cn}难度完成: {len(questions)}道题")
 
         return quiz_bank
 
@@ -325,7 +325,7 @@ async def generate_quiz_for_node(node_id: int, db_path: str = None) -> bool:
         if node['learning_objectives']:
             try:
                 learning_objectives = json.loads(node['learning_objectives'])
-            except:
+            except (json.JSONDecodeError, ValueError):
                 pass
 
         content = node['content_l1'] or node['content_l2'] or ""
@@ -389,20 +389,20 @@ async def generate_quiz_for_course(course_id: int, db_path: str = None) -> Dict[
         if not nodes:
             return {"success": False, "message": "课程没有节点", "generated": 0, "failed": 0}
 
-        print(f"\n找到 {len(nodes)} 个节点，开始生成题库...\n")
+        logger.info(f"\n找到 {len(nodes)} 个节点，开始生成题库...\n")
 
         generated = 0
         failed = 0
 
         for idx, node in enumerate(nodes):
-            print(f"\n[{idx+1}/{len(nodes)}] 节点: {node['title']} (ID: {node['id']})")
+            logger.info(f"\n[{idx+1}/{len(nodes)}] 节点: {node['title']} (ID: {node['id']})")
             success = await generate_quiz_for_node(node['id'], db_path)
             if success:
                 generated += 1
-                print(f"  ✓ 完成")
+                logger.info(f"  ✓ 完成")
             else:
                 failed += 1
-                print(f"  ✗ 失败")
+                logger.warning(f"  ✗ 失败")
 
         return {
             "success": True,

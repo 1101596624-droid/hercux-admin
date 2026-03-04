@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api';
 
 // 不活动超时时间：3天（毫秒）
 const INACTIVITY_TIMEOUT = 3 * 24 * 60 * 60 * 1000;
@@ -57,14 +57,11 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
 
         try {
-          console.log('Login attempt:', email);
-
           // Login to get token
           const formData = new URLSearchParams();
           formData.append('username', email);
           formData.append('password', password);
 
-          console.log('Sending login request to:', `${API_BASE_URL}/v1/auth/login`);
           const loginResponse = await fetch(`${API_BASE_URL}/v1/auth/login`, {
             method: 'POST',
             headers: {
@@ -73,8 +70,6 @@ export const useAuthStore = create<AuthState>()(
             },
             body: formData,
           });
-
-          console.log('Login response status:', loginResponse.status);
 
           if (!loginResponse.ok) {
             const error = await loginResponse.json().catch(() => ({ detail: '登录失败' }));
@@ -87,7 +82,6 @@ export const useAuthStore = create<AuthState>()(
           }
 
           const loginData = await loginResponse.json();
-          console.log('Login data received:', loginData);
           const { access_token, expires_in } = loginData;
 
           if (!access_token) {
@@ -102,18 +96,14 @@ export const useAuthStore = create<AuthState>()(
           // Store token in localStorage
           if (typeof window !== 'undefined') {
             localStorage.setItem('auth_token', access_token);
-            console.log('Token stored in localStorage');
           }
 
           // Get user info
-          console.log('Fetching user info from:', `${API_BASE_URL}/v1/auth/me`);
           const userResponse = await fetch(`${API_BASE_URL}/v1/auth/me`, {
             headers: {
               'Authorization': `Bearer ${access_token}`,
             },
           });
-
-          console.log('User info response status:', userResponse.status);
 
           if (!userResponse.ok) {
             const errorText = await userResponse.text();
@@ -122,7 +112,6 @@ export const useAuthStore = create<AuthState>()(
           }
 
           const userData = await userResponse.json();
-          console.log('User data received:', userData);
 
           const user: User = {
             id: String(userData.id),
@@ -137,7 +126,6 @@ export const useAuthStore = create<AuthState>()(
           const expiresInMs = (expires_in || 3 * 24 * 60 * 60) * 1000;
           const tokenExpiresAt = Date.now() + expiresInMs;
 
-          console.log('Login successful, setting user state');
           set({
             user,
             token: access_token,
@@ -233,21 +221,18 @@ export const useAuthStore = create<AuthState>()(
 
         // 检查是否超过不活动时间（3天）
         if (lastActivityTime && (now - lastActivityTime) > INACTIVITY_TIMEOUT) {
-          console.log('Session expired due to inactivity (3 days)');
           logout();
           return false;
         }
 
         // 检查 Token 是否过期
         if (tokenExpiresAt && now > tokenExpiresAt) {
-          console.log('Token expired');
           logout();
           return false;
         }
 
         // 检查是否需要刷新 Token（剩余12小时时刷新）
         if (tokenExpiresAt && (tokenExpiresAt - now) < TOKEN_REFRESH_THRESHOLD) {
-          console.log('Token will expire soon, refreshing...');
           refreshToken().catch(console.error);
         }
 
@@ -288,7 +273,6 @@ export const useAuthStore = create<AuthState>()(
               tokenExpiresAt: Date.now() + expiresInMs,
               lastActivityTime: Date.now(),
             });
-            console.log('Token refreshed successfully');
           }
         } catch (error) {
           console.error('Token refresh error:', error);

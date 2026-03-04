@@ -6,9 +6,13 @@ import json
 import logging
 import uuid
 import io
+import os
+import asyncio
 from typing import AsyncGenerator, Dict, Any, Optional, List
 from datetime import datetime
 from pathlib import Path
+
+import httpx
 
 from .supervisor import CourseSupervisor
 from .generator import ChapterGenerator, GeneratorPromptBuilder
@@ -20,8 +24,14 @@ from .models import (
 from .standards_loader import get_standards_loader
 from app.services.gemini_service import gemini_service
 from app.services.storage_service import storage_service
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+LLM_OUTPUT_TOKEN_LIMIT = 8192
+
+
+class StepContentRetryExhaustedError(RuntimeError):
+    """步骤重试耗尽，触发章节级重试或失败。"""
 
 
 class CourseGenerationService:
@@ -147,6 +157,10 @@ class CourseGenerationService:
                 # 重置单步重试计数（新章节）
                 state.reset_step_retries()
                 state.current_attempt = 0
+                state.last_json_error = None
+                state.json_fix_guidance = None
+                state.last_step_error = None
+                state.step_fix_guidance = None
 
                 # 通知开始生成章节
                 yield {
@@ -223,6 +237,10 @@ class CourseGenerationService:
                                         }
                                     }
                                     continue
+                                raise RuntimeError(
+                                    f"Chapter {chapter_index + 1} skeleton check requires regenerate but retries exhausted: "
+                                    f"{'; '.join(skeleton_check['issues'])}"
+                                )
                             # action == 'revise' 时继续，后续步骤会修复
 
                         # === 分步生成：填充所有长文本内容（带步骤检测）===
@@ -246,42 +264,87 @@ class CourseGenerationService:
                             else:
                                 yield sim_event
 
+                        # 重置上次失败痕迹，避免污染后续章节提示词
+                        state.last_json_error = None
+                        state.json_fix_guidance = None
+                        state.last_step_error = None
+                        state.step_fix_guidance = None
+
                         # === 步骤检测已完成，跳过章节级别评审，直接通过 ===
                         logger.info(f"Chapter {chapter_index + 1} step-by-step check completed, skipping chapter review")
                         break
 
                     except ValueError as e:
                         logger.error(f"Failed to parse chapter {chapter_index + 1}: {e}")
+                        error_type, is_truncated = self._classify_json_parse_failure(str(e), full_response)
 
-                        # JSON解析失败，只重试骨架生成（最多2次额外重试）
+                        # 让监督者分析 JSON 错误并生成修复指导（按失败原因）
+                        json_fix_guidance = await self.supervisor.analyze_json_error(
+                            raw_response=full_response,
+                            error_message=str(e),
+                            chapter_index=chapter_index,
+                            error_type=error_type,
+                            is_truncated=is_truncated
+                        )
+                        state.last_json_error = f"{error_type}: {str(e)}"
+                        state.json_fix_guidance = json_fix_guidance
+
                         state.increment_attempt()
 
-                        if state.current_attempt <= 2:
-                            # 让监督者分析 JSON 错误并生成修复指导
-                            json_fix_guidance = await self.supervisor.analyze_json_error(
-                                raw_response=full_response,
-                                error_message=str(e),
-                                chapter_index=chapter_index
-                            )
-                            state.last_json_error = str(e)
-                            state.json_fix_guidance = json_fix_guidance
-
+                        if state.can_retry():
                             yield {
                                 "event": "skeleton_retry",
                                 "data": {
                                     "index": chapter_index,
                                     "attempt": state.current_attempt,
-                                    "reason": f"骨架JSON解析失败，重新生成骨架",
+                                    "reason": "骨架JSON解析失败，重新生成骨架",
+                                    "error_type": error_type,
+                                    "is_truncated": is_truncated,
                                     "error": str(e)[:200]
                                 }
                             }
                             continue
-                        else:
-                            # 超过重试次数，使用默认骨架
-                            logger.warning(f"Chapter {chapter_index + 1} JSON parse failed after retries, using default skeleton")
-                            chapter = self._get_default_chapter_skeleton(chapter_outline, chapter_index)
-                            # 使用默认骨架后直接跳出循环
-                            break
+
+                        raise RuntimeError(
+                            f"Chapter {chapter_index + 1} JSON parse retries exhausted "
+                            f"(type={error_type}, truncated={is_truncated}): {e}"
+                        )
+                    except StepContentRetryExhaustedError as e:
+                        logger.error(f"Step content retry exhausted in chapter {chapter_index + 1}: {e}")
+                        state.last_step_error = str(e)
+                        state.step_fix_guidance = await self.supervisor.analyze_step_retry_guidance(
+                            state=state,
+                            chapter_title=chapter_outline.title,
+                            step_index=-1,
+                            step_type="chapter_level",
+                            step_title="章节整体重试",
+                            failure_reason=str(e),
+                            attempt=state.current_attempt + 1,
+                            max_attempts=state.max_attempts
+                        )
+
+                        state.increment_attempt()
+
+                        if state.can_retry():
+                            yield {
+                                "event": "chapter_retry",
+                                "data": {
+                                    "index": chapter_index,
+                                    "attempt": state.current_attempt,
+                                    "reason": "步骤内容重试耗尽，执行章节级重试",
+                                    "error": str(e)[:200]
+                                }
+                            }
+                            continue
+
+                        raise RuntimeError(
+                            f"Chapter {chapter_index + 1} step retries exhausted after chapter-level retries: {e}"
+                        )
+
+                if chapter is None:
+                    raise RuntimeError(
+                        f"Chapter {chapter_index + 1} generation ended without valid content after {state.current_attempt} attempts"
+                    )
 
                 # 保存章节
                 if chapter:
@@ -408,11 +471,7 @@ class CourseGenerationService:
                         "mode": step.simulator_spec.mode if hasattr(step.simulator_spec, 'mode') else "html",
                         "name": step.simulator_spec.name,
                         "description": step.simulator_spec.description,
-                        "html_content": (
-                            html_val := step.simulator_spec.html_content if hasattr(step.simulator_spec, 'html_content') else "",
-                            logger.info(f"[DEBUG] Simulator '{step.simulator_spec.name}' html_content length: {len(html_val)}"),
-                            html_val
-                        )[2],
+                        "html_content": step.simulator_spec.html_content if hasattr(step.simulator_spec, 'html_content') else "",
                         # 兼容旧字段
                         "custom_code": step.simulator_spec.html_content if hasattr(step.simulator_spec, 'html_content') else ""
                     } if step.simulator_spec else None,
@@ -667,9 +726,27 @@ class CourseGenerationService:
         # 2. 生成每个步骤的内容
         for i, step in enumerate(chapter.steps):
             step_passed = False
-            max_step_retries = 2
+            max_step_retries = max(1, state.max_step_retries)
+            last_failure_reason = ""
+            step_retry_guidance = ""
 
             for retry in range(max_step_retries):
+                if retry > 0 and last_failure_reason:
+                    step_retry_guidance = await self.supervisor.analyze_step_retry_guidance(
+                        state=state,
+                        chapter_title=chapter.title,
+                        step_index=i,
+                        step_type=step.type,
+                        step_title=step.title,
+                        failure_reason=last_failure_reason,
+                        attempt=retry + 1,
+                        max_attempts=max_step_retries
+                    )
+                    state.last_step_error = last_failure_reason
+                    state.step_fix_guidance = step_retry_guidance
+                else:
+                    step_retry_guidance = ""
+
                 # === text_content / illustrated_content ===
                 if step.type in ['text_content', 'illustrated_content']:
                     body = ""
@@ -696,7 +773,8 @@ class CourseGenerationService:
                             },
                             system_prompt=generator_system_prompt,
                             min_length=150,
-                            max_length=400
+                            max_length=400,
+                            retry_guidance=step_retry_guidance
                         )
 
                         if isinstance(step.content, dict):
@@ -711,6 +789,10 @@ class CourseGenerationService:
                         logger.info(f"[Step Check] Step {i+1} '{step.title}' body passed: {len(body)} chars")
                     else:
                         logger.warning(f"[Step Check] Step {i+1} body too short ({len(body)} chars, need {min_body_length}+)")
+                        last_failure_reason = (
+                            f"step_body_too_short: {len(body)} < {min_body_length}, "
+                            f"step={i + 1}, title={step.title}, retry={retry + 1}/{max_step_retries}"
+                        )
                         continue
 
                     # === illustrated_content 额外检测 diagram_spec ===
@@ -730,7 +812,8 @@ class CourseGenerationService:
                                 },
                                 system_prompt=generator_system_prompt,
                                 min_length=80,
-                                max_length=200
+                                max_length=200,
+                                retry_guidance=step_retry_guidance
                             )
                             desc = step.diagram_spec['description']
 
@@ -739,6 +822,10 @@ class CourseGenerationService:
                         else:
                             logger.warning(f"[Step Check] Step {i+1} diagram description too short ({len(desc)} chars)")
                             step_passed = False
+                            last_failure_reason = (
+                                f"diagram_description_too_short: {len(desc)} < 50, "
+                                f"step={i + 1}, title={step.title}, retry={retry + 1}/{max_step_retries}"
+                            )
                             continue
 
                 # === assessment ===
@@ -759,7 +846,8 @@ class CourseGenerationService:
                                 },
                                 system_prompt=generator_system_prompt,
                                 min_length=30,
-                                max_length=100
+                                max_length=100,
+                                retry_guidance=step_retry_guidance
                             )
 
                         if len(q.get('explanation', '')) < 20:
@@ -770,6 +858,10 @@ class CourseGenerationService:
                         step_passed = True
                         logger.info(f"[Step Check] Step {i+1} assessment passed: {len(questions)} questions")
                     else:
+                        last_failure_reason = (
+                            f"assessment_explanations_incomplete: step={i + 1}, "
+                            f"title={step.title}, retry={retry + 1}/{max_step_retries}"
+                        )
                         continue
 
                 # === ai_tutor ===
@@ -785,13 +877,18 @@ class CourseGenerationService:
                                 "step_title": step.title,
                                 "learning_objectives": chapter.learning_objectives
                             },
-                            system_prompt=generator_system_prompt
+                            system_prompt=generator_system_prompt,
+                            retry_guidance=step_retry_guidance
                         )
                     step_passed = bool(step.ai_spec and step.ai_spec.get('opening_message'))
                     if step_passed:
                         logger.info(f"[Step Check] Step {i+1} ai_tutor passed")
                         break
                     else:
+                        last_failure_reason = (
+                            f"ai_tutor_invalid: missing opening_message/probing_questions, "
+                            f"step={i + 1}, title={step.title}, retry={retry + 1}/{max_step_retries}"
+                        )
                         continue
 
                 # === simulator (只检测description，代码由专门方法处理) ===
@@ -809,7 +906,8 @@ class CourseGenerationService:
                             },
                             system_prompt=generator_system_prompt,
                             min_length=50,
-                            max_length=150
+                            max_length=150,
+                            retry_guidance=step_retry_guidance
                         )
                         desc = step.simulator_spec.description
 
@@ -818,6 +916,10 @@ class CourseGenerationService:
                         logger.info(f"[Step Check] Step {i+1} simulator description passed: {len(desc)} chars")
                     else:
                         logger.warning(f"[Step Check] Step {i+1} simulator description too short ({len(desc)} chars)")
+                        last_failure_reason = (
+                            f"simulator_description_too_short: {len(desc)} < 30, "
+                            f"step={i + 1}, title={step.title}, retry={retry + 1}/{max_step_retries}"
+                        )
                         continue
 
                 else:
@@ -828,7 +930,12 @@ class CourseGenerationService:
                     break
 
             if not step_passed:
-                logger.warning(f"[Step Check] Step {i+1} '{step.title}' failed after {max_step_retries} retries, using current content")
+                failure_detail = (
+                    f"[Step Check] Step {i+1} '{step.title}' failed after {max_step_retries} retries. "
+                    f"Last reason: {last_failure_reason or 'unknown'}"
+                )
+                logger.error(failure_detail)
+                raise StepContentRetryExhaustedError(failure_detail)
 
         return chapter
 
@@ -890,13 +997,52 @@ class CourseGenerationService:
 
         return text
 
+    def _classify_json_parse_failure(self, error_message: str, raw_response: str) -> tuple[str, bool]:
+        """分类JSON解析错误，识别是否疑似被截断。"""
+        message = (error_message or "").lower()
+        response = (raw_response or "").strip()
+
+        truncated_markers = [
+            "unterminated string",
+            "unexpected end",
+            "end of data",
+            "eof",
+            "expecting value",
+        ]
+        escaping_markers = [
+            "invalid \\escape",
+            "invalid control character",
+            "unterminated string",
+        ]
+
+        unbalanced_braces = response.count("{") != response.count("}")
+        unbalanced_brackets = response.count("[") != response.count("]")
+        response_tail_incomplete = bool(response) and not response.endswith("}")
+        is_truncated = (
+            any(m in message for m in truncated_markers) or
+            unbalanced_braces or
+            unbalanced_brackets or
+            response_tail_incomplete
+        )
+
+        if is_truncated:
+            return "truncated_output", True
+        if any(m in message for m in escaping_markers):
+            return "invalid_escape_or_string", False
+        if "extra data" in message:
+            return "extra_text_outside_json", False
+        if "expecting property name enclosed in double quotes" in message:
+            return "invalid_property_quotes", False
+        return "invalid_json_structure", False
+
     async def _generate_text_content(
         self,
         content_type: str,
         context: Dict[str, Any],
         system_prompt: str,
         min_length: int,
-        max_length: int
+        max_length: int,
+        retry_guidance: str = ""
     ) -> str:
         """生成单个文本内容（增强版：注入学习上下文）"""
         from app.services.llm_factory import get_llm_service
@@ -941,6 +1087,10 @@ class CourseGenerationService:
 - 不要使用 JSON 格式（如 {"content": "..."}）
 - 不要在文本中使用转义字符（如 \\n 或 \\"）
 - 直接输出中文文字内容"""
+        retry_guidance_block = (
+            f"\n【本次重试修复指导】\n{retry_guidance}\n"
+            if retry_guidance else ""
+        )
 
         prompts = {
             "rationale": f"""请为以下章节生成设计理念说明。
@@ -951,6 +1101,7 @@ class CourseGenerationService:
 章节类型：{context.get('chapter_type', '')}
 
 {learning_context}
+{retry_guidance_block}
 
 要求：
 - {min_length}-{max_length}字
@@ -968,6 +1119,7 @@ class CourseGenerationService:
 学习目标：{', '.join(context.get('learning_objectives', []))}
 
 {learning_context}
+{retry_guidance_block}
 
 要求：
 - {min_length}-{max_length}字
@@ -997,6 +1149,7 @@ class CourseGenerationService:
 - 详细描述图片应该展示的内容
 - 包括：主题、场景、元素、布局、风格
 - 描述越详细，生成的图片越准确
+{retry_guidance_block}
 {format_warning}""",
 
             "question_explanation": f"""请为以下选择题生成答案解析。
@@ -1009,6 +1162,7 @@ class CourseGenerationService:
 - {min_length}-{max_length}字
 - 解释为什么正确答案是对的
 - 简要说明其他选项为什么不对
+{retry_guidance_block}
 {format_warning}""",
 
             "simulator_description": f"""请为以下模拟器生成详细描述。
@@ -1021,6 +1175,7 @@ class CourseGenerationService:
 - {min_length}-{max_length}字
 - 说明模拟器要展示什么概念
 - 描述交互效果和视觉呈现
+{retry_guidance_block}
 {format_warning}"""
         }
 
@@ -1031,7 +1186,7 @@ class CourseGenerationService:
             response = await claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                max_tokens=500
+                max_tokens=LLM_OUTPUT_TOKEN_LIMIT
             )
             # 方案A：使用清理函数处理响应
             return self._clean_text_response(response)
@@ -1042,7 +1197,8 @@ class CourseGenerationService:
     async def _generate_ai_tutor_content(
         self,
         context: Dict[str, Any],
-        system_prompt: str
+        system_prompt: str,
+        retry_guidance: str = ""
     ) -> Dict[str, Any]:
         """生成AI导师步骤内容"""
         from app.services.llm_factory import get_llm_service
@@ -1052,6 +1208,10 @@ class CourseGenerationService:
         chapter_title = context.get('chapter_title', '')
         step_title = context.get('step_title', chapter_title)
         objectives = ', '.join(context.get('learning_objectives', []))
+        retry_guidance_block = (
+            f"\n【本次重试修复指导】\n{retry_guidance}\n"
+            if retry_guidance else ""
+        )
 
         prompt = f"""请为以下课程章节生成AI导师对话内容（苏格拉底式提问），用于检验学生对核心概念的理解。
 
@@ -1092,14 +1252,17 @@ class CourseGenerationService:
 - opening_message 要有亲和力，引导学生思考
 - probing_questions 至少3个，由浅入深
 - diagnostic_focus 中的 key_concepts 和 common_misconceptions 要与学习目标相关
-- 请直接输出JSON，不要有其他内容"""
+- 严格遵守课程标准，不得输出占位内容
+- 单次输出token上限为 {LLM_OUTPUT_TOKEN_LIMIT}
+- 请直接输出JSON，不要有其他内容
+{retry_guidance_block}"""
 
         try:
             claude_service = get_llm_service()
             response = await claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                max_tokens=1000
+                max_tokens=LLM_OUTPUT_TOKEN_LIMIT
             )
 
             # 尝试解析JSON
@@ -1198,112 +1361,291 @@ class CourseGenerationService:
 章节主题：{chapter_outline.suggested_simulator if hasattr(chapter_outline, 'suggested_simulator') else chapter.title}
 """
 
-        # 是否使用递进式生成（新策略）
-        use_progressive = True
+        # 课程生成默认走 Agent 生成，确保与独立 Agent 测试链路一致
+        use_agent_generation = os.environ.get("SIMULATOR_USE_AGENT_GENERATION", "1").lower() not in ("0", "false", "no")
+        force_regen = os.environ.get("SIMULATOR_FORCE_REGENERATE", "1").lower() not in ("0", "false", "no")
+        subject_id, agent_subject = self._get_simulator_subjects(state)
 
         for step_idx, step in enumerate(chapter.steps):
             if step.type == 'simulator' and step.simulator_spec:
                 code = step.simulator_spec.html_content or ""
                 code_lines = len([l for l in code.split('\n') if l.strip()])
+                should_generate = force_regen or code_lines < 20
 
-                # 如果代码为空或太短，生成新代码
-                if code_lines < 20:
-                    logger.info(f"Generating HTML simulator: '{step.simulator_spec.name}'")
+                if not should_generate:
+                    continue
 
-                    # ✅ HTML模拟器生成已启用 (2026-02-11)
-                    if use_progressive:  # 启用HTML生成
-                        # ========== 递进式生成（新策略）==========
-                        logger.info(f"Using progressive generation for '{step.simulator_spec.name}'...")
+                logger.info(
+                    f"Generating HTML simulator: '{step.simulator_spec.name}' "
+                    f"(use_agent={use_agent_generation}, force_regen={force_regen}, subject={subject_id})"
+                )
 
-                        try:
-                            result_code = None
-                            async for event in self.generator.generate_simulator_code_progressive(
-                                simulator_name=step.simulator_spec.name,
-                                simulator_description=step.simulator_spec.description,
-                                chapter_context=chapter_context,
-                                system_prompt=generator_system_prompt
-                            ):
-                                if event["type"] == "progress":
-                                    yield {
-                                        "event": "simulator_progress",
-                                        "data": {
-                                            "simulator_name": step.simulator_spec.name,
-                                            "step_index": step_idx,
-                                            "round": event["round"],
-                                            "max_rounds": event["max_rounds"],
-                                            "stage": event["stage"],
-                                            "message": event["message"]
-                                        }
+                try:
+                    result_code = None
+
+                    if use_agent_generation:
+                        yield {
+                            "event": "simulator_progress",
+                            "data": {
+                                "simulator_name": step.simulator_spec.name,
+                                "step_index": step_idx,
+                                "round": 1,
+                                "max_rounds": 1,
+                                "stage": "agent_queue",
+                                "message": "提交到Agent异步生成队列..."
+                            }
+                        }
+                        agent_result = await self._generate_simulator_via_agent_task(
+                            simulator_name=step.simulator_spec.name,
+                            simulator_description=step.simulator_spec.description,
+                            chapter_context=chapter_context,
+                            subject=agent_subject
+                        )
+                        result_code = agent_result.get("code", "")
+                        yield {
+                            "event": "simulator_progress",
+                            "data": {
+                                "simulator_name": step.simulator_spec.name,
+                                "step_index": step_idx,
+                                "round": 1,
+                                "max_rounds": 1,
+                                "stage": "agent_done",
+                                "message": (
+                                    f"Agent完成: quality={agent_result.get('quality_score', 0):.2f}, "
+                                    f"lines={agent_result.get('line_count', 0)}"
+                                )
+                            }
+                        }
+                    else:
+                        logger.info(f"Using local progressive generation for '{step.simulator_spec.name}'...")
+                        async for event in self.generator.generate_simulator_code_progressive(
+                            simulator_name=step.simulator_spec.name,
+                            simulator_description=step.simulator_spec.description,
+                            chapter_context=chapter_context,
+                            system_prompt=generator_system_prompt
+                        ):
+                            if event["type"] == "progress":
+                                yield {
+                                    "event": "simulator_progress",
+                                    "data": {
+                                        "simulator_name": step.simulator_spec.name,
+                                        "step_index": step_idx,
+                                        "round": event["round"],
+                                        "max_rounds": event["max_rounds"],
+                                        "stage": event["stage"],
+                                        "message": event["message"]
                                     }
-                                elif event["type"] == "result":
-                                    result_code = event["code"]
+                                }
+                            elif event["type"] == "result":
+                                result_code = event["code"]
 
-                            if result_code:
-                                step.simulator_spec.html_content = result_code
-                                new_lines = len([l for l in result_code.split('\n') if l.strip()])
-                                logger.info(f"Progressive generation completed: {new_lines} lines")
+                    if not result_code:
+                        logger.warning(f"Simulator '{step.simulator_spec.name}' returned empty code")
+                        continue
 
-                                # === 动态阈值计算 (2026-02-11) ===
-                                from .template_service import TemplateService
-                                template_service = TemplateService(self.db)
-                                thresholds = await template_service.calculate_dynamic_thresholds(subject="physics")
+                    new_lines = len([l for l in result_code.split('\n') if l.strip()])
+                    min_quality_norm = self._get_min_quality_norm()
+                    min_quality_score = min_quality_norm * 100.0
 
-                                dynamic_pass_threshold = thresholds['pass_threshold']
-                                dynamic_save_threshold = thresholds['save_threshold']
+                    # === 动态阈值 + 硬门禁 (2026-03-01) ===
+                    from .template_service import TemplateService
+                    template_service = TemplateService(self.db)
+                    thresholds = await template_service.calculate_dynamic_thresholds(subject=subject_id)
 
-                                logger.info(
-                                    f"Dynamic thresholds - Phase: {thresholds['phase']}, "
-                                    f"Pass: {dynamic_pass_threshold:.1f}, Save: {dynamic_save_threshold:.1f}, "
-                                    f"Templates: {thresholds['template_count']}, Avg: {thresholds['avg_quality']:.1f}"
-                                )
+                    dynamic_pass_threshold = max(thresholds['pass_threshold'], min_quality_score)
+                    dynamic_save_threshold = max(thresholds['save_threshold'], min_quality_score)
 
-                                # HTML质量评分检查 (使用动态阈值)
-                                quality_passed, quality_score, quality_report = self.generator.validate_html_quality(
-                                    code=result_code,
-                                    threshold=dynamic_pass_threshold
-                                )
+                    logger.info(
+                        f"Dynamic thresholds({subject_id}) - Phase: {thresholds['phase']}, "
+                        f"Pass: {dynamic_pass_threshold:.1f}, Save: {dynamic_save_threshold:.1f}, "
+                        f"Templates: {thresholds['template_count']}, Avg: {thresholds['avg_quality']:.1f}"
+                    )
 
-                                if quality_passed:
-                                    logger.info(f"Simulator '{step.simulator_spec.name}' quality score: {quality_score.total_score}/100 - PASSED")
+                    quality_passed, quality_score, _ = self.generator.validate_html_quality(
+                        code=result_code,
+                        threshold=dynamic_pass_threshold
+                    )
 
-                                    # === 质量反馈循环：使用动态保存阈值 ===
-                                    if quality_score.total_score >= dynamic_save_threshold:
-                                        try:
-                                            await self._save_simulator_as_template(
-                                                code=result_code,
-                                                spec=step.simulator_spec,
-                                                quality_score=quality_score,
-                                                subject="physics",  # TODO: 从课程元数据获取
-                                                topic=step.simulator_spec.name
-                                            )
-                                            logger.info(
-                                                f"✨ High-quality simulator (score: {quality_score.total_score}, "
-                                                f"threshold: {dynamic_save_threshold:.1f}) saved as template"
-                                            )
-                                        except Exception as e:
-                                            logger.error(f"Failed to save simulator as template: {e}")
-                                    else:
-                                        logger.info(
-                                            f"Score {quality_score.total_score} below save threshold "
-                                            f"{dynamic_save_threshold:.1f}, not saved as template"
-                                        )
-                                else:
-                                    # 质量不合格，但保留代码
-                                    # 0分检查已移到generator规则检查中，这里只记录
-                                    logger.warning(f"Simulator '{step.simulator_spec.name}' quality score: {quality_score.total_score}/100 - FAILED")
-                                    logger.info(f"Using generated code despite low quality score")
+                    if not quality_passed:
+                        logger.warning(
+                            f"Simulator '{step.simulator_spec.name}' rejected by local quality gate: "
+                            f"{quality_score.total_score}/100 < {dynamic_pass_threshold:.1f}"
+                        )
+                        continue
 
+                    # 通过门禁后再落库到章节，避免覆盖为低质量代码
+                    step.simulator_spec.html_content = result_code
+                    logger.info(f"Simulator accepted: '{step.simulator_spec.name}' ({new_lines} lines)")
+
+                    if quality_score.total_score >= dynamic_save_threshold:
+                        try:
+                            await self._save_simulator_as_template(
+                                code=result_code,
+                                spec=step.simulator_spec,
+                                quality_score=quality_score,
+                                subject=subject_id,
+                                topic=step.simulator_spec.name
+                            )
                         except Exception as e:
-                            logger.error(f"Progressive generation failed: {e}")
-                            # 只有在html_content为空时才是真正的失败，否则只是模板保存失败
-                            if not step.simulator_spec.html_content:
-                                logger.warning(f"Simulator generation truly failed, html_content is empty")
-                            else:
-                                logger.info(f"Simulator code generated successfully ({len(step.simulator_spec.html_content)} chars), only template saving failed")
+                            logger.error(f"Failed to save simulator as template: {e}")
+                    else:
+                        logger.info(
+                            f"Score {quality_score.total_score} below save threshold "
+                            f"{dynamic_save_threshold:.1f}, not saved as template"
+                        )
 
-                    # 旧的备选路径已删除（2026-02-11）- 现在统一使用 progressive 生成
+                except Exception as e:
+                    logger.error(f"Simulator generation failed: {e}")
+                    if not step.simulator_spec.html_content:
+                        logger.warning(f"Simulator generation truly failed and no fallback code exists")
+                    else:
+                        logger.info(
+                            f"Keep previous simulator code ({len(step.simulator_spec.html_content)} chars) "
+                            f"because new generation failed"
+                        )
 
         yield {"event": "_chapter_done", "data": {"chapter": chapter}}
+
+    def _get_min_quality_norm(self) -> float:
+        """读取统一质量门槛，支持 0~1 或 0~100 两种写法。"""
+        raw_value = os.environ.get("SIMULATOR_TEMPLATE_MIN_QUALITY", "0.85")
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            value = 0.85
+        if value > 1.0:
+            value = value / 100.0
+        return max(0.0, min(1.0, value))
+
+    def _get_simulator_subjects(self, state: GenerationState) -> tuple[str, str]:
+        """
+        返回：
+        - subject_id: backend模板库使用（physics/mathematics/...）
+        - agent_subject: 传给Agent的学科中文名（数学/物理/...）
+        """
+        classification = getattr(state, "subject_classification", None) or {}
+        subject_id = classification.get("subject_id") or "physics"
+        subject_name = classification.get("subject_name") or subject_id
+        subject_to_agent = {
+            "physics": "物理",
+            "chemistry": "化学",
+            "biology": "生物",
+            "mathematics": "数学",
+            "history": "历史",
+            "geography": "地理",
+            "computer_science": "计算机",
+            "medicine": "医学",
+        }
+        return subject_id, subject_to_agent.get(subject_id, subject_name)
+
+    async def _generate_simulator_via_agent_task(
+        self,
+        simulator_name: str,
+        simulator_description: str,
+        chapter_context: str,
+        subject: str
+    ) -> Dict[str, Any]:
+        """
+        通过 Agent 异步任务接口生成模拟器，并执行硬门禁：
+        - quality_score >= SIMULATOR_TEMPLATE_MIN_QUALITY (默认0.85)
+        - line_count >= SIMULATOR_TEMPLATE_MIN_LINES (默认500)
+        """
+        base_url = settings.AGENT_BASE_URL.rstrip("/")
+        submit_url = f"{base_url}/enhance/simulator/tasks"
+
+        min_quality = self._get_min_quality_norm()
+        min_lines = int(os.environ.get("SIMULATOR_TEMPLATE_MIN_LINES", "500"))
+        max_attempts = max(1, int(os.environ.get("SIMULATOR_AGENT_MAX_ATTEMPTS", "2")))
+        timeout_sec = max(60, int(os.environ.get("SIMULATOR_AGENT_TASK_TIMEOUT_SEC", "2160")))
+        poll_interval = max(1.0, float(os.environ.get("SIMULATOR_AGENT_POLL_INTERVAL_SEC", "2")))
+        allow_below_gate = os.environ.get("SIMULATOR_ALLOW_BELOW_GATE", "0").lower() in ("1", "true", "yes")
+
+        best_result: Optional[Dict[str, Any]] = None
+        best_quality = -1.0
+
+        timeout = httpx.Timeout(connect=15.0, read=30.0, write=30.0, pool=30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            for attempt in range(1, max_attempts + 1):
+                payload = {
+                    "topic": simulator_name,
+                    "subject": subject,
+                    "variables": None,
+                    "chapter_context": chapter_context,
+                    "simulator_description": simulator_description or "",
+                    "complexity_level": "advanced",
+                }
+                submit_resp = await client.post(submit_url, json=payload)
+                submit_resp.raise_for_status()
+                submit_data = submit_resp.json()
+                task_id = submit_data.get("task_id")
+                if not task_id:
+                    raise RuntimeError("Agent任务创建成功但未返回task_id")
+
+                logger.info(
+                    f"Agent simulator task submitted: {task_id} "
+                    f"(attempt {attempt}/{max_attempts}, subject={subject})"
+                )
+
+                status_url = f"{submit_url}/{task_id}"
+                loop = asyncio.get_running_loop()
+                started = loop.time()
+                while True:
+                    elapsed = loop.time() - started
+                    if elapsed > timeout_sec:
+                        raise TimeoutError(f"Agent任务超时: {task_id} (> {timeout_sec}s)")
+
+                    await asyncio.sleep(poll_interval)
+                    status_resp = await client.get(status_url)
+                    status_resp.raise_for_status()
+                    task_data = status_resp.json()
+                    status = task_data.get("status")
+
+                    if status in ("queued", "running"):
+                        continue
+
+                    if status == "succeeded":
+                        result = task_data.get("result") or {}
+                        code = (result.get("code") or "").strip()
+                        quality = float(result.get("quality_score") or 0.0)
+                        valid = bool(result.get("valid"))
+                        line_count = int(result.get("line_count") or len([l for l in code.split("\n") if l.strip()]))
+                        result["line_count"] = line_count
+
+                        if quality > best_quality and code:
+                            best_quality = quality
+                            best_result = result
+
+                        if code and valid and quality >= min_quality and line_count >= min_lines:
+                            return result
+
+                        logger.warning(
+                            f"Agent result below gate (attempt {attempt}/{max_attempts}): "
+                            f"valid={valid}, quality={quality:.2f}<{min_quality:.2f}, "
+                            f"lines={line_count}<{min_lines}"
+                        )
+                        break
+
+                    error_code = task_data.get("error_code")
+                    error_message = task_data.get("error_message")
+                    logger.warning(
+                        f"Agent task failed/canceled (attempt {attempt}/{max_attempts}): "
+                        f"task_id={task_id}, status={status}, code={error_code}, msg={error_message}"
+                    )
+                    break
+
+        if best_result and allow_below_gate:
+            logger.warning(
+                f"Returning below-gate simulator due to SIMULATOR_ALLOW_BELOW_GATE=1 "
+                f"(quality={best_result.get('quality_score', 0):.2f}, "
+                f"lines={best_result.get('line_count', 0)})"
+            )
+            return best_result
+
+        best_quality_text = f"{best_quality:.2f}" if best_quality >= 0 else "N/A"
+        raise RuntimeError(
+            f"Agent simulator generation did not pass gate after {max_attempts} attempts "
+            f"(min_quality={min_quality:.2f}, min_lines={min_lines}, best_quality={best_quality_text})"
+        )
 
     async def _save_simulator_as_template(
         self,
@@ -1334,6 +1676,20 @@ class CourseGenerationService:
         # 标准化topic名称 (移除特殊字符，转为小写下划线)
         topic_normalized = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]+', '_', topic).lower().strip('_')
 
+        # 入待审核硬门禁：代码行数>=500 且 质量>=0.85
+        code_lines = len([l for l in code.split('\n') if l.strip()])
+        min_lines_for_pending = int(os.environ.get("SIMULATOR_TEMPLATE_MIN_LINES", "500"))
+        min_quality_norm = self._get_min_quality_norm()
+        min_quality_score = min_quality_norm * 100.0
+
+        if code_lines < min_lines_for_pending or quality_score.total_score < min_quality_score:
+            logger.info(
+                f"Template skip ({subject}/{topic_normalized}): "
+                f"lines={code_lines}/{min_lines_for_pending}, "
+                f"quality={quality_score.total_score:.1f}/{min_quality_score:.1f}"
+            )
+            return
+
         # 检查是否已存在同名模板
         result = await self.generator.db.execute(
             select(SimulatorTemplate).where(
@@ -1348,7 +1704,6 @@ class CourseGenerationService:
             return
 
         # 提取代码指标
-        code_lines = len([l for l in code.split('\n') if l.strip()])
         has_setup_update = 'requestAnimationFrame' in code  # 简单检测动画模式
         variable_count = 0  # HTML模拟器不使用variables，设为0
 
@@ -1392,6 +1747,7 @@ class CourseGenerationService:
             existing.has_setup_update = has_setup_update
             existing.visual_elements = visual_elements
             existing.template_metadata = metadata
+            existing.status = 'pending'  # 二次入库也必须回到待审核
             logger.info(f"Updated template {subject}/{topic_normalized} with improved quality score")
         else:
             # 创建新模板
@@ -1404,7 +1760,8 @@ class CourseGenerationService:
                 variable_count=variable_count,
                 has_setup_update=has_setup_update,
                 visual_elements=visual_elements,
-                template_metadata=metadata
+                template_metadata=metadata,
+                status='pending'
             )
             self.generator.db.add(new_template)
             logger.info(f"Created new template {subject}/{topic_normalized} with score {quality_score.total_score}")
@@ -1672,7 +2029,7 @@ class CourseGenerationService:
 
     def detect_course_subject(self, course_title: str, outline: Optional[CourseOutline] = None) -> Dict[str, Any]:
         """
-        识别课程所属学科（基于标准文档）
+        识别课程所属学科（受控自治分类）
 
         Args:
             course_title: 课程标题
@@ -1683,135 +2040,213 @@ class CourseGenerationService:
                 'subject_id': 学科ID (physics, chemistry, etc.),
                 'subject_name': 学科名称 (物理学, 化学, etc.),
                 'confidence': 置信度 (0-1),
+                'is_science': 是否理科（决定是否生成模拟器）,
                 'matched_keywords': 匹配的关键词列表,
                 'color_scheme': 推荐配色方案,
-                'visualization_elements': 推荐可视化元素
+                'visualization_elements': 推荐可视化元素,
+                'decision': existing | new_subject_candidate,
+                'candidate_subject': 新学科候选信息（仅 decision=new_subject_candidate 时非空）
             }
         """
-        # 收集文本信息
-        text = course_title.lower()
-        if outline:
-            text += " " + outline.description.lower()
-            text += " " + " ".join(outline.core_concepts).lower()
-            for ch in outline.chapters[:3]:  # 只取前3章
-                text += " " + ch.title.lower()
-                text += " " + " ".join(ch.key_concepts).lower()
+        import re
 
-        # 学科关键词映射（扩展版）
-        subject_keywords = {
-            'physics': {
-                'name': '物理学',
-                'keywords': [
-                    '物理', '力学', '运动', '能量', '电磁', '光学', '热力学', '波动',
-                    'physics', 'force', 'motion', 'energy', 'electromagnetic', 'optics',
-                    '牛顿', '加速度', '速度', '质量', '摩擦', '引力', '惯性'
-                ]
+        # 收集文本信息（标题权重更高）
+        title_text = (course_title or "").lower().strip()
+        text = title_text
+        if outline:
+            text += " " + (outline.description or "").lower()
+            text += " " + " ".join(outline.core_concepts or []).lower()
+            for ch in outline.chapters[:3]:  # 只取前3章
+                text += " " + (ch.title or "").lower()
+                text += " " + " ".join(ch.key_concepts or []).lower()
+
+        subject_catalog: Dict[str, Dict[str, Any]] = {
+            "physics": {
+                "name": "物理学",
+                "is_science": True,
+                "keywords": ["物理", "大学物理", "力学", "电磁", "光学", "热力学", "牛顿", "加速度", "physics"],
             },
-            'chemistry': {
-                'name': '化学',
-                'keywords': [
-                    '化学', '反应', '分子', '原子', '化合', '元素', '溶液', '酸碱',
-                    'chemistry', 'reaction', 'molecule', 'atom', 'compound', 'element',
-                    '氧化', '还原', '催化', '离子', '价态'
-                ]
+            "chemistry": {
+                "name": "化学",
+                "is_science": True,
+                "keywords": ["化学", "有机化学", "无机化学", "分子", "原子", "反应", "chemistry"],
             },
-            'biology': {
-                'name': '生物学',
-                'keywords': [
-                    '生物', '细胞', '基因', '进化', '生态', '遗传', '蛋白质', 'dna',
-                    'biology', 'cell', 'gene', 'evolution', 'ecology', 'protein',
-                    '生命', '器官', '系统', '代谢', '光合作用'
-                ]
+            "biology": {
+                "name": "生物学",
+                "is_science": True,
+                "keywords": ["生物", "分子生物学", "细胞生物学", "遗传学", "生态学", "biology", "dna"],
             },
-            'mathematics': {
-                'name': '数学',
-                'keywords': [
-                    '数学', '函数', '方程', '几何', '代数', '微积分', '统计', '概率',
-                    'math', 'function', 'equation', 'geometry', 'algebra', 'calculus',
-                    '三角', '向量', '矩阵', '导数', '积分'
-                ]
+            "mathematics": {
+                "name": "数学",
+                "is_science": True,
+                "keywords": ["数学", "高等数学", "代数", "几何", "微积分", "函数", "mathematics", "math"],
             },
-            'history': {
-                'name': '历史',
-                'keywords': [
-                    '历史', '朝代', '事件', '文化', '革命', '战争', '帝国', '文明',
-                    'history', 'dynasty', 'event', 'civilization', 'war', 'revolution',
-                    '古代', '中世纪', '近代', '现代', '世纪'
-                ]
+            "engineering": {
+                "name": "工程",
+                "is_science": False,
+                "keywords": ["工程", "机械设计", "机械", "电气", "自动化", "通信", "土木", "engineering"],
             },
-            'geography': {
-                'name': '地理',
-                'keywords': [
-                    '地理', '地形', '气候', '地球', '地质', '地图', '板块', '环境',
-                    'geography', 'terrain', 'climate', 'earth', 'geology', 'plate',
-                    '河流', '山脉', '海洋', '大陆', '纬度', '经度'
-                ]
+            "computer_science": {
+                "name": "计算机科学",
+                "is_science": False,
+                "keywords": ["计算机", "数据结构", "算法", "编程", "软件工程", "computer science", "algorithm"],
             },
-            'computer_science': {
-                'name': '计算机科学',
-                'keywords': [
-                    '编程', '算法', '计算机', '代码', '软件', '数据结构', '网络',
-                    'programming', 'algorithm', 'computer', 'code', 'software', 'network',
-                    'python', 'java', '编码', '调试', '数据库', 'ai', '人工智能'
-                ]
+            "history": {
+                "name": "历史",
+                "is_science": False,
+                "keywords": ["历史", "中国近代史", "中国近现代史", "世界史", "history"],
             },
-            'medicine': {
-                'name': '医学',
-                'keywords': [
-                    '医学', '疾病', '治疗', '人体', '解剖', '药物', '病理', '诊断',
-                    'medicine', 'disease', 'treatment', 'anatomy', 'drug', 'pathology',
-                    '症状', '器官', '手术', '医疗', '健康'
-                ]
-            }
+            "economics": {
+                "name": "经济学",
+                "is_science": False,
+                "keywords": ["经济学", "宏观经济学", "微观经济学", "金融", "会计", "economics"],
+            },
+            "law": {
+                "name": "法学",
+                "is_science": False,
+                "keywords": ["法学", "法律", "宪法学", "宪法", "民法", "刑法", "law"],
+            },
+            "literature": {
+                "name": "文学",
+                "is_science": False,
+                "keywords": ["文学", "英语写作", "写作", "文艺", "literature"],
+            },
+            "psychology": {
+                "name": "心理学",
+                "is_science": False,
+                "keywords": ["心理学", "认知心理学", "心理健康", "psychology"],
+            },
+            "management": {
+                "name": "管理学",
+                "is_science": False,
+                "keywords": ["管理学", "企业战略管理", "企业管理", "工商管理", "management"],
+            },
+            "philosophy": {
+                "name": "哲学",
+                "is_science": False,
+                "keywords": ["哲学", "西方哲学史", "伦理学", "逻辑学", "philosophy"],
+            },
+            "geography": {
+                "name": "地理",
+                "is_science": False,
+                "keywords": ["地理", "自然地理学", "人文地理", "地质", "geography"],
+            },
+            "art": {
+                "name": "艺术",
+                "is_science": False,
+                "keywords": ["美术", "美术史", "西方美术史", "艺术", "art"],
+            },
+            "education": {
+                "name": "教育学",
+                "is_science": False,
+                "keywords": ["教育学", "教育心理学", "教学法", "课程论", "education"],
+            },
+            "medicine": {
+                "name": "医学",
+                "is_science": False,
+                "keywords": ["医学", "人体解剖学", "解剖学", "临床", "medicine"],
+            },
+            "agriculture": {
+                "name": "农学",
+                "is_science": False,
+                "keywords": ["农学", "作物栽培学", "作物栽培", "农业", "畜牧", "agriculture"],
+            },
         }
 
-        # 计算每个学科的匹配分数
-        scores = {}
-        matched = {}
-
-        for subject_id, subject_info in subject_keywords.items():
-            score = 0
-            keywords_matched = []
-
-            for keyword in subject_info['keywords']:
-                if keyword in text:
-                    score += 1
+        scores: Dict[str, float] = {}
+        matched: Dict[str, List[str]] = {}
+        for subject_id, subject_info in subject_catalog.items():
+            score = 0.0
+            keywords_matched: List[str] = []
+            for keyword in subject_info["keywords"]:
+                key = keyword.lower()
+                if key and key in text:
+                    weight = 2.0 if key in title_text else 1.0
+                    if len(key) >= 4:
+                        weight += 0.4
+                    score += weight
                     keywords_matched.append(keyword)
-
             if score > 0:
                 scores[subject_id] = score
                 matched[subject_id] = keywords_matched
 
-        # 如果没有匹配，返回默认学科（physics）
-        if not scores:
-            logger.info(f"No subject keywords matched for '{course_title}', using default 'physics'")
+        def _new_candidate() -> Dict[str, Any]:
+            normalized = re.sub(r"[^a-z0-9_]+", "_", title_text)
+            normalized = re.sub(r"_+", "_", normalized).strip("_")[:40] or "new_subject"
             return {
-                'subject_id': 'physics',
-                'subject_name': '物理学',
-                'confidence': 0.0,
-                'matched_keywords': [],
-                'color_scheme': self.standards_loader.get_subject_color_scheme('physics'),
-                'visualization_elements': self.standards_loader.get_recommended_elements_for_subject('physics')
+                "proposed_subject_id": normalized,
+                "proposed_subject_name": (course_title or "新学科").strip()[:24] or "新学科",
+                "reason": "low_confidence_or_no_match",
+                "evidence": [],
             }
 
-        # 获取得分最高的学科
-        best_subject_id = max(scores, key=scores.get)
-        best_score = scores[best_subject_id]
-        total_keywords = len(subject_keywords[best_subject_id]['keywords'])
+        def _build(subject_id: str, confidence: float, keywords: List[str], decision: str, candidate: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+            info = subject_catalog.get(subject_id, {"name": "通用", "is_science": False})
+            return {
+                "subject_id": subject_id,
+                "subject_name": info["name"] if subject_id in subject_catalog else "通用",
+                "is_science": bool(info.get("is_science", False)),
+                "confidence": float(max(0.0, min(1.0, confidence))),
+                "matched_keywords": keywords,
+                "color_scheme": self.standards_loader.get_subject_color_scheme(subject_id),
+                "visualization_elements": self.standards_loader.get_recommended_elements_for_subject(subject_id),
+                "decision": decision,
+                "candidate_subject": candidate,
+            }
 
-        # 计算置信度
-        confidence = min(1.0, best_score / (total_keywords * 0.3))  # 30%的关键词匹配即高置信度
+        if not scores:
+            logger.info("No subject keywords matched for '%s', fallback to general with candidate", course_title)
+            return _build(
+                subject_id="general",
+                confidence=0.0,
+                keywords=[],
+                decision="new_subject_candidate",
+                candidate=_new_candidate(),
+            )
 
-        logger.info(f"Detected subject '{best_subject_id}' for '{course_title}' (score: {best_score}, confidence: {confidence:.2f})")
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        best_subject_id, best_score = ranked[0]
+        second_score = ranked[1][1] if len(ranked) > 1 else 0.0
+        margin = (best_score - second_score) / max(best_score, 1.0)
+        coverage = min(1.0, best_score / max(2.0, len(subject_catalog[best_subject_id]["keywords"]) * 0.25))
+        confidence = round(max(0.0, min(1.0, 0.70 * coverage + 0.30 * max(0.0, margin))), 3)
+        decision = "existing"
 
-        return {
-            'subject_id': best_subject_id,
-            'subject_name': subject_keywords[best_subject_id]['name'],
-            'confidence': confidence,
-            'matched_keywords': matched[best_subject_id],
-            'color_scheme': self.standards_loader.get_subject_color_scheme(best_subject_id),
-            'visualization_elements': self.standards_loader.get_recommended_elements_for_subject(best_subject_id)
-        }
+        if confidence < 0.34 or (second_score > 0 and margin < 0.15 and best_score < 3.0):
+            candidate = _new_candidate()
+            candidate["evidence"] = matched.get(best_subject_id, [])[:5]
+            candidate["closest_existing_subject"] = best_subject_id
+            logger.info(
+                "Low-confidence subject classification for '%s': best=%s score=%.2f second=%.2f conf=%.2f -> general candidate",
+                course_title,
+                best_subject_id,
+                best_score,
+                second_score,
+                confidence,
+            )
+            return _build(
+                subject_id="general",
+                confidence=confidence,
+                keywords=matched.get(best_subject_id, [])[:8],
+                decision="new_subject_candidate",
+                candidate=candidate,
+            )
+
+        logger.info(
+            "Detected subject '%s' for '%s' (score=%.2f, second=%.2f, confidence=%.2f)",
+            best_subject_id,
+            course_title,
+            best_score,
+            second_score,
+            confidence,
+        )
+        return _build(
+            subject_id=best_subject_id,
+            confidence=confidence,
+            keywords=matched.get(best_subject_id, [])[:8],
+            decision=decision,
+            candidate=None,
+        )
 
     async def auto_classify_and_update_course(
         self,

@@ -3,8 +3,10 @@
 import { Card, CardHeader, CardContent, Button } from '@/components/ui';
 import { useState } from 'react';
 
+import type { TrainingPlan } from '@/lib/api/training';
+
 interface DailyScheduleProps {
-  plan: any;
+  plan: TrainingPlan;
 }
 
 export function DailySchedule({ plan }: DailyScheduleProps) {

@@ -1,0 +1,370 @@
+{
+  "generated_at": "2026-02-27T20:07:59.671654+00:00",
+  "regression_summary": {
+    "passed": 42,
+    "failed": 0,
+    "pass_rate": 1.0
+  },
+  "regression_results": [
+    {
+      "name": "phase1_record_event",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 17.208199999004137,
+      "detail": ""
+    },
+    {
+      "name": "phase1_my_state",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 5.055300003732555,
+      "detail": ""
+    },
+    {
+      "name": "phase1_weak_nodes",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 3.8534999985131435,
+      "detail": ""
+    },
+    {
+      "name": "phase2_generate_path",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 8.615800004918128,
+      "detail": ""
+    },
+    {
+      "name": "phase2_next_activity",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 3.9032999993651174,
+      "detail": ""
+    },
+    {
+      "name": "phase2_complete_path_node",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.904300003137905,
+      "detail": ""
+    },
+    {
+      "name": "phase2_path_history",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.8904999999213032,
+      "detail": ""
+    },
+    {
+      "name": "phase2_admin_emotion_current",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 1.6249999971478246,
+      "detail": ""
+    },
+    {
+      "name": "phase4_review_init",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 4.04260000505019,
+      "detail": ""
+    },
+    {
+      "name": "phase4_review_due",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 3.7052999978186563,
+      "detail": ""
+    },
+    {
+      "name": "phase4_review_stats",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 4.670500005886424,
+      "detail": ""
+    },
+    {
+      "name": "phase5_report_session",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 9.647300001233816,
+      "detail": ""
+    },
+    {
+      "name": "phase5_report_growth",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 8.448399996268563,
+      "detail": ""
+    },
+    {
+      "name": "phase5_report_history",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.9500999953597784,
+      "detail": ""
+    },
+    {
+      "name": "phase6_recommendation",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 18.758999998681247,
+      "detail": ""
+    },
+    {
+      "name": "phase7_progress_feedback",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 10.110899995197542,
+      "detail": ""
+    },
+    {
+      "name": "phase7_emotion_feedback",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 8.05459999537561,
+      "detail": ""
+    },
+    {
+      "name": "phase7_smart_report",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 11.759900000470225,
+      "detail": ""
+    },
+    {
+      "name": "phase10_cross_recommendations",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 6.981499995163176,
+      "detail": ""
+    },
+    {
+      "name": "phase10_concept_recommendations",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 3.720900000189431,
+      "detail": ""
+    },
+    {
+      "name": "phase11_course_recommended",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 9.597500000381842,
+      "detail": ""
+    },
+    {
+      "name": "phase11_course_path",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 6.449900000006892,
+      "detail": ""
+    },
+    {
+      "name": "phase11_course_progress",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.6183999943896197,
+      "detail": ""
+    },
+    {
+      "name": "phase13_adaptive_tasks",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 9.156800006167032,
+      "detail": ""
+    },
+    {
+      "name": "phase13_adaptive_path",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 5.441699999209959,
+      "detail": ""
+    },
+    {
+      "name": "phase13_strategy_weights",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.1890999996685423,
+      "detail": ""
+    },
+    {
+      "name": "phase15_goal_create",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 6.242700001166668,
+      "detail": ""
+    },
+    {
+      "name": "phase15_goal_list",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.4810000031720847,
+      "detail": ""
+    },
+    {
+      "name": "phase15_goal_progress",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 5.32339999335818,
+      "detail": ""
+    },
+    {
+      "name": "phase15_goal_update",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 5.164199996215757,
+      "detail": ""
+    },
+    {
+      "name": "phase15_habit_summary",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.3475999987567775,
+      "detail": ""
+    },
+    {
+      "name": "phase15_habit_calendar",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 2.3895000049378723,
+      "detail": ""
+    },
+    {
+      "name": "phase15_habit_bests",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 3.4567999973660335,
+      "detail": ""
+    },
+    {
+      "name": "phase15_predictive",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 29.396499994618353,
+      "detail": ""
+    },
+    {
+      "name": "phase15_forgetting_risks",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 3.559800003131386,
+      "detail": ""
+    },
+    {
+      "name": "phase15_bottlenecks",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 100.93819999747211,
+      "detail": ""
+    },
+    {
+      "name": "phase15_comparative",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 5.136200001288671,
+      "detail": ""
+    },
+    {
+      "name": "phase16_transfer_coeff",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 4.118899996683467,
+      "detail": ""
+    },
+    {
+      "name": "phase16_transfer_update",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 7.017800002358854,
+      "detail": ""
+    },
+    {
+      "name": "phase16_temporal_patterns",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 5.996900006721262,
+      "detail": ""
+    },
+    {
+      "name": "phase16_temporal_optimal",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 4.147799998463597,
+      "detail": ""
+    },
+    {
+      "name": "admin_knowledge_overview",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 3.824999999778811,
+      "detail": ""
+    }
+  ],
+  "concurrency_results": [
+    {
+      "endpoint": "knowledge_weak_nodes",
+      "requests": 40,
+      "concurrency": 10,
+      "failures": 0,
+      "success_rate": 1.0,
+      "rps": 384.31,
+      "latency_ms": {
+        "p50": 25.88,
+        "p95": 29.56,
+        "p99": 31.8,
+        "avg": 25.59,
+        "max": 31.8
+      }
+    },
+    {
+      "endpoint": "learning_next_activity",
+      "requests": 40,
+      "concurrency": 10,
+      "failures": 0,
+      "success_rate": 1.0,
+      "rps": 441.57,
+      "latency_ms": {
+        "p50": 22.71,
+        "p95": 24.27,
+        "p99": 25.57,
+        "avg": 22.22,
+        "max": 25.57
+      }
+    },
+    {
+      "endpoint": "recommendation_content",
+      "requests": 30,
+      "concurrency": 8,
+      "failures": 0,
+      "success_rate": 1.0,
+      "rps": 103.54,
+      "latency_ms": {
+        "p50": 67.37,
+        "p95": 107.25,
+        "p99": 107.99,
+        "avg": 73.65,
+        "max": 107.99
+      }
+    },
+    {
+      "endpoint": "admin_knowledge_overview",
+      "requests": 40,
+      "concurrency": 10,
+      "failures": 0,
+      "success_rate": 1.0,
+      "rps": 1934.84,
+      "latency_ms": {
+        "p50": 4.41,
+        "p95": 5.09,
+        "p99": 5.16,
+        "avg": 4.5,
+        "max": 5.16
+      }
+    }
+  ],
+  "targets": {
+    "api_p95_ms_target": 200,
+    "api_success_rate_target": 0.99
+  }
+}

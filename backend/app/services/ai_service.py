@@ -48,8 +48,8 @@ class AIService:
     def search_service(self):
         """Lazy load search service"""
         if self._search_service is None:
-            from app.services.tavily_service import get_tavily_service
-            self._search_service = get_tavily_service()
+            from app.services.deepseek_search_service import get_search_service
+            self._search_service = get_search_service()
         return self._search_service
 
     async def search_latest_info(self, topic: str, context_type: str = "general") -> str:

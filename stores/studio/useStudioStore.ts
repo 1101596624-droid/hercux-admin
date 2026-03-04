@@ -15,7 +15,9 @@ import type {
   LessonOutline,
   GenerationProgress,
   Lesson,
+  LessonStep,
 } from '@/types/studio';
+import type { V3CourseOutline } from '@/lib/api/studio';
 
 interface StudioState {
   // View state
@@ -40,13 +42,13 @@ interface StudioState {
   totalLessons: number;
   lessonsOutline: LessonOutline[];
   completedLessons: number[];
-  completedLessonsData: any[];  // 已完成课时的完整数据
-  generationMeta: any | null;   // 课程元数据
+  completedLessonsData: Lesson[];  // 已完成课时的完整数据
+  generationMeta: PackageMetaV2 | null;   // 课程元数据
   generationError: string | null;
   currentProcessor: ProcessorWithConfig | null;
 
   // V3 特有状态
-  v3Outline: any | null;  // V3 大纲
+  v3Outline: V3CourseOutline | null;  // V3 大纲
   v3CurrentAttempt: number;  // 当前章节尝试次数
   v3ReviewResults: Array<{
     index: number;
@@ -58,7 +60,7 @@ interface StudioState {
   }>;  // 审核结果历史
 
   // 流式步骤状态（用于实时渲染）
-  streamingSteps: any[];  // 当前课时已完成的步骤
+  streamingSteps: LessonStep[];  // 当前课时已完成的步骤
   streamingLessonInfo: { title: string; rationale?: string; learning_objectives?: string[] } | null;
 
   // Generated package
@@ -98,15 +100,15 @@ interface StudioActions {
   setCurrentLessonIndex: (index: number) => void;
   setTotalLessons: (total: number) => void;
   setLessonsOutline: (outline: LessonOutline[]) => void;
-  addCompletedLesson: (index: number, lessonData?: any) => void;
-  setCompletedLessonsData: (lessonsData: any[]) => void; // 修复Bug #3：直接设置完整章节列表
-  setGenerationMeta: (meta: any) => void;
+  addCompletedLesson: (index: number, lessonData?: Lesson) => void;
+  setCompletedLessonsData: (lessonsData: Lesson[]) => void; // 修复Bug #3：直接设置完整章节列表
+  setGenerationMeta: (meta: PackageMetaV2) => void;
   setGenerationError: (error: string | null) => void;
   setCurrentProcessor: (processor: ProcessorWithConfig | null) => void;
   setIsPaused: (isPaused: boolean) => void;  // 新增：设置暂停状态
 
   // 流式步骤
-  addStreamingStep: (step: any) => void;
+  addStreamingStep: (step: LessonStep) => void;
   setStreamingLessonInfo: (info: { title: string; rationale?: string; learning_objectives?: string[] } | null) => void;
   clearStreamingSteps: () => void;
 
@@ -204,7 +206,7 @@ export const useStudioStore = create<StudioStore>()(
       setCompletedLessonsData: (lessonsData) =>
         set(() => ({
           completedLessonsData: lessonsData,
-          completedLessons: lessonsData.map((_: any, idx: number) => idx),
+          completedLessons: lessonsData.map((_: Lesson, idx: number) => idx),
         })),  // 修复Bug #3：直接设置完整章节列表
       setGenerationMeta: (meta) => set({ generationMeta: meta }),
       setGenerationError: (error) => set({ generationError: error }),
@@ -339,8 +341,18 @@ export const getTotalCharCount = (sources: UploadedSource[]) => {
  */
 export const getAllSourceMaterial = (sources: UploadedSource[]) => {
   return sources
+    .filter((source) => source.text && source.text.trim().length > 0)
     .map((source) => `【来源: ${source.name}】\n${source.text}`)
     .join('\n\n---\n\n');
+};
+
+/**
+ * 获取已上传文件 ID 列表（生成时服务端再解析）
+ */
+export const getUploadSourceIds = (sources: UploadedSource[]) => {
+  return sources
+    .filter((source) => source.type === 'file' && source.uploadId)
+    .map((source) => source.uploadId as string);
 };
 
 /**

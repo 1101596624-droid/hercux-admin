@@ -9,9 +9,96 @@ import type {
   SaveCourseResponse,
   PublishCourseResponse,
   EditorChapter,
+  ComponentType,
+  NodeConfig,
+  SimulatorConfig,
   AIGuidanceConfig,
 } from '@/types/editor';
 import { DEFAULT_AI_GUIDANCE } from '@/types/editor';
+
+// Internal types for API response data transformation
+interface APINode {
+  id: number;
+  node_id?: string;
+  component_id?: string;
+  title?: string;
+  description?: string;
+  sequence?: number;
+  content?: string | Record<string, unknown>;
+  config?: string | Record<string, unknown>;
+}
+
+interface APINodeContent {
+  steps?: APIStep[];
+  [key: string]: unknown;
+}
+
+interface APIStep {
+  step_id?: string;
+  type?: string;
+  title?: string;
+  content?: { body?: string; key_points?: string[] };
+  diagram_spec?: {
+    type?: string;
+    diagram_id?: string;
+    image_url?: string;
+    description?: string;
+    annotations?: unknown[];
+    design_notes?: string;
+    [key: string]: unknown;
+  };
+  simulator_spec?: {
+    type?: string;
+    mode?: 'custom' | 'sdl' | 'html' | string;
+    custom_code?: string;
+    html_content?: string;
+    variables?: SimulatorConfig['variables'];
+    name?: string;
+    description?: string;
+    scenario?: { description?: string; [key: string]: unknown };
+    parameters?: Record<string, unknown>[];
+    inputs?: SimulatorConfig['inputs'];
+    outputs?: SimulatorConfig['outputs'];
+    initialState?: Record<string, unknown>;
+    interface_spec?: Record<string, unknown>;
+    evaluation_logic?: Record<string, unknown>;
+    pixi_config?: Record<string, unknown>;
+    sdl?: SimulatorConfig['sdl'];
+    instructions?: string[];
+    preset_id?: string;
+    iframe_url?: string;
+    [key: string]: unknown;
+  };
+  video_spec?: {
+    video_id?: string;
+    video_url?: string;
+    duration?: string;
+    [key: string]: unknown;
+  };
+  assessment_spec?: { questions?: APIAssessmentQuestion[]; [key: string]: unknown };
+  ai_spec?: { opening_message?: string; conversation_goals?: Array<{ goal: string }>; max_turns?: number };
+  [key: string]: unknown;
+}
+
+interface APIAssessmentQuestion {
+  question: string;
+  options?: string[];
+  correct?: string;
+  explanation?: string;
+}
+
+interface EditorStepOutput {
+  step_id: string;
+  type: string;
+  title: string;
+  content?: { body: string; key_points: string[] };
+  diagram_spec?: Record<string, unknown>;
+  simulator_spec?: SimulatorConfig | Record<string, unknown>;
+  video_spec?: NodeConfig['videoConfig'] | Record<string, unknown>;
+  assessment_spec?: Record<string, unknown>;
+  ai_spec?: NodeConfig['aiTutorConfig'] | Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 // ============================================
 // Course Editor API
@@ -106,7 +193,7 @@ export const realEditorAPI = {
 
     // 按节点创建章节（每个 lesson 节点作为一个章节）
     if (nodesData.nodes && nodesData.nodes.length > 0) {
-      nodesData.nodes.forEach((node: any, index: number) => {
+      nodesData.nodes.forEach((node: APINode, index: number) => {
         // 解析节点内容（数据库已统一为jsonb类型，不再需要双重解析）
         let content = {};
         try {
@@ -140,10 +227,10 @@ export const realEditorAPI = {
         };
 
         // 如果有 steps，将每个 step 作为一个 section
-        const steps = (content as any).steps || [];
-        steps.forEach((step: any, stepIndex: number) => {
-          const sectionConfig: any = {
-            type: step.type || 'text_content',
+        const steps = (content as APINodeContent).steps || [];
+        steps.forEach((step: APIStep, stepIndex: number) => {
+          const sectionConfig: NodeConfig = {
+            type: (step.type as ComponentType) || 'text_content',
           };
 
           // 根据 step 类型设置对应的配置
@@ -169,8 +256,8 @@ export const realEditorAPI = {
               id: step.step_id || `sim-${stepIndex}`,
               // 如果有 custom_code 则使用 custom 模式，如果有 sdl 则使用 interactive 类型
               type: step.simulator_spec.mode === 'custom' ? 'custom' :
-                    step.simulator_spec.sdl ? 'interactive' : (step.simulator_spec.type || 'preset'),
-              mode: step.simulator_spec.mode,
+                    step.simulator_spec.sdl ? 'interactive' : (step.simulator_spec.type || 'preset') as SimulatorConfig['type'],
+              mode: step.simulator_spec.mode as SimulatorConfig['mode'],
               custom_code: step.simulator_spec.custom_code,
               variables: step.simulator_spec.variables,
               name: step.simulator_spec.name || step.title || '',
@@ -199,11 +286,11 @@ export const realEditorAPI = {
 
           if (step.assessment_spec) {
             sectionConfig.quizConfig = {
-              questions: (step.assessment_spec.questions || []).map((q: any, idx: number) => ({
+              questions: (step.assessment_spec.questions || []).map((q: APIAssessmentQuestion, idx: number) => ({
                 id: `q-${idx}`,
                 question: q.question,
                 options: q.options || [],
-                correctIndex: q.options?.indexOf(q.correct) ?? 0,
+                correctIndex: q.options?.indexOf(q.correct ?? '') ?? 0,
                 explanation: q.explanation,
               })),
               passingScore: 60,
@@ -213,9 +300,9 @@ export const realEditorAPI = {
 
           if (step.ai_spec) {
             sectionConfig.aiTutorConfig = {
-              openingMessage: step.ai_spec.opening_message,
-              conversationGoals: step.ai_spec.conversation_goals?.map((g: any) => g.goal) || [],
-              maxTurns: step.ai_spec.max_turns,
+              openingMessage: step.ai_spec.opening_message || '',
+              conversationGoals: step.ai_spec.conversation_goals?.map((g: { goal: string }) => g.goal) || [],
+              maxTurns: step.ai_spec.max_turns ?? 10,
             };
           }
 
@@ -224,7 +311,7 @@ export const realEditorAPI = {
             chapterId: chapter.id,
             title: step.title || `步骤 ${stepIndex + 1}`,
             order: stepIndex,
-            componentType: step.type || 'text_content',
+            componentType: (step.type as ComponentType) || 'text_content',
             config: sectionConfig,
           });
         });
@@ -286,7 +373,7 @@ export const realEditorAPI = {
 
         // 将章节的 sections 转换为 steps 格式
         const steps = chapter.sections.map((section, stepIndex) => {
-          const step: any = {
+          const step: EditorStepOutput = {
             step_id: section.id,
             type: section.componentType || 'text_content',
             title: section.title,
@@ -342,7 +429,7 @@ export const realEditorAPI = {
         };
 
         // 查找对应的现有节点
-        const existingNode = existingNodes.find((n: any) =>
+        const existingNode = existingNodes.find((n: APINode) =>
           n.node_id === `${courseId}_${chapter.id}` ||
           n.component_id === chapter.id ||
           n.sequence === i + 1
@@ -405,7 +492,7 @@ export const realEditorAPI = {
 
         // 将章节的 sections 转换为 steps 格式
         const steps = chapter.sections.map((section, stepIndex) => {
-          const step: any = {
+          const step: EditorStepOutput = {
             step_id: section.id,
             type: section.componentType || 'text_content',
             title: section.title,
@@ -626,7 +713,6 @@ export const mockEditorAPI = {
 
   async saveCourse(courseId: string, request: SaveCourseRequest): Promise<SaveCourseResponse> {
     await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY));
-    console.log('Mock save course:', courseId, request);
     return {
       success: true,
       courseId,
@@ -636,7 +722,6 @@ export const mockEditorAPI = {
 
   async createCourse(request: SaveCourseRequest): Promise<{ courseId: string }> {
     await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY));
-    console.log('Mock create course:', request);
     return {
       courseId: `course-${Date.now()}`,
     };
@@ -644,7 +729,6 @@ export const mockEditorAPI = {
 
   async publishCourse(courseId: string): Promise<PublishCourseResponse> {
     await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY));
-    console.log('Mock publish course:', courseId);
     return {
       success: true,
       publishedAt: new Date().toISOString(),

@@ -26,7 +26,7 @@ export interface UpdateProgressRequest {
 
 export interface CompleteNodeRequest {
   time_spent_seconds?: number;
-  result_data?: any;
+  result_data?: Record<string, unknown>;
 }
 
 export const progressAPI = {

@@ -205,7 +205,7 @@ export default function SettingsPage() {
   };
 
   // 更新设置
-  const updateSetting = <K extends keyof AllSettings>(section: K, key: keyof AllSettings[K], value: any) => {
+  const updateSetting = <K extends keyof AllSettings>(section: K, key: keyof AllSettings[K], value: AllSettings[K][keyof AllSettings[K]]) => {
     if (!settings) return;
     setSettings({
       ...settings,

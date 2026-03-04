@@ -75,6 +75,8 @@ export default function AnalyticsPage() {
     return change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`;
   };
 
+  const activeUserRate = overview.totalUsers > 0 ? ((overview.activeUsers / overview.totalUsers) * 100).toFixed(1) : '0.0';
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -135,7 +137,7 @@ export default function AnalyticsPage() {
         <StatCard
           title="活跃用户"
           value={overview.activeUsers.toLocaleString()}
-          subtitle={`占总用户 ${((overview.activeUsers / overview.totalUsers) * 100).toFixed(1)}%`}
+          subtitle={`占总用户 ${activeUserRate}%`}
           icon={
             <svg className="w-6 h-6 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />

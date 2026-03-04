@@ -22,7 +22,7 @@ export interface TrainingPlan {
   current_phase: string;
   weekly_hours: number;
   primary_goal: string;
-  plan_data: any; // JSON structure with weekly plans
+  plan_data: Record<string, unknown>; // JSON structure with weekly plans
   created_at: string;
   updated_at: string | null;
 }
@@ -30,7 +30,7 @@ export interface TrainingPlan {
 export interface AdjustPlanRequest {
   plan_id: number;
   adjustment_request: string;
-  context?: any;
+  context?: Record<string, unknown>;
 }
 
 export const trainingAPI = {
@@ -80,7 +80,7 @@ export const trainingAPI = {
   /**
    * Get plan recommendations based on user profile
    */
-  async getRecommendations(): Promise<any> {
+  async getRecommendations(): Promise<Record<string, unknown>> {
     return apiClient.get('/v1/planner/recommendations');
   },
 };

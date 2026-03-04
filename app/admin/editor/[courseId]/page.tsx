@@ -16,7 +16,7 @@ import { AIGuidancePanel } from '@/components/editor/right/AIGuidancePanel';
 import { Button } from '@/components/ui/Button';
 import { DIFFICULTY_LABELS, DIFFICULTY_COLORS, type CourseDifficulty } from '@/types/editor';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
 
 export default function CourseEditorPage() {
   const params = useParams();
@@ -82,9 +82,7 @@ export default function CourseEditorPage() {
       setLocalLoading(true);
       setError(null);
       try {
-        console.log('Fetching course:', courseId);
         const data = await courseEditorAPI.getCourse(courseId);
-        console.log('Course data received:', data);
         loadCourse(courseId, {
           title: data.title,
           coverImage: data.coverImage,

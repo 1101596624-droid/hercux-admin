@@ -4,7 +4,15 @@
  * 基于 HERCU 课程包标准规范 v2.0
  */
 
-import type { StepType, ComplexityLevel } from './coursePackage';
+import type {
+  StepType,
+  ComplexityLevel,
+  TimelineData,
+  DecisionData,
+  ComparisonData,
+  ConceptMapData,
+} from './coursePackage';
+import type { SceneDefinition } from './simulator-engine';
 
 // ============================================
 // Component Types
@@ -147,20 +155,38 @@ export interface SimulatorOutputConfig {
   color?: string;    // 进度条颜色
 }
 
+// 文科模拟器配置兼容类型（供旧编辑器 API 与页面复用）
+export type TimelineConfig = TimelineData;
+export type DecisionScenarioConfig = DecisionData;
+export type ComparisonConfig = ComparisonData;
+export type ConceptMapConfig = ConceptMapData;
+
+// SDL 场景类型别名（供模板系统使用）
+export type SDLScene = SceneDefinition;
+
 /** 模拟器配置（新版本：仅支持 custom 和 iframe） */
 export interface SimulatorConfig {
-  type: 'custom' | 'iframe';
+  id?: string;
+  type: 'custom' | 'iframe' | 'preset' | 'interactive' | 'timeline' | 'decision' | 'comparison' | 'concept-map';
   name: string;
   description: string;
-  // 模式：sdl（默认）或 custom（自定义代码）
-  mode?: 'sdl' | 'custom';
+  thumbnail?: string;
+  // 模式：sdl（默认）或 custom/html（自定义代码）
+  mode?: 'sdl' | 'custom' | 'html';
   // 自定义代码模式
   custom_code?: string;
+  html_content?: string;
   // 输入输出（保留向后兼容）
   inputs: SimulatorInputConfig[];
   outputs: SimulatorOutputConfig[];
   // 通用
   iframeUrl?: string;
+  presetId?: string;
+  parameters?: Record<string, unknown>[];
+  initialState?: Record<string, unknown>;
+  interfaceSpec?: Record<string, unknown>;
+  evaluationLogic?: Record<string, unknown>;
+  pixi_config?: Record<string, unknown>;
   instructions?: string[];
   // 变量配置（用于自定义代码模式）
   variables?: Array<{
@@ -174,36 +200,10 @@ export interface SimulatorConfig {
     unit?: string;
   }>;
   // SDL 场景配置（保留向后兼容）
-  scenario?: {
+  scenario?: Record<string, unknown> & {
     description?: string;
-    [key: string]: any;
   };
-  sdl?: {
-    version: string;
-    id: string;
-    name: string;
-    description: string;
-    canvas: {
-      width: number;
-      height: number;
-      backgroundColor: string;
-      renderer: string;
-      antialias: boolean;
-    };
-    assets: {
-      icons: any[];
-      images: any[];
-      sounds: any[];
-      fonts: any[];
-    };
-    elements: any[];
-    timelines?: any[];
-    interactions?: any[];
-    physics?: any;
-    variables?: any[];
-    evaluation?: any;
-    aiInterface?: any;
-  };
+  sdl?: SDLScene | Record<string, unknown>;
 }
 
 // ============================================

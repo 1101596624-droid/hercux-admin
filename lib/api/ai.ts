@@ -15,13 +15,13 @@ export interface AIChatRequest {
       role: 'user' | 'assistant';
       content: string;
     }>;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
 export interface AIChatResponse {
   response: string;
-  context_used?: any;
+  context_used?: Record<string, unknown>;
 }
 
 export interface ChatHistory {
@@ -30,7 +30,7 @@ export interface ChatHistory {
   node_id: string;
   message: string;
   response: string;
-  context: any;
+  context: Record<string, unknown>;
   created_at: string;
 }
 
@@ -60,7 +60,7 @@ export const aiAPI = {
   /**
    * Get AI suggestions based on current context
    */
-  async getSuggestions(nodeId: string, context?: any): Promise<{ suggestions: string[] }> {
+  async getSuggestions(nodeId: string, context?: Record<string, unknown>): Promise<{ suggestions: string[] }> {
     return apiClient.post('/v1/ai/suggestions', { node_id: nodeId, context });
   },
 };

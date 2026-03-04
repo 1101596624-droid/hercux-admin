@@ -18,6 +18,7 @@ from .standards_loader import get_standards_loader
 from .template_service import TemplateService
 
 logger = logging.getLogger(__name__)
+LLM_OUTPUT_TOKEN_LIMIT = 8192
 
 # Canvas 2D API白名单 (2026-02-11: HTML格式使用Canvas 2D API)
 CANVAS_2D_DRAWING_APIS = [
@@ -300,6 +301,12 @@ class ChapterGenerator:
         self.standards_loader = get_standards_loader()  # 新增：标准加载器
         self.db = db  # 数据库会话，用于模板学习
 
+    def _llm_max_tokens(self, requested: Optional[int] = None) -> int:
+        """统一限制单次输出token上限为8192。"""
+        if requested is None:
+            return LLM_OUTPUT_TOKEN_LIMIT
+        return max(1, min(requested, LLM_OUTPUT_TOKEN_LIMIT))
+
     async def generate_chapter(
         self,
         prompt: str,
@@ -310,7 +317,7 @@ class ChapterGenerator:
         response = await self.claude_service.generate_raw_response(
             prompt=prompt,
             system_prompt=system_prompt,
-            max_tokens=8000
+            max_tokens=self._llm_max_tokens(8000)
         )
 
         return self._parse_chapter(response)
@@ -325,7 +332,7 @@ class ChapterGenerator:
         async for chunk in self.claude_service.generate_stream(
             prompt=prompt,
             system_prompt=system_prompt,
-            max_tokens=8000
+            max_tokens=self._llm_max_tokens(8000)
         ):
             yield chunk
 
@@ -955,7 +962,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                max_tokens=6000
+                max_tokens=self._llm_max_tokens(6000)
             )
             logger.info(f"[Producer] Raw response length: {len(response)}, first 200 chars: {response[:200]}")
             cleaned = self._clean_simulator_code(response)
@@ -1050,7 +1057,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                max_tokens=6000
+                max_tokens=self._llm_max_tokens(6000)
             )
             return self._clean_simulator_code(response)
         except Exception as e:
@@ -1288,7 +1295,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=enhanced_prompt,
                 system_prompt=system_prompt,
-                max_tokens=4000
+                max_tokens=self._llm_max_tokens(4000)
             )
 
             # 4. 清理和解析内容
@@ -1339,7 +1346,7 @@ class ChapterGenerator:
         response = await self.claude_service.generate_raw_response(
             prompt=basic_prompt,
             system_prompt=system_prompt,
-            max_tokens=4000
+            max_tokens=self._llm_max_tokens(4000)
         )
 
         # 清理内容
@@ -1891,7 +1898,7 @@ class ChapterGenerator:
                 response = await self.claude_service.generate_raw_response(
                     prompt=prompt,
                     system_prompt=system_prompt,
-                    max_tokens=6000
+                    max_tokens=self._llm_max_tokens(6000)
                 )
 
                 code = self._clean_simulator_code(response)
@@ -2806,7 +2813,7 @@ class ChapterGenerator:
         response = await self.claude_service.generate_raw_response(
             prompt=prompt,
             system_prompt=system_prompt,
-            max_tokens=4000
+            max_tokens=self._llm_max_tokens(4000)
         )
 
         return self._parse_single_step(response, step_type)
@@ -3038,7 +3045,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是教育技术评估专家，专门评估教学模拟器质量。请客观公正地评分，并给出建设性意见。",
-                max_tokens=500
+                max_tokens=self._llm_max_tokens(500)
             )
 
             # 解析JSON
@@ -3128,7 +3135,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是教育内容评估专家，专门评估教学文本质量。请客观公正地评分，并给出建设性意见。",
-                max_tokens=500
+                max_tokens=self._llm_max_tokens(500)
             )
 
             agent_score, feedback = self._parse_agent_score(response, default_score=24)
@@ -3206,7 +3213,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是教育测评评估专家，专门评估测验题目质量。请客观公正地评分，并给出建设性意见。",
-                max_tokens=500
+                max_tokens=self._llm_max_tokens(500)
             )
 
             agent_score, feedback = self._parse_agent_score(response, default_score=12)
@@ -3346,7 +3353,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是教育可视化评估专家，专门评估图文教学内容质量。请客观公正地评分，并给出建设性意见。",
-                max_tokens=500
+                max_tokens=self._llm_max_tokens(500)
             )
 
             agent_score, feedback = self._parse_agent_score(response, default_score=12)
@@ -3430,7 +3437,7 @@ class ChapterGenerator:
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是AI教育对话系统评估专家，专门评估AI导师教学质量。请客观公正地评分，并给出建设性意见。",
-                max_tokens=500
+                max_tokens=self._llm_max_tokens(500)
             )
 
             agent_score, feedback = self._parse_agent_score(response, default_score=12)
@@ -3514,7 +3521,7 @@ Agent评分：{agent_score}/40（Agent评估教学效果，权重提升到40%）
             response = await self.claude_service.generate_raw_response(
                 prompt=prompt,
                 system_prompt="你是AI监督者，负责质量把关。请客观评估，既要保证质量，也要避免过于严苛。对于结构性问题选择reject重做，对于细节问题选择fix修复。",
-                max_tokens=300
+                max_tokens=self._llm_max_tokens(300)
             )
 
             # 解析JSON
@@ -3747,3 +3754,4 @@ class GeneratorPromptBuilder:
         }
 
         return base_prompt + processor_prompts.get(processor_id, '')
+

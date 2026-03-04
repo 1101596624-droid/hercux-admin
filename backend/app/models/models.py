@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Float, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Float, Boolean, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -163,6 +163,9 @@ class SimulatorTemplate(Base):
     # Visual and interaction features
     visual_elements = Column(JSON)  # ["grid", "vectors", "particles", "labels"]
 
+    # Legacy metadata column (DB has NOT NULL constraint, 'metadata' is reserved in SQLAlchemy)
+    template_meta = Column('metadata', JSON, nullable=False, default=dict, server_default='{}')
+
     # Template metadata for learning
     template_metadata = Column(JSON)  # {
         # "common_apis": ["fillRect", "arc", "beginPath", "stroke"],
@@ -171,6 +174,8 @@ class SimulatorTemplate(Base):
         # "interaction_types": ["mouse_drag", "slider_control"],
         # "structure_insights": "Uses modular state management with clear separation"
     # }
+
+    status = Column(String(20), nullable=False, default='pending', server_default='pending', index=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -186,6 +191,7 @@ class LearningProgress(Base):
     status = Column(Enum(NodeStatus, values_callable=lambda x: [e.value for e in x]), default=NodeStatus.LOCKED, index=True)
     completion_percentage = Column(Float, default=0.0)
     time_spent_seconds = Column(Integer, default=0)
+    current_step_index = Column(Integer, default=0)
     last_accessed = Column(DateTime(timezone=True), index=True)
     completed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -840,3 +846,555 @@ class PatternApplication(Base):
     success = Column(Boolean, nullable=False, default=True)  # Whether application was successful
 
     applied_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ============================================
+# Generation Task Queue (并发课程生成任务队列)
+# ============================================
+
+class GenerationTaskStatus(str, enum.Enum):
+    """课程生成任务状态"""
+    PENDING = "pending"          # 排队中
+    RUNNING = "running"          # 生成中
+    COMPLETED = "completed"      # 已完成
+    FAILED = "failed"            # 失败
+    CANCELLED = "cancelled"      # 已取消
+
+
+class GenerationTask(Base):
+    """课程生成任务 (2026-02-23)
+
+    支持多管理员并发生成课程，任务队列化管理。
+    """
+    __tablename__ = "generation_tasks"
+
+    id = Column(String(36), primary_key=True)  # UUID
+    admin_id = Column(Integer, nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+
+    # 生成参数
+    course_title = Column(String(500), nullable=False)
+    source_material = Column(Text)
+    source_info = Column(Text)
+    processor_id = Column(String(100))
+    processor_prompt = Column(Text)
+
+    # 进度信息
+    progress_pct = Column(Integer, default=0)          # 0-100
+    current_phase = Column(String(100))                 # 当前阶段描述
+    chapters_completed = Column(Integer, default=0)     # 已完成章节数
+    chapters_total = Column(Integer, default=0)         # 总章节数
+
+    # 结果
+    package_id = Column(String(36))                     # 生成完成后的课程包ID
+    error_message = Column(Text)                        # 失败原因
+
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
+
+# ============================================
+# BKT Knowledge Tracking Models (知识追踪)
+# ============================================
+
+class Subject(Base):
+    """学科表"""
+    __tablename__ = "subjects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    knowledge_nodes = relationship("KnowledgeNode", back_populates="subject")
+
+
+class KnowledgeNode(Base):
+    """知识节点"""
+    __tablename__ = "knowledge_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False, index=True)
+    course_node_id = Column(Integer, ForeignKey("course_nodes.id"), nullable=True)
+    code = Column(String(100), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    difficulty = Column(Float, default=0.5)
+    parent_code = Column(String(100))
+    prerequisites = Column(JSON, default=[])
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    subject = relationship("Subject", back_populates="knowledge_nodes")
+    course_node = relationship("CourseNode", foreign_keys=[course_node_id])
+
+
+class StudentKnowledgeState(Base):
+    """学生知识状态"""
+    __tablename__ = "student_knowledge_state"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False, index=True)
+    mastery = Column(Float, default=0.1)
+    stability = Column(Float, default=0.5)
+    last_practice_at = Column(DateTime(timezone=True))
+    practice_count = Column(Integer, default=0)
+    correct_count = Column(Integer, default=0)
+    streak = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class StudentEvent(Base):
+    """学生行为事件"""
+    __tablename__ = "student_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False, index=True)
+    event_type = Column(String(50), nullable=False)
+    is_correct = Column(Integer)
+    response_time_ms = Column(Integer)
+    event_data = Column(JSON, default={})
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StudentMisconception(Base):
+    """学生错误概念"""
+    __tablename__ = "student_misconceptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False, index=True)
+    misconception = Column(Text, nullable=False)
+    frequency = Column(Integer, default=1)
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StudentEmotionState(Base):
+    """学生情感状态（Phase 2 情感感知）"""
+    __tablename__ = "student_emotion_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    emotion_type = Column(String(50), nullable=False)  # frustration, anxiety, boredom, focus, excitement
+    intensity = Column(Float, default=0.0)  # 0~1 情感强度
+    confidence = Column(Float, default=0.5)  # 检测置信度
+    trigger_event_id = Column(Integer, ForeignKey("student_events.id"))
+    trigger_type = Column(String(50))  # streak_fail, low_mastery, fast_correct, long_pause
+    context = Column(JSON, default={})  # 附加上下文
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StudentLearningPath(Base):
+    """学生学习路径（Phase 2 自适应路径规划）"""
+    __tablename__ = "student_learning_paths"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False, index=True)
+    status = Column(String(20), default="active")  # active, completed, expired
+    session_duration = Column(Integer, default=30)  # 计划学习时长（分钟）
+    path_items = Column(JSON, default=[])  # 路径项列表
+    emotion_snapshot = Column(String(50))  # 生成时的情感状态快照
+    total_nodes = Column(Integer, default=0)
+    completed_nodes = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True))
+
+
+class ReviewSchedule(Base):
+    """间隔复习调度表（Phase 4 FSRS）"""
+    __tablename__ = "review_schedule"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False)
+    fsrs_stability = Column(Float, default=1.0)       # FSRS 稳定性
+    fsrs_difficulty = Column(Float, default=5.0)       # FSRS 难度 (1~10)
+    next_review_at = Column(DateTime(timezone=True), nullable=False)
+    last_review_at = Column(DateTime(timezone=True))
+    last_review_type = Column(String(30))              # flashcard, mini_quiz, simulator_replay, explain_to_ai
+    last_rating = Column(Integer)                      # 1=Again, 2=Hard, 3=Good, 4=Easy
+    review_count = Column(Integer, default=0)
+    interval_days = Column(Float, default=1.0)         # 当前复习间隔（天）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_review_user_due", "user_id", "next_review_at"),
+        UniqueConstraint("user_id", "knowledge_node_id", name="uq_review_user_node"),
+    )
+
+
+class LearningReport(Base):
+    """学习报告（Phase 5 元认知）"""
+    __tablename__ = "learning_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    report_type = Column(String(20), nullable=False)  # session, weekly, monthly
+    period_start = Column(DateTime(timezone=True))
+    period_end = Column(DateTime(timezone=True))
+    summary = Column(JSON, default={})       # 报告摘要数据
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MetacognitiveLog(Base):
+    """元认知日志（Phase 5）"""
+    __tablename__ = "metacognitive_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    trigger = Column(String(50), nullable=False)  # after_practice_set, session_end, etc.
+    prompt_text = Column(Text, nullable=False)
+    student_response = Column(Text)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StudentConversation(Base):
+    """学生对话记录（Phase 3 诊断式Tutor）"""
+    __tablename__ = "student_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False)
+    session_id = Column(String(64), nullable=False, index=True)  # 对话会话ID
+    tutor_phase = Column(String(20), default="understand")  # understand/diagnose/scaffold/explain/verify/extend
+    messages = Column(JSON, default=[])  # [{role, content, timestamp}]
+    diagnosis = Column(JSON, default={})  # 诊断结果
+    emotion_snapshot = Column(String(50))  # 对话时的情感状态
+    mastery_before = Column(Float)  # 对话前mastery
+    mastery_after = Column(Float)  # 对话后mastery
+    mode = Column(String(20), default="adaptive")  # adaptive/diagnostic/remedial/challenge
+    turn_count = Column(Integer, default=0)
+    resolved = Column(Boolean, default=False)  # 问题是否解决
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_conv_user_session", "user_id", "session_id"),
+        Index("idx_conv_user_node", "user_id", "knowledge_node_id"),
+    )
+
+
+class CourseRecommendation(Base):
+    """课程推荐关联表（Phase 6 推荐系统）"""
+    __tablename__ = "course_recommendations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    target_course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    relation_type = Column(String(30), nullable=False)  # prerequisite/complementary/advanced/cross_discipline
+    weight = Column(Float, default=1.0)  # 关联强度 0~1
+    reason = Column(String(500))  # 推荐理由
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_rec_source", "source_course_id"),
+        Index("idx_rec_target", "target_course_id"),
+        UniqueConstraint("source_course_id", "target_course_id", "relation_type", name="uq_course_rec"),
+    )
+
+
+class RecommendedLesson(Base):
+    """推荐小课堂记录（Phase 6）"""
+    __tablename__ = "recommended_lessons"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False)
+    course_node_id = Column(Integer, ForeignKey("course_nodes.id"))
+    reason = Column(String(500))  # 推荐理由
+    priority = Column(Integer, default=1)  # 1=最高
+    mastery_at_recommend = Column(Float)  # 推荐时的掌握度
+    emotion_at_recommend = Column(String(50))  # 推荐时的情感状态
+    is_viewed = Column(Boolean, default=False)
+    is_completed = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    viewed_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("idx_rec_lesson_user", "user_id", "created_at"),
+    )
+
+
+class RecommendedGrinder(Base):
+    """推荐做题家题目记录（Phase 6）"""
+    __tablename__ = "recommended_grinders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False)
+    reason = Column(String(500))  # 推荐理由
+    priority = Column(Integer, default=1)
+    suggested_difficulty = Column(Float, default=0.5)
+    mastery_at_recommend = Column(Float)
+    emotion_at_recommend = Column(String(50))
+    misconception_id = Column(Integer, ForeignKey("student_misconceptions.id"))
+    is_viewed = Column(Boolean, default=False)
+    is_completed = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    viewed_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("idx_rec_grinder_user", "user_id", "created_at"),
+    )
+
+
+class StudentAssessment(Base):
+    """学生评估记录（Phase 7 智能评估与自适应反馈）"""
+    __tablename__ = "student_assessments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    knowledge_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"))
+    mastery = Column(Float)  # 综合掌握度
+    stability = Column(Float)  # 记忆稳定性
+    frustration_level = Column(Float, default=0.0)  # 挫败感 0~1
+    anxiety_level = Column(Float, default=0.0)  # 焦虑度 0~1
+    focus_level = Column(Float, default=0.5)  # 专注度 0~1
+    assessment_type = Column(String(30), default="auto")  # auto/manual/session_end
+    feedback = Column(Text)  # 自适应反馈文本
+    strategy_suggestions = Column(JSON, default=[])  # 学习策略建议列表
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_assess_user", "user_id", "created_at"),
+    )
+
+
+class StudentMultiTaskPlan(Base):
+    """多任务学习计划（Phase 8 多任务学习与多目标优化）"""
+    __tablename__ = "student_multi_task_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    objective_weights = Column(JSON, default={"mastery": 0.35, "retention": 0.25, "emotion": 0.2, "efficiency": 0.2})
+    student_snapshot = Column(JSON, default={})
+    tasks = Column(JSON, default=[])
+    optimization_summary = Column(JSON, default={})
+    status = Column(String(20), default="active")
+    total_tasks = Column(Integer, default=0)
+    completed_tasks = Column(Integer, default=0)
+    session_minutes = Column(Integer, default=30)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("idx_mtp_user", "user_id", "created_at"),
+        Index("idx_mtp_status", "user_id", "status"),
+    )
+
+
+class SubjectRelation(Base):
+    """学科间关系（Phase 9 学科知识图谱）"""
+    __tablename__ = "subject_relations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    target_subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    relation_type = Column(String(30), nullable=False)  # prerequisite/extension/cross_discipline/complementary
+    weight = Column(Float, default=1.0)
+    transfer_coefficient = Column(Float, default=0.3)  # 学习迁移系数 0~1
+    description = Column(Text)
+    shared_concepts = Column(JSON, default=[])
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    source_subject = relationship("Subject", foreign_keys=[source_subject_id])
+    target_subject = relationship("Subject", foreign_keys=[target_subject_id])
+
+    __table_args__ = (
+        Index("idx_sr_source", "source_subject_id"),
+        Index("idx_sr_target", "target_subject_id"),
+        UniqueConstraint("source_subject_id", "target_subject_id", "relation_type", name="uq_subject_rel"),
+    )
+
+
+class ConceptBridge(Base):
+    """知识节点级跨学科概念桥接（Phase 10）"""
+    __tablename__ = "concept_bridges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False)
+    target_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False)
+    concept_name = Column(String(200), nullable=False)
+    transfer_weight = Column(Float, default=0.5)  # 概念迁移权重
+    description = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    source_node = relationship("KnowledgeNode", foreign_keys=[source_node_id])
+    target_node = relationship("KnowledgeNode", foreign_keys=[target_node_id])
+
+    __table_args__ = (
+        Index("idx_cb_source", "source_node_id"),
+        Index("idx_cb_target", "target_node_id"),
+        Index("idx_cb_concept", "concept_name"),
+        UniqueConstraint("source_node_id", "target_node_id", "concept_name", name="uq_concept_bridge"),
+    )
+
+
+class CourseRelation(Base):
+    """课程间结构关系（Phase 11）"""
+    __tablename__ = "course_relations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    target_course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    relation_type = Column(String(30), nullable=False)  # prerequisite/advanced/parallel/supplementary
+    weight = Column(Float, default=1.0)
+    description = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_cr_source", "source_course_id"),
+        Index("idx_cr_target", "target_course_id"),
+        UniqueConstraint("source_course_id", "target_course_id", "relation_type", name="uq_course_rel"),
+    )
+
+
+class StudentCourseProgress(Base):
+    """学生课程级进度聚合（Phase 11）"""
+    __tablename__ = "student_course_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    total_nodes = Column(Integer, default=0)
+    completed_nodes = Column(Integer, default=0)
+    completion_pct = Column(Float, default=0.0)
+    avg_mastery = Column(Float, default=0.0)
+    total_time_seconds = Column(Integer, default=0)
+    last_activity_at = Column(DateTime(timezone=True))
+    status = Column(String(20), default="in_progress")  # in_progress/completed/paused
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "course_id", name="uq_scp_user_course"),
+        Index("idx_scp_user", "user_id", "status"),
+    )
+
+
+class StudentFeedback(Base):
+    """综合学习反馈（Phase 12 学习反馈与智能报告）"""
+    __tablename__ = "student_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    feedback_type = Column(String(30), nullable=False)  # progress/emotion/smart_report
+    subject_id = Column(Integer, ForeignKey("subjects.id"))
+    progress_summary = Column(JSON, default={})    # 学习进度摘要
+    emotion_summary = Column(JSON, default={})     # 情感状态摘要
+    suggestions = Column(JSON, default=[])         # 个性化建议列表
+    difficulty_adjustment = Column(JSON, default={})  # 难度调整建议
+    encouragement = Column(Text)                   # 鼓励语
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_sf_user", "user_id", "created_at"),
+        Index("idx_sf_type", "user_id", "feedback_type"),
+    )
+
+
+class AgentStrategyReward(Base):
+    """Agent策略奖惩记录（Phase 13 强化学习）"""
+    __tablename__ = "agent_strategy_rewards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    strategy_type = Column(String(50), nullable=False)  # task_generation/difficulty_selection/content_type
+    action_taken = Column(JSON, default={})        # 执行的动作
+    student_state_before = Column(JSON, default={})  # 动作前学生状态
+    student_state_after = Column(JSON, default={})   # 动作后学生状态
+    reward_signal = Column(Float, default=0.0)       # 奖励信号 (-1 ~ +1)
+    reward_components = Column(JSON, default={})     # 奖励分量明细
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_asr_user", "user_id", "created_at"),
+        Index("idx_asr_strategy", "strategy_type", "reward_signal"),
+    )
+
+
+class AgentStrategyWeight(Base):
+    """Agent策略权重（Phase 13 自我优化）"""
+    __tablename__ = "agent_strategy_weights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    strategy_type = Column(String(50), nullable=False, unique=True)
+    weights = Column(JSON, default={})
+    total_episodes = Column(Integer, default=0)
+    avg_reward = Column(Float, default=0.0)
+    last_updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StudentGoal(Base):
+    """学习目标（Phase 15 目标管理）"""
+    __tablename__ = "student_goals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    goal_type = Column(String(20), nullable=False)  # mastery/streak/completion/custom
+    title = Column(String(200), nullable=False)
+    description = Column(Text)
+    subject_id = Column(Integer, ForeignKey("subjects.id"))
+    node_id = Column(Integer, ForeignKey("knowledge_nodes.id"))
+    target_value = Column(Float, nullable=False)
+    current_value = Column(Float, default=0)
+    deadline = Column(DateTime(timezone=True))
+    status = Column(String(20), default="active")  # active/completed/abandoned/expired
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_sg_user_status", "user_id", "status"),
+        Index("idx_sg_user_deadline", "user_id", "deadline"),
+    )
+
+
+class LearningHabit(Base):
+    """每日学习习惯快照（Phase 15 习惯追踪）"""
+    __tablename__ = "learning_habits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    date = Column(DateTime(timezone=False), nullable=False)  # DATE type
+    events_count = Column(Integer, default=0)
+    study_minutes = Column(Integer, default=0)
+    subjects_touched = Column(Integer, default=0)
+    accuracy = Column(Float)
+    dominant_emotion = Column(String(20))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_lh_user_date"),
+        Index("idx_lh_user_date", "user_id", "date"),
+    )
+
+
+class StudentSubjectTransfer(Base):
+    """个性化跨学科迁移系数（Phase 16 动态贝叶斯更新）"""
+    __tablename__ = "student_subject_transfers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    source_subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    target_subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    observed_transfer = Column(Float, default=0.5)
+    confidence = Column(Float, default=0.1)
+    sample_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "source_subject_id", "target_subject_id", name="uq_sst_user_src_tgt"),
+        Index("idx_sst_user", "user_id"),
+        Index("idx_sst_user_source", "user_id", "source_subject_id"),
+    )

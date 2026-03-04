@@ -1,6 +1,6 @@
 """
 标准加载器 - 负责加载和管理YAML标准文档
-版本: 1.0.0
+版本: v3
 创建日期: 2026-02-10
 """
 
@@ -160,6 +160,118 @@ class StandardsLoader:
 
         logger.info("All standards reloaded")
 
+    # ==================== 内部归一化工具 ====================
+
+    @staticmethod
+    def _snake_to_camel(identifier: str) -> str:
+        """将 snake_case 转换为 camelCase。"""
+        if not isinstance(identifier, str) or '_' not in identifier:
+            return identifier
+
+        parts = identifier.split('_')
+        if not parts:
+            return identifier
+
+        return parts[0] + ''.join(part[:1].upper() + part[1:] for part in parts[1:] if part)
+
+    @staticmethod
+    def _camel_to_snake(identifier: str) -> str:
+        """将 camelCase/PascalCase 转换为 snake_case。"""
+        if not isinstance(identifier, str) or not identifier:
+            return identifier
+
+        result = []
+        for idx, char in enumerate(identifier):
+            if char.isupper() and idx > 0 and identifier[idx - 1] != '_':
+                result.append('_')
+            result.append(char.lower())
+        return ''.join(result)
+
+    def _normalize_color_scheme(self, subject_id: str, scheme: Dict[str, Any]) -> Dict[str, Any]:
+        """规范化单个学科配色：同时提供扁平色值与 base_colors。"""
+        normalized = dict(scheme or {})
+        normalized['id'] = subject_id
+
+        base_colors = normalized.get('base_colors')
+        if isinstance(base_colors, dict):
+            base_colors = dict(base_colors)
+        else:
+            base_colors = {}
+
+        color_keys = (
+            'primary',
+            'secondary',
+            'accent',
+            'success',
+            'danger',
+            'neutral',
+            'highlight',
+            'background',
+        )
+
+        # 扁平字段补齐 base_colors
+        for key in color_keys:
+            value = normalized.get(key)
+            if value is not None and key not in base_colors:
+                base_colors[key] = value
+
+        # base_colors 反向补齐扁平字段
+        for key in color_keys:
+            if key not in normalized and key in base_colors:
+                normalized[key] = base_colors[key]
+
+        normalized['base_colors'] = base_colors
+        return normalized
+
+    def _extract_color_system_map(self, color_systems_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """兼容解析学科配色：支持 map/list 两种存储结构。"""
+        raw_color_systems = color_systems_data.get('color_systems', {})
+        normalized_map: Dict[str, Dict[str, Any]] = {}
+
+        # v3 结构：color_systems 为 map
+        if isinstance(raw_color_systems, dict):
+            for subject_id, scheme in raw_color_systems.items():
+                if isinstance(scheme, dict):
+                    normalized_map[subject_id] = self._normalize_color_scheme(subject_id, scheme)
+            return normalized_map
+
+        # 兼容结构：color_systems 为 list（每项带 id）
+        if isinstance(raw_color_systems, list):
+            for scheme in raw_color_systems:
+                if not isinstance(scheme, dict):
+                    continue
+                subject_id = scheme.get('id')
+                if not subject_id:
+                    continue
+                normalized_map[subject_id] = self._normalize_color_scheme(subject_id, scheme)
+
+        return normalized_map
+
+    def _normalize_easing_function(self, function: Dict[str, Any]) -> Dict[str, Any]:
+        """规范化缓动函数，补充 aliases（snake/camel 双向兼容）。"""
+        normalized = dict(function or {})
+
+        func_id = normalized.get('id')
+        if not isinstance(func_id, str) or not func_id:
+            return normalized
+
+        aliases = normalized.get('aliases', [])
+        alias_set = set()
+        if isinstance(aliases, list):
+            alias_set.update(alias for alias in aliases if isinstance(alias, str) and alias)
+
+        snake_id = self._camel_to_snake(func_id)
+        camel_id = self._snake_to_camel(func_id)
+        alias_set.update([snake_id, camel_id])
+        alias_set.discard(func_id)
+
+        if alias_set:
+            normalized['aliases'] = sorted(alias_set)
+        else:
+            normalized.pop('aliases', None)
+
+        return normalized
+
     # ==================== 便捷查询方法 ====================
 
     def get_simulator_standards(self) -> Dict[str, Any]:
@@ -180,7 +292,20 @@ class StandardsLoader:
 
     def get_color_systems(self) -> Dict[str, Any]:
         """获取学科颜色系统"""
-        return self.get_standard("color_systems")
+        raw_data = self.get_standard("color_systems")
+        if not isinstance(raw_data, dict):
+            return {
+                'version': 'unknown',
+                'color_systems': {},
+                'subject_color_schemes': []
+            }
+
+        normalized_data = dict(raw_data)
+        color_map = self._extract_color_system_map(raw_data)
+
+        normalized_data['color_systems'] = color_map
+        normalized_data['subject_color_schemes'] = list(color_map.values())
+        return normalized_data
 
     def get_visual_best_practices(self) -> Dict[str, Any]:
         """获取视觉最佳实践"""
@@ -196,7 +321,49 @@ class StandardsLoader:
 
     def get_animation_easing(self) -> Dict[str, Any]:
         """获取动画缓动函数库"""
-        return self.get_standard("animation_easing")
+        raw_data = self.get_standard("animation_easing")
+        if not isinstance(raw_data, dict):
+            return {'easing_functions': []}
+
+        normalized_data = dict(raw_data)
+        normalized_functions: List[Dict[str, Any]] = []
+        seen_ids = set()
+
+        for function in raw_data.get('easing_functions', []):
+            if not isinstance(function, dict):
+                continue
+
+            base_function = self._normalize_easing_function(function)
+            base_id = base_function.get('id')
+            if isinstance(base_id, str) and base_id and base_id not in seen_ids:
+                normalized_functions.append(base_function)
+                seen_ids.add(base_id)
+
+            # 为兼容调用方补充 alias 条目（例如 easeInOut / easeOutBack）
+            for alias_id in base_function.get('aliases', []):
+                if alias_id in seen_ids:
+                    continue
+
+                alias_function = dict(base_function)
+                alias_function['id'] = alias_id
+                if isinstance(base_id, str) and base_id:
+                    alias_function['alias_of'] = base_id
+
+                alias_list = [
+                    alias
+                    for alias in base_function.get('aliases', [])
+                    if alias != alias_id
+                ]
+                if alias_list:
+                    alias_function['aliases'] = alias_list
+                else:
+                    alias_function.pop('aliases', None)
+
+                normalized_functions.append(alias_function)
+                seen_ids.add(alias_id)
+
+        normalized_data['easing_functions'] = normalized_functions
+        return normalized_data
 
     # ==================== 查询辅助方法 ====================
 
@@ -211,22 +378,25 @@ class StandardsLoader:
             学科颜色方案（包含 name, philosophy, primary, secondary, accent, use_cases等）
         """
         color_systems_data = self.get_color_systems()
-
-        # 新格式：color_systems是字典，key为学科ID
         color_systems = color_systems_data.get('color_systems', {})
 
-        if subject in color_systems:
-            scheme = color_systems[subject]
-            # 添加id字段以保持一致性
-            scheme['id'] = subject
-            return scheme
+        if subject in color_systems and isinstance(color_systems[subject], dict):
+            return self._normalize_color_scheme(subject, color_systems[subject])
 
-        # 未找到，返回默认颜色方案（physics）
-        logger.warning(f"Color scheme for '{subject}' not found, using default (physics)")
-        default_scheme = color_systems.get('physics', {})
-        if default_scheme:
-            default_scheme['id'] = 'physics'
-        return default_scheme
+        # 未找到时优先回退到 physics，再回退到任意可用学科
+        fallback_subject = 'physics' if 'physics' in color_systems else None
+        if fallback_subject is None and color_systems:
+            fallback_subject = next(iter(color_systems.keys()))
+
+        if fallback_subject:
+            logger.warning(
+                f"Color scheme for '{subject}' not found, using default ({fallback_subject})"
+            )
+            fallback_scheme = color_systems.get(fallback_subject, {})
+            if isinstance(fallback_scheme, dict):
+                return self._normalize_color_scheme(fallback_subject, fallback_scheme)
+
+        return None
 
     def get_visualization_element(self, element_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -281,8 +451,19 @@ class StandardsLoader:
         easing_funcs = self.get_animation_easing()
         functions = easing_funcs.get('easing_functions', [])
 
+        target_ids = {
+            easing_id,
+            self._snake_to_camel(easing_id),
+            self._camel_to_snake(easing_id)
+        }
+
         for func in functions:
-            if func.get('id') == easing_id:
+            func_id = func.get('id')
+            if func_id in target_ids:
+                return func
+
+            aliases = func.get('aliases', [])
+            if isinstance(aliases, list) and any(alias in target_ids for alias in aliases):
                 return func
 
         logger.warning(f"Easing function '{easing_id}' not found")
