@@ -13,7 +13,6 @@
 import json
 import uuid
 import logging
-from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 from sqlalchemy import select, update
@@ -349,7 +348,7 @@ class TaskQueueService:
 
     @staticmethod
     async def cancel_task(task_id: str, admin_id: int) -> bool:
-        """取消任务（排队中直接移除，运行中设置取消标记）"""
+        """取消任务并删除任务记录（排队中直接移除，运行中设置取消标记）"""
         redis = await get_redis()
 
         async with AsyncSessionLocal() as db:
@@ -382,26 +381,16 @@ class TaskQueueService:
             # 从 RUNNING_KEY 移除（无论是否在里面）
             await redis.srem(RUNNING_KEY, task_id)
 
-            # 保留任务记录，便于退出登录/关闭应用后回看历史
-            await db.execute(
-                update(GenerationTask).where(GenerationTask.id == task_id).values(
-                    status=GenerationTaskStatus.CANCELLED.value,
-                    completed_at=datetime.now(timezone.utc),
-                    current_phase="任务已取消",
-                    error_message="用户取消",
-                )
-            )
+            # 直接删除任务记录，不保留历史
+            await db.delete(task)
             await db.commit()
 
-            await TaskQueueService.update_progress(
-                task_id,
-                status=GenerationTaskStatus.CANCELLED.value,
-                current_phase="任务已取消",
-                error_message="用户取消",
-            )
-            # 注意：running 任务取消依赖 cancel key，让 worker 感知后优雅退出
+            # 取消后不保留任务进度键
+            await redis.delete(f"{PROGRESS_KEY_PREFIX}{task_id}")
+            if task.status != GenerationTaskStatus.RUNNING.value:
+                await redis.delete(f"{CANCEL_KEY_PREFIX}{task_id}")
 
-            logger.info(f"任务已取消并保留记录: {task_id}")
+            logger.info(f"任务已取消并删除记录: {task_id}")
             return True
 
     @staticmethod

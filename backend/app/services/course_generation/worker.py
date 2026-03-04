@@ -122,7 +122,7 @@ async def run_generation_task(task_payload: dict, semaphore: asyncio.Semaphore):
 
         async with AsyncSessionLocal() as db:
             # 更新数据库状态
-            from sqlalchemy import select, update as sql_update
+            from sqlalchemy import select, update as sql_update, delete as sql_delete
             await db.execute(
                 sql_update(GenerationTask).where(GenerationTask.id == task_id).values(
                     status=GenerationTaskStatus.RUNNING.value,
@@ -176,20 +176,9 @@ async def run_generation_task(task_payload: dict, semaphore: asyncio.Semaphore):
                     # 检查取消标记
                     if await TaskQueueService.is_cancelled(task_id):
                         logger.info(f"任务被取消: {task_id}")
-                        await db.execute(
-                            sql_update(GenerationTask).where(GenerationTask.id == task_id).values(
-                                status=GenerationTaskStatus.CANCELLED.value,
-                                completed_at=datetime.now(timezone.utc),
-                                current_phase="任务已取消",
-                                error_message="用户取消",
-                            )
-                        )
+                        await db.execute(sql_delete(GenerationTask).where(GenerationTask.id == task_id))
                         await db.commit()
-                        await _update_progress(
-                            status=GenerationTaskStatus.CANCELLED.value,
-                            current_phase="任务已取消",
-                            error_message="用户取消",
-                        )
+                        await redis.delete(f"{TaskQueueService._progress_key(task_id)}")
                         await redis.delete(f"{CANCEL_KEY_PREFIX}{task_id}")
                         return
 
@@ -274,8 +263,16 @@ async def run_generation_task(task_payload: dict, semaphore: asyncio.Semaphore):
                             )
                         )
                         await db.commit()
+                        await db.execute(sql_delete(GenerationTask).where(GenerationTask.id == task_id))
+                        await db.commit()
+                        # 保留短期完成态供前端拿到 package_id，随后自动过期
+                        final_ttl = max(120, min(int(settings.GENERATION_PROGRESS_TTL), 600))
+                        await redis.expire(TaskQueueService._progress_key(task_id), final_ttl)
                         await redis.delete(f"{CANCEL_KEY_PREFIX}{task_id}")
-                        logger.info(f"任务完成并保留记录: {task_id}, 课程包: {pkg_id}, course_id: {course_id}")
+                        logger.info(
+                            f"任务完成并删除记录: {task_id}, 课程包: {pkg_id}, "
+                            f"course_id: {course_id}, progress_ttl={final_ttl}s"
+                        )
                     else:
                         await db.execute(
                             sql_update(GenerationTask).where(GenerationTask.id == task_id).values(
