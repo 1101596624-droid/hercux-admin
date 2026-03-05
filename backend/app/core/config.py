@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1800  # 30小时 (默认)
+    ACCESS_TOKEN_EXPIRE_MINUTES_DESKTOP: int = 10080  # 7天 (桌面学生端)
     ACCESS_TOKEN_EXPIRE_MINUTES_APP: int = 10080  # 7天 (主应用)
     ACCESS_TOKEN_EXPIRE_MINUTES_ADMIN: int = 4320  # 3天 (后台应用)
 
