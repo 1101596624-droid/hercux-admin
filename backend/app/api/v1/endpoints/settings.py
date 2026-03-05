@@ -10,7 +10,7 @@ from typing import Optional
 
 from app.db.session import get_db
 from app.models.models import UserLearningSettings, User
-from app.core.security import ClientType, get_current_user, get_request_client_type
+from app.core.security import get_current_user
 
 router = APIRouter()
 
@@ -101,38 +101,3 @@ async def update_settings(
         auto_play_next=bool(settings.auto_play_next),
         show_learning_time=bool(settings.show_learning_time)
     )
-
-
-@router.get("/client-capabilities")
-async def get_client_capabilities(
-    client_type: ClientType = Depends(get_request_client_type)
-):
-    """
-    返回客户端能力矩阵，供桌面端 / APP 做功能开关。
-    """
-    resolved_client_type: ClientType = client_type if client_type != "unknown" else "desktop"
-
-    capability_map = {
-        "desktop": {
-            "agent_api_enabled": True,
-            "universe_enabled": False,
-        },
-        "app": {
-            "agent_api_enabled": False,
-            "universe_enabled": True,
-        },
-        "admin": {
-            "agent_api_enabled": True,
-            "universe_enabled": False,
-        },
-    }
-
-    return {
-        "client_type": resolved_client_type,
-        "course_standard": {
-            "version": "v3",
-            "lesson_field": "steps",
-            "simulator_html_field": "html_content",
-        },
-        "capabilities": capability_map[resolved_client_type],  # type: ignore[index]
-    }

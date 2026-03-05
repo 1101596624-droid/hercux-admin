@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth,
     upload,
@@ -36,7 +36,6 @@ from app.api.v1.endpoints import agent
 from app.api.v1.endpoints import admin_knowledge_tracking, knowledge, learning_path, review, report, diagnostic_tutor, recommendation, assessment, multi_task, subject_graph, cross_disciplinary, course_rec, smart_feedback, adaptive_agent
 from app.api.v1.endpoints import predictive, goals, habits
 from app.api.v1.endpoints import transfer, temporal
-from app.core.security import require_non_app_client
 
 api_router = APIRouter()
 
@@ -101,12 +100,7 @@ api_router.include_router(admin_admins.router, prefix="/admin", tags=["Admin - A
 api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])
 
 # HERCU Agent 监控
-api_router.include_router(
-    agent.router,
-    prefix="/agent",
-    tags=["Agent"],
-    dependencies=[Depends(require_non_app_client)],
-)
+api_router.include_router(agent.router, prefix="/agent", tags=["Agent"])
 
 # BKT 知识追踪
 api_router.include_router(admin_knowledge_tracking.router, prefix="/admin/knowledge", tags=["Admin - Knowledge Tracking"])
@@ -146,12 +140,7 @@ api_router.include_router(course_rec.router, prefix="/course-rec", tags=["Course
 api_router.include_router(smart_feedback.router, prefix="/smart-feedback", tags=["Smart Feedback & Report"])
 
 # Agent 强化学习与自适应任务生成
-api_router.include_router(
-    adaptive_agent.router,
-    prefix="/adaptive-agent",
-    tags=["Adaptive Agent"],
-    dependencies=[Depends(require_non_app_client)],
-)
+api_router.include_router(adaptive_agent.router, prefix="/adaptive-agent", tags=["Adaptive Agent"])
 
 # Phase 15: 预测分析
 api_router.include_router(predictive.router, prefix="/predictive", tags=["Predictive Analytics"])

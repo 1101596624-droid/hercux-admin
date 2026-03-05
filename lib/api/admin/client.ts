@@ -22,7 +22,6 @@ class AdminAPIClient {
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
     return {
       'Content-Type': 'application/json',
-      'X-Client-Type': 'admin',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     };
   }

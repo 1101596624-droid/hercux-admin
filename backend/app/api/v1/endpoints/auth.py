@@ -14,10 +14,7 @@ from app.core.security import (
     authenticate_user,
     create_access_token,
     get_password_hash,
-    get_client_type_from_token,
-    get_current_user,
-    normalize_client_type,
-    oauth2_scheme,
+    get_current_user
 )
 from app.db.session import get_db
 from app.models.models import User
@@ -219,7 +216,7 @@ async def login(
     Args:
         form_data: OAuth2 form data (username field contains email)
         db: Database session
-        x_client_type: Client type header ("desktop"/"app"/"admin")
+        x_client_type: Client type header ("app" for main app, "admin" for admin)
 
     Returns:
         Access token and token type
@@ -252,23 +249,17 @@ async def login(
     clear_login_failures(form_data.username)
 
     # 根据客户端类型设置不同的有效期
-    # desktop: 7天, app: 7天, admin: 3天
-    client_type = normalize_client_type(x_client_type)
-    if client_type == "desktop":
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_DESKTOP
-    elif client_type == "app":
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_APP
-    elif client_type == "admin":
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_ADMIN
+    # 主应用: 7天, 后台应用: 3天
+    if x_client_type == "app":
+        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_APP  # 7天
+    elif x_client_type == "admin":
+        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_ADMIN  # 3天
     else:
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES  # 默认30小时
 
     access_token_expires = timedelta(minutes=expire_minutes)
     access_token = create_access_token(
-        data={
-            "sub": str(user.id),
-            "client_type": client_type,
-        },
+        data={"sub": str(user.id)},
         expires_delta=access_token_expires
     )
 
@@ -298,7 +289,6 @@ async def get_current_user_info(
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
     current_user: User = Depends(get_current_user),
-    token: str = Depends(oauth2_scheme),
     x_client_type: Optional[str] = Header(None, alias="X-Client-Type")
 ):
     """
@@ -306,31 +296,22 @@ async def refresh_token(
 
     Args:
         current_user: Current user from JWT token
-        x_client_type: Client type header ("desktop"/"app"/"admin")
+        x_client_type: Client type header ("app" for main app, "admin" for admin)
 
     Returns:
         New access token and token type
     """
-    # 优先使用请求头，缺省时回落到现有 token 的 client_type claim
-    client_type = normalize_client_type(x_client_type)
-    if client_type == "unknown":
-        client_type = get_client_type_from_token(token)
-
-    if client_type == "desktop":
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_DESKTOP
-    elif client_type == "app":
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_APP
-    elif client_type == "admin":
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_ADMIN
+    # 根据客户端类型设置不同的有效期
+    if x_client_type == "app":
+        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_APP  # 7天
+    elif x_client_type == "admin":
+        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES_ADMIN  # 3天
     else:
-        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES  # 默认30小时
 
     access_token_expires = timedelta(minutes=expire_minutes)
     access_token = create_access_token(
-        data={
-            "sub": str(current_user.id),
-            "client_type": client_type,
-        },
+        data={"sub": str(current_user.id)},
         expires_delta=access_token_expires
     )
 
