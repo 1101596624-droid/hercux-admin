@@ -1,167 +1,109 @@
 # HERCU Backend Tests
 
-This directory contains unit and integration tests for the HERCU backend API.
+This directory contains unit and integration tests for the shared backend.
 
 ## Test Structure
 
-```
+```text
 tests/
-├── conftest.py                    # Test fixtures and configuration
-├── test_auth.py                   # Authentication endpoint tests
-├── test_courses.py                # Course endpoint tests
-├── test_nodes.py                  # Node endpoint tests
-├── test_progress.py               # Progress tracking tests
-├── test_ai.py                     # AI service endpoint tests
-├── test_users.py                  # User endpoint tests
-└── test_statistics_service.py     # Statistics service unit tests
+├── conftest.py
+├── test_auth.py
+├── test_courses.py
+├── test_nodes.py
+├── test_progress.py
+├── test_ai.py
+├── test_users.py
+├── test_statistics_service.py
+├── test_question_endpoints.py
+├── test_question_recognize_service.py
+└── test_task_queue_service.py
 ```
+
+## Prerequisites
+
+当前测试不是“零配置即跑”。
+
+在导入 `app.main` 前，至少需要提供这些环境变量：
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `NEO4J_URI`
+- `NEO4J_USER`
+- `NEO4J_PASSWORD`
+- `SECRET_KEY`
+
+如果这些变量缺失，pytest 会在加载 `conftest.py` 时直接失败，而不会进入具体测试用例。
 
 ## Running Tests
 
-### Install Test Dependencies
+安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Run All Tests
+运行全部测试：
 
 ```bash
 pytest
 ```
 
-### Run Specific Test File
+运行单个测试文件：
 
 ```bash
 pytest tests/test_courses.py
 ```
 
-### Run Tests with Coverage
+app question teaching 回归：
 
 ```bash
-pytest --cov=app --cov-report=html
+python -m pytest tests/test_question_endpoints.py
 ```
 
-This will generate an HTML coverage report in `htmlcov/index.html`.
-
-### Run Tests by Marker
+recognize-v2 service 回归：
 
 ```bash
-# Run only unit tests
-pytest -m unit
-
-# Run only integration tests
-pytest -m integration
-
-# Run only slow tests
-pytest -m slow
+python -m pytest tests/test_question_recognize_service.py
 ```
 
-### Run Tests in Verbose Mode
+task queue 回归：
 
 ```bash
-pytest -v
+python -m pytest tests/test_task_queue_service.py
 ```
 
-### Run Tests and Stop on First Failure
+## Question Regression Coverage
 
-```bash
-pytest -x
-```
+- `test_question_endpoints.py` 覆盖：
+  - `recognize-v2`
+  - `plan-teaching-v2`
+  - `generate-teaching-stream-v2`
+  - `clarify-step-v2`
+  - legacy stream adapter 的 `traceId` / 协议回归
+- 负路径覆盖：
+  - `recognize-v2` service exception
+  - `plan-teaching-v2` service exception
+  - `generate-teaching-stream-v2` 非法 provided plan
+  - `clarify-step-v2` 参数缺失与 service exception
+- `test_question_recognize_service.py` 覆盖：
+  - 上游视觉失败时的保守草稿 fallback
+  - 相同请求的缓存命中
+  - electrical domain 的 fallback skeleton
 
-## Test Fixtures
+## Fixtures
 
-The `conftest.py` file provides several useful fixtures:
+`conftest.py` 提供的常用 fixture 包括：
 
-- `db_session`: Fresh database session for each test (SQLite in-memory)
-- `client`: AsyncClient for making API requests
-- `test_user`: Pre-created test user
-- `test_user_token`: JWT token for the test user
-- `auth_headers`: Authorization headers with test user token
-- `test_course`: Pre-created test course
-- `test_nodes`: Pre-created course nodes with dependencies
-- `test_progress`: Pre-created learning progress records
+- `db_session`
+- `client`
+- `test_user`
+- `test_user_token`
+- `auth_headers`
+- `test_course`
+- `test_nodes`
+- `test_progress`
 
-## Writing New Tests
+## Notes
 
-### Example Test
-
-```python
-import pytest
-from httpx import AsyncClient
-
-@pytest.mark.unit
-async def test_my_endpoint(client: AsyncClient, auth_headers: dict):
-    """Test description"""
-    response = await client.get(
-        "/api/v1/my-endpoint",
-        headers=auth_headers
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert "expected_field" in data
-```
-
-### Test Markers
-
-Use markers to categorize tests:
-
-- `@pytest.mark.unit` - Fast unit tests
-- `@pytest.mark.integration` - Integration tests
-- `@pytest.mark.slow` - Slow-running tests
-
-## Mocking External Services
-
-For tests that interact with external services (like Claude API), use mocking:
-
-```python
-from unittest.mock import patch
-
-async def test_with_mock(client: AsyncClient, auth_headers: dict):
-    with patch("app.services.ai_service.AIService.method") as mock_method:
-        mock_method.return_value = "mocked response"
-
-        response = await client.post("/api/v1/endpoint", headers=auth_headers)
-        assert response.status_code == 200
-```
-
-## Coverage Goals
-
-- **Target**: 80%+ code coverage
-- **Critical paths**: 100% coverage for authentication, progress tracking, and unlock logic
-- **AI services**: Mock external API calls to ensure consistent test results
-
-## Continuous Integration
-
-These tests are designed to run in CI/CD pipelines. The in-memory SQLite database ensures fast, isolated test execution without external dependencies.
-
-## Troubleshooting
-
-### Import Errors
-
-If you encounter import errors, ensure you're running tests from the backend directory:
-
-```bash
-cd backend
-pytest
-```
-
-### Async Warnings
-
-If you see warnings about async fixtures, ensure `pytest-asyncio` is installed and `asyncio_mode = auto` is set in `pytest.ini`.
-
-### Database Errors
-
-Tests use an in-memory SQLite database that's created fresh for each test. If you encounter database errors, check that:
-1. All models are properly imported in `conftest.py`
-2. The test database URL is correct
-3. Tables are being created/dropped correctly
-
-## Future Improvements
-
-- [ ] Add integration tests with real PostgreSQL database
-- [ ] Add performance/load tests
-- [ ] Add end-to-end tests for complete learning flows
-- [ ] Add tests for Neo4j skill tree integration
-- [ ] Add tests for Redis caching behavior
+- 当前 question 相关测试说明比旧 README 更接近 2026-03-24 之后的共享后端现状。
+- 如果测试行为与旧文档冲突，以代码和本文件为准。
